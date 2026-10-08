@@ -14,14 +14,14 @@
     <div class="col-1of3">&nbsp;</div>
     <div class="col-1of3 text-center">&nbsp;</div>
     <div class="col-1of3 text-right">
-        <a target="_blank" href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjListings&amp;action=pjActionListing" class="btn btn-secondary"><i class="fa fa-external-link m-r-xs"></i> Open in new window</a>
+        <a target="_blank" href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjListings&amp;action=pjActionListing&amp;company=<?php echo pjCompanyContext::hashOf($controller->getCompanyId()); ?>" class="btn btn-secondary"><i class="fa fa-external-link m-r-xs"></i> Open in new window</a>
         <a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminOptions&amp;action=pjActionInstall" class="btn btn-secondary"><i class="fa fa-wrench m-r-xs"></i> Install your website</a>
     </div>
 </div>
 
 
 
-<div class="pjtc-layout" id="pjThemeColors" data-csrf="<?php echo pjAppController::getCsrfToken(); ?>" data-save-url="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminOptions&amp;action=pjActionSaveThemeColors" data-listing-url="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjListings&amp;action=pjActionListing">
+<div class="pjtc-layout" id="pjThemeColors" data-csrf="<?php echo pjAppController::getCsrfToken(); ?>" data-save-url="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminOptions&amp;action=pjActionSaveThemeColors" data-listing-url="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjListings&amp;action=pjActionListing&amp;company=<?php echo pjCompanyContext::hashOf($controller->getCompanyId()); ?>">
 
     <!-- LEFT: controls -->
     <div class="pjtc-controls">
@@ -122,7 +122,7 @@
                 <button type="button" class="pjtc-reload" id="pjtcReload"><i class="fa fa-refresh"></i> Reload</button>
             </div>
             <div class="pjtc-frame">
-                <iframe id="pjtcFrame" title="Live preview" src="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjListings&amp;action=pjActionListing"></iframe>
+                <iframe id="pjtcFrame" title="Live preview" src="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjListings&amp;action=pjActionListing&amp;company=<?php echo pjCompanyContext::hashOf($controller->getCompanyId()); ?>"></iframe>
             </div>
         </div>
     </div>

@@ -72,10 +72,14 @@ class pjAppController extends pjBaseAppController
 	public function beforeFilter()
     {
     	parent::beforeFilter();
-    	if(!in_array($this->_get->toString('controller'), array('pjFront', 'pjInstaller')))
+    	if(!in_array($this->_get->toString('controller'), array('pjFront', 'pjInstaller', 'pjListings', 'pjCron')))
     	{
-    		$pjCalendarModel = pjCalendarModel::factory();
-    		if ($this->isOwner())
+    		// Everything in the back-office works inside the active company.
+    		$company_id = $this->getCompanyId();
+    		$this->set('active_company', pjCompanyContext::activeCompany($this->getRoleId(), $this->getUserId()));
+
+    		$pjCalendarModel = pjCalendarModel::factory()->where('t1.company_id', $company_id);
+    		if ($this->isRestrictedUser())
     		{
     			$pjCalendarModel->where('t1.user_id', $this->getUserId());
     		}
@@ -86,14 +90,20 @@ class pjAppController extends pjBaseAppController
 				->findAll()->getDataPair('id');
 			$this->set('calendars', $calendars);
 			
-			if ($this->getCalendarId() === false && count($calendars) > 0)
+			// The "current property" must always belong to the active company.
+			$current = $this->getCalendarId();
+			if ($current === false || !isset($calendars[$current]))
 			{
-				$keys = array_keys($calendars);
-				$this->setCalendarId($keys[0]);
-				
+				if (count($calendars) > 0)
+				{
+					$keys = array_keys($calendars);
+					$this->setCalendarId($keys[0]);
+				} else {
+					unset($_SESSION[$this->defaultCalendarId]);
+				}
 			}
 			
-			$base_option_arr = pjBaseOptionModel::factory()->getPairs(1);
+			$base_option_arr = pjCompanyContext::basePairs($company_id);
 	        $script_option_arr = pjOptionModel::factory()->getPairs($this->getCalendarId());
 	        $this->option_arr = array_merge($base_option_arr, $script_option_arr);
 	        $this->set('option_arr', $this->option_arr);
@@ -124,7 +134,7 @@ class pjAppController extends pjBaseAppController
 	    
 	    $permissions = pjAuthPermissionModel::factory()->findAll()->getDataPair('key', 'id');
 	    
-	    $roles = array(1 => 'admin', 2 => 'editor', 3 => 'owner');
+	    $roles = array(1 => 'admin', 2 => 'editor', 3 => 'owner', 4 => 'company');
 	    foreach ($roles as $role_id => $role)
 	    {
 	        if (isset($GLOBALS['CONFIG'], $GLOBALS['CONFIG']["role_permissions_{$role}"])
@@ -164,6 +174,10 @@ class pjAppController extends pjBaseAppController
 	        }
 	    }
 	    pjAuthRoleModel::factory()->setAttributes(array('id' => 3, 'role' => 'Owner', 'is_backend' => 'T', 'is_admin' => 'T'))->insert();
+	    if ((int) pjAuthRoleModel::factory()->where('t1.id', 4)->findCount()->getData() === 0)
+	    {
+	        pjAuthRoleModel::factory()->setAttributes(array('id' => 4, 'role' => 'Company', 'is_backend' => 'T', 'is_admin' => 'T'))->insert();
+	    }
 	    
 	    // Grant full permissions to Admin
 	    $user_id = 1; // Admin ID
@@ -173,8 +187,11 @@ class pjAppController extends pjBaseAppController
 	        $pjAuthUserPermissionModel->setAttributes(compact('user_id', 'permission_id'))->insert();
 	    }
 	    
+		$first_company = pjCompanyModel::factory()->orderBy('t1.id ASC')->limit(1)->findAll()->getDataIndex(0);
+		$company_id = !empty($first_company) ? (int) $first_company['id'] : 0;
 		$id = pjCalendarModel::factory()->setAttributes(array(
 			'user_id'        => 1,
+			'company_id'     => $company_id > 0 ? $company_id : ':NULL',
 			'uuid'           => pjUtil::uuid(),
 			'bedrooms'       => '1',
 			'bathrooms'      => '1',
@@ -386,6 +403,131 @@ class pjAppController extends pjBaseAppController
 	public function isOwner()
 	{
 		return $this->getRoleId() == 3;
+	}
+
+	public function isCompany()
+	{
+		return $this->getRoleId() == 4;
+	}
+
+	/**
+	 * Users that may only see their own properties inside the active company
+	 * (Owner role). Company users are limited by the company itself.
+	 */
+	public function isRestrictedUser()
+	{
+		return $this->isOwner();
+	}
+
+	/* ------------------------------------------------------------------
+	 * Company (workspace) scoping
+	 * ------------------------------------------------------------------ */
+
+	/** Active company id (0 = none available). */
+	public function getCompanyId()
+	{
+		return (int) pjCompanyContext::activeId($this->getRoleId(), $this->getUserId());
+	}
+
+	/** Active company record or false. */
+	public function getCurrentCompany()
+	{
+		return pjCompanyContext::activeCompany($this->getRoleId(), $this->getUserId());
+	}
+
+	/**
+	 * SQL condition "<column> belongs to a property of the active company".
+	 * Use with any calendar_id / foreign_id column.
+	 */
+	public function companyCalendarSql($column)
+	{
+		$sql = sprintf("`company_id` = %u", $this->getCompanyId());
+		if ($this->isRestrictedUser())
+		{
+			$sql .= sprintf(" AND `user_id` = %u", (int) $this->getUserId());
+		}
+		return sprintf("(%s IN (SELECT `id` FROM `%s` WHERE %s))", $column, pjCalendarModel::factory()->getTable(), $sql);
+	}
+
+	/** Property ids of the active company (respecting Owner restriction). */
+	public function getCompanyCalendarIds()
+	{
+		$m = pjCalendarModel::factory()->where('t1.company_id', $this->getCompanyId());
+		if ($this->isRestrictedUser())
+		{
+			$m->where('t1.user_id', $this->getUserId());
+		}
+		return array_map('intval', $m->findAll()->getDataPair(null, 'id'));
+	}
+
+	public function isCompanyCalendar($calendar_id)
+	{
+		return (int) $calendar_id > 0 && in_array((int) $calendar_id, $this->getCompanyCalendarIds(), true);
+	}
+
+	/** Keep only the property ids that belong to the active company. */
+	public function filterCompanyCalendarIds($ids)
+	{
+		$allowed = $this->getCompanyCalendarIds();
+		$out = array();
+		foreach ((array) $ids as $id)
+		{
+			if (in_array((int) $id, $allowed, true))
+			{
+				$out[] = (int) $id;
+			}
+		}
+		return array_values(array_unique($out));
+	}
+
+	public function isCompanyReservation($reservation_id)
+	{
+		$arr = pjReservationModel::factory()->select('t1.calendar_id')->find((int) $reservation_id)->getData();
+		return !empty($arr) && $this->isCompanyCalendar($arr['calendar_id']);
+	}
+
+	/** Keep only reservation ids whose property belongs to the active company. */
+	public function filterCompanyReservationIds($ids)
+	{
+		$ids = array_values(array_filter(array_map('intval', (array) $ids)));
+		if (empty($ids))
+		{
+			return array();
+		}
+		return array_map('intval', pjReservationModel::factory()
+			->whereIn('t1.id', $ids)
+			->where($this->companyCalendarSql('t1.calendar_id'))
+			->findAll()->getDataPair(null, 'id'));
+	}
+
+	/**
+	 * For models that carry their own company_id column (extras, features,
+	 * discounts, vouchers): does record $id belong to the active company?
+	 */
+	public function isCompanyRecord($model, $id)
+	{
+		return (int) $id > 0 && (int) $model->reset()->where('t1.id', (int) $id)->where('t1.company_id', $this->getCompanyId())->findCount()->getData() === 1;
+	}
+
+	public function filterCompanyRecordIds($model, $ids)
+	{
+		$ids = array_values(array_filter(array_map('intval', (array) $ids)));
+		if (empty($ids))
+		{
+			return array();
+		}
+		return array_map('intval', $model->reset()->whereIn('t1.id', $ids)->where('t1.company_id', $this->getCompanyId())->findAll()->getDataPair(null, 'id'));
+	}
+
+	/** Stop the request: the record belongs to another company. */
+	public function denyCompanyAccess($redirect = null)
+	{
+		if ($this->isXHR() || $redirect === null)
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'This record belongs to another company.'));
+		}
+		pjUtil::redirect($redirect);
+		exit;
 	}
 	
 	public function isPriceReady()

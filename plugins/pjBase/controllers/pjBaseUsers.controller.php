@@ -6,6 +6,67 @@ if (!defined("ROOT_PATH"))
 }
 class pjBaseUsers extends pjBase
 {
+	/* ---- users per company -------------------------------------------------- */
+
+	private function usersCompanyId()
+	{
+		return class_exists('pjCompanyContext') ? (int) pjCompanyContext::activeId($this->getRoleId(), $this->getUserId()) : 0;
+	}
+
+	/** Administrators manage the users of every company. */
+	private function isUsersAdmin()
+	{
+		return !class_exists('pjCompanyContext') || pjCompanyContext::isAdmin($this->getRoleId(), $this->getUserId());
+	}
+
+	/**
+	 * company_id to store for a user: administrators have none; otherwise the company
+	 * chosen in the form (hash), falling back to the active company.
+	 */
+	private function postedCompanyId($role_id)
+	{
+		if (!class_exists('pjCompanyContext'))
+		{
+			return null;
+		}
+		$cid = 0;
+		if ($this->isUsersAdmin() && $this->_post->check('company'))
+		{
+			$cid = pjCompanyContext::idFromHash($this->_post->toString('company'));
+		}
+		if ($cid <= 0)
+		{
+			$cid = $this->usersCompanyId();
+		}
+		return pjCompanyContext::companyForRole($role_id, $cid);
+	}
+
+	/** Stop unless the user belongs to the active company (or is a global administrator). */
+	private function assertCompanyUser($user_id)
+	{
+		if ($this->isUsersAdmin())
+		{
+			return;
+		}
+		if (class_exists('pjCompanyContext') && !pjCompanyContext::isCompanyUser($user_id, $this->usersCompanyId()))
+		{
+			if ($this->isXHR())
+			{
+				self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'This user belongs to another company.'));
+			}
+			pjUtil::redirect(PJ_INSTALL_URL . "index.php?controller=pjBaseUsers&action=pjActionIndex&err=PU08");
+		}
+	}
+
+	private function filterCompanyUsers($ids)
+	{
+		if ($this->isUsersAdmin())
+		{
+			return array_values(array_filter(array_map('intval', (array) $ids)));
+		}
+		return class_exists('pjCompanyContext') ? pjCompanyContext::filterUserIds($ids, $this->usersCompanyId()) : array_map('intval', (array) $ids);
+	}
+
 	public function pjActionCheckEmail()
 	{
 		$this->setAjax(true);
@@ -76,11 +137,26 @@ class pjBaseUsers extends pjBase
 		    					->join('pjAuthRole', 't2.id=t1.role_id', 'left')
 		    					->where('t2.is_backend', 'T')
 		    					->where('t2.is_admin', 'T');
+			if (class_exists('pjCompanyContext'))
+			{
+				if (!$this->isUsersAdmin())
+				{
+					// non-admins: users of their company + the administrators
+					$pjAuthUserModel->where(pjCompanyContext::userScopeSql($this->usersCompanyId()));
+				} elseif ($this->_get->check('company') && $this->_get->toString('company') !== '') {
+					// admins see every user; optional company filter
+					if ($this->_get->toString('company') === 'none')
+					{
+						$pjAuthUserModel->where('t1.company_id IS NULL');
+					} else {
+						$pjAuthUserModel->where('t1.company_id', (int) pjCompanyContext::idFromHash($this->_get->toString('company')));
+					}
+				}
+			}
 			if ($q = $this->_get->toString('q'))
 			{
-				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($q));
-				$pjAuthUserModel->where('t1.email LIKE', "%$q%");
-				$pjAuthUserModel->orWhere('t1.name LIKE', "%$q%");
+				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($pjAuthUserModel->escapeStr($q)));
+				$pjAuthUserModel->where("(t1.email LIKE '%$q%' OR t1.name LIKE '%$q%')");
 			}
 			
 			if (in_array($this->_get->toString('status'), array('T', 'F')))
@@ -90,7 +166,7 @@ class pjBaseUsers extends pjBase
 			
 			$column = 'name';
 			$direction = 'ASC';
-			if ($this->_get->toString('column') && in_array(strtoupper($this->_get->toString('direction')), array('ASC', 'DESC')))
+			if ($this->_get->toString('column') && in_array($this->_get->toString('column'), array('name', 'email', 'last_login', 'role', 'status', 'locked', 'company'), true) && in_array(strtoupper($this->_get->toString('direction')), array('ASC', 'DESC')))
 			{
 				$column = $this->_get->toString('column');
 				$direction = strtoupper($this->_get->toString('direction'));
@@ -108,8 +184,9 @@ class pjBaseUsers extends pjBase
 			$offset = ((int) $page - 1) * $rowCount;
 			
 			$data = $pjAuthUserModel
-				->select('t1.id, t1.email, t1.name, DATE(t1.created) AS `created`, DATE(t1.last_login) AS `last_login`, t1.status, t1.is_active, t1.locked, t1.role_id')
-				->orderBy("$column $direction")
+				->select('t1.id, t1.email, t1.name, DATE(t1.created) AS `created`, DATE(t1.last_login) AS `last_login`, t1.status, t1.is_active, t1.locked, t1.role_id, t1.company_id'
+					. (class_exists('pjCompanyContext') ? sprintf(', (SELECT c.`name` FROM `%s` c WHERE c.`id` = t1.company_id) AS `company`', pjCompanyModel::factory()->getTable()) : ''))
+				->orderBy(($column === 'role' ? 't1.role_id' : ($column === 'company' ? '`company`' : $column)) . " $direction")
 				->limit($rowCount, $offset)
 				->findAll()
 				->getData();
@@ -117,6 +194,14 @@ class pjBaseUsers extends pjBase
 			$role_arr = __('plugin_base_role_arr', true);
 			foreach($data as $k => $v) {
 				$data[$k]['role'] = $role_arr[$v['role_id']];
+				// Which company the user belongs to (administrators work for all companies)
+				if ((int) $v['role_id'] === 1)
+				{
+					$data[$k]['company'] = __('lblUserAllCompanies', true);
+				} else {
+					$data[$k]['company'] = !empty($v['company']) ? pjSanitize::clean($v['company']) : '—';
+				}
+				unset($data[$k]['company_id']);
 				$data[$k]['name'] = pjSanitize::clean($v['name']);
 				$data[$k]['email'] = pjSanitize::clean($v['email']);
 			}
@@ -140,6 +225,11 @@ class pjBaseUsers extends pjBase
 			$data = array();
 			$data['status'] = $this->_post->check('status') ? 'T': 'F';
 			$data['role_id'] = $this->_post->toInt('role_id');
+			if (class_exists('pjCompanyContext'))
+			{
+				// New users belong to the active company (administrators are global).
+				$data['company_id'] = $this->postedCompanyId($data['role_id']);
+			}
 
 			$response = pjAuth::init(array_merge($this->_post->raw(),$data))->createUser();
 			pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjBaseUsers&action=pjActionIndex&err=" . $response['code']);
@@ -163,7 +253,13 @@ class pjBaseUsers extends pjBase
 		
 		if (self::isPost() && $this->_post->toInt('user_update') && $this->_post->toInt('id'))
 		{
+		    $this->assertCompanyUser($this->_post->toInt('id'));
 		    $post = $this->_post->raw();
+		    if (class_exists('pjCompanyContext'))
+		    {
+		        $post['company_id'] = $this->postedCompanyId($this->_post->toInt('role_id'));
+		        unset($post['company']);
+		    }
 			$data = array();
 			$data['id'] = $this->_post->toInt('id');
 			if ($has_revert)
@@ -185,6 +281,7 @@ class pjBaseUsers extends pjBase
 		}
 		if (self::isGet() && $this->_get->toInt('id'))
 		{
+		    $this->assertCompanyUser($this->_get->toInt('id'));
 		    if($this->_get->toInt('id') == 1 && $this->getUserId() != 1)
 		    {
 		        $this->sendForbidden();
@@ -221,7 +318,7 @@ class pjBaseUsers extends pjBase
 	    if (self::isPost() && $this->_post->toInt('user_update') && $this->_post->toInt('id'))
 	    {
 	        $data = array();
-	        $data['id'] = $this->_post->toInt('id');
+	        $data['id'] = (int) $this->getUserId(); // My profile: always the logged-in user
 	        if ($has_revert)
 	        {
 	            $data['status'] = $this->_post->check('status') ? 'T' : 'F';
@@ -271,7 +368,8 @@ class pjBaseUsers extends pjBase
 		$record = $this->_post->toArray('record');
 		if (count($record))
 		{
-			$arr = pjAuthUserModel::factory()->whereIn('id', $record)->findAll()->getData();
+			$record = $this->filterCompanyUsers($record);
+			$arr = empty($record) ? array() : pjAuthUserModel::factory()->whereIn('id', $record)->findAll()->getData();
 			$datetime = array('created', 'last_login', 'pswd_modified');
 			foreach ($arr as &$item)
 			{
@@ -317,6 +415,12 @@ class pjBaseUsers extends pjBase
 			self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Missing, empty or invalid parameters.'));
 		}
 		
+		$this->assertCompanyUser($params['id']);
+		// role / company changes are done in the edit form, not inline
+		if ($params['column'] == 'company_id')
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Access denied.'));
+		}
 		if ($params['column'] == 'status' && !pjAuth::factory('pjBaseUsers')->hasAccess())
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Access denied.'));
@@ -367,7 +471,15 @@ class pjBaseUsers extends pjBase
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Access denied.'));
 		}
-		self::jsonResponse(pjAuth::init($params)->updateUser());
+		$resp = pjAuth::init($params)->updateUser();
+		if ($params['column'] == 'role_id' && class_exists('pjCompanyContext'))
+		{
+			// administrators are global, everyone else belongs to the active company
+			$cur = pjAuthUserModel::factory()->select('t1.company_id')->find((int) $params['id'])->getData();
+			$keep = !empty($cur['company_id']) ? (int) $cur['company_id'] : $this->usersCompanyId();
+			pjAuthUserModel::factory()->where('id', (int) $params['id'])->limit(1)->modifyAll(array('company_id' => pjCompanyContext::companyForRole($params['value'], $keep)));
+		}
+		self::jsonResponse($resp);
 	}
 	
 	public function pjActionStatusUser()
@@ -387,6 +499,11 @@ class pjBaseUsers extends pjBase
 			self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Access denied.'));
 		}
 		$record = $this->_post->toArray('record');
+		if (empty($record))
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Missing, empty or invalid parameters.'));
+		}
+		$record = $this->filterCompanyUsers($record);
 		if (empty($record))
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Missing, empty or invalid parameters.'));
@@ -425,6 +542,7 @@ class pjBaseUsers extends pjBase
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Access denied.'));
 		}
+		$this->assertCompanyUser($this->_get->toInt('id'));
 		if (!pjAuthUserModel::factory()->set('id', $this->_get->toInt('id'))->erase()->getAffectedRows())
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 105, 'text' => 'User has not been deleted.'));
@@ -456,6 +574,11 @@ class pjBaseUsers extends pjBase
 			self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Missing, empty or invalid parameters.'));
 		}
 		$record = $this->_post->toArray('record');
+		if (empty($record))
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Missing, empty or invalid parameters.'));
+		}
+		$record = $this->filterCompanyUsers($record);
 		if (empty($record))
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Missing, empty or invalid parameters.'));

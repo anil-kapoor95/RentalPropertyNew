@@ -15,7 +15,8 @@
     <div class="col-lg-12">
     	<div class="ibox float-e-margins">
 			<div class="ibox-content">
-				<form action="<?php echo PJ_INSTALL_URL; ?>preview.php" method="get" class="form-horizontal" target="_blank">					
+				<form action="<?php echo PJ_INSTALL_URL; ?>preview.php" method="get" class="form-horizontal" target="_blank">
+					<input type="hidden" name="company" value="<?php echo pjCompanyContext::hashOf($controller->getCompanyId()); ?>" />					
 					<div class="m-b-lg">
 						<h2 class="no-margins"><?php __('lblInstallConfig');?></h2>
 					</div>
@@ -27,7 +28,7 @@
 	
 								<div class="col-lg-5 col-md-8">
 									<select id="install_calendar" name="cid" class="form-control">
-										<?php if (!$controller->isOwner()) { ?>
+										<?php if (!$controller->isOwner() && count($tpl['calendars']) > 0) { ?>
 											<option value="all"><?php __('lblInstallConfigAllCalendars'); ?></option>
 										<?php } ?>
 										<?php
@@ -92,8 +93,8 @@
 							<div class="form-group">
 								<div class="col-lg-12 col-md-12">
 									<textarea class="form-control textarea_install" rows="4">&lt;link href="<?php echo PJ_INSTALL_URL.PJ_FRAMEWORK_LIBS_PATH . 'pj/css/'; ?>pj.bootstrap.min.css" type="text/css" rel="stylesheet" /&gt;
-&lt;link href="<?php echo PJ_INSTALL_URL; ?>index.php?controller=pjFront&action=pjActionLoadAvailabilityCss" type="text/css" rel="stylesheet" /&gt;
-&lt;script type="text/javascript" src="<?php echo PJ_INSTALL_URL; ?>index.php?controller=pjFront&action=pjActionLoadAvailability"&gt;&lt;/script&gt;</textarea>
+&lt;link href="<?php echo PJ_INSTALL_URL; ?>index.php?controller=pjFront&action=pjActionLoadAvailabilityCss&company=<?php echo pjCompanyContext::hashOf($controller->getCompanyId()); ?>" type="text/css" rel="stylesheet" /&gt;
+&lt;script type="text/javascript" src="<?php echo PJ_INSTALL_URL; ?>index.php?controller=pjFront&action=pjActionLoadAvailability&company=<?php echo pjCompanyContext::hashOf($controller->getCompanyId()); ?>"&gt;&lt;/script&gt;</textarea>
 								</div>
 							</div>
 						</div>
@@ -105,18 +106,19 @@
 </div>
 
 <div style="display: none" id="boxAvailability">&lt;link href="<?php echo PJ_INSTALL_URL.PJ_FRAMEWORK_LIBS_PATH . 'pj/css/'; ?>pj.bootstrap.min.css" type="text/css" rel="stylesheet" /&gt;
-&lt;link type="text/css" rel="stylesheet" href="<?php echo PJ_INSTALL_URL; ?>index.php?controller=pjFront&action=pjActionLoadAvailabilityCss" /&gt;
-&lt;script type="text/javascript" src="<?php echo PJ_INSTALL_URL; ?>index.php?controller=pjFront&action=pjActionLoadAvailability{LOCALE}"&gt;&lt;/script&gt;</div>
+&lt;link type="text/css" rel="stylesheet" href="<?php echo PJ_INSTALL_URL; ?>index.php?controller=pjFront&action=pjActionLoadAvailabilityCss&company=<?php echo pjCompanyContext::hashOf($controller->getCompanyId()); ?>" /&gt;
+&lt;script type="text/javascript" src="<?php echo PJ_INSTALL_URL; ?>index.php?controller=pjFront&action=pjActionLoadAvailability&company=<?php echo pjCompanyContext::hashOf($controller->getCompanyId()); ?>{LOCALE}"&gt;&lt;/script&gt;</div>
 			</div>
 		</div>
 
 </div><!-- /.col-lg-12 -->
 </div>
 <?php
-$__themeCss = PJ_INSTALL_URL . 'index.php?controller=pjFront&action=pjActionThemeCss';
+$__co       = '&company=' . pjCompanyContext::hashOf($controller->getCompanyId());
+$__themeCss = PJ_INSTALL_URL . 'index.php?controller=pjFront&action=pjActionThemeCss' . $__co;
 $__listCss  = PJ_INSTALL_URL . 'index.php?controller=pjListings&action=pjActionListingCss';
-$__listJs   = PJ_INSTALL_URL . 'index.php?controller=pjListings&action=pjActionListingJs';
-$__listUrl  = PJ_INSTALL_URL . 'index.php?controller=pjListings&action=pjActionListing';
+$__listJs   = PJ_INSTALL_URL . 'index.php?controller=pjListings&action=pjActionListingJs' . $__co;
+$__listUrl  = PJ_INSTALL_URL . 'index.php?controller=pjListings&action=pjActionListing' . $__co;
 $__embed    = '<link type="text/css" rel="stylesheet" href="'.$__themeCss.'" />'."\n".'<link type="text/css" rel="stylesheet" href="'.$__listCss.'" />'."\n".'<div id="rpbcProperties"></div>'."\n".'<script type="text/javascript" src="'.$__listJs.'"></script>';
 $__scriptOnly = '<div id="rpbcProperties"></div>'."\n".'<script type="text/javascript" src="'.$__listJs.'"></script>';
 ?>

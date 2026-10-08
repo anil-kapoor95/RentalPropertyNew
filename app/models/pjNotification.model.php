@@ -13,6 +13,7 @@ class pjNotificationModel extends pjAppModel
 	protected $schema = array(
 		array('name' => 'id', 'type' => 'int', 'default' => ':NULL'),
 	    array('name' => 'foreign_id', 'type' => 'int', 'default' => ':NULL'),
+	    array('name' => 'company_id', 'type' => 'int', 'default' => 0),
 		array('name' => 'recipient', 'type' => 'enum', 'default' => ':NULL'),
 		array('name' => 'transport', 'type' => 'enum', 'default' => ':NULL'),
 		array('name' => 'variant', 'type' => 'varchar', 'default' => ':NULL'),

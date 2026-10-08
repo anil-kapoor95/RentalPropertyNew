@@ -38,6 +38,7 @@ class pjAdminDiscounts extends pjAdmin
 					$data['min_duration'] = $this->_post->toInt('min_duration');
 					$data['max_duration'] = $this->_post->toInt('max_duration');
 				}
+				$data['company_id'] = $this->getCompanyId();
 				$id = pjDiscountModel::factory($data)->insert()->getInsertId();
 				if ($id !== false && (int) $id > 0)
 				{
@@ -47,7 +48,7 @@ class pjAdminDiscounts extends pjAdmin
 						pjMultiLangModel::factory()->saveMultiLang($i18n_arr, $id, 'pjDiscount');
 					}
 					
-					$calendar_id_arr = $this->_post->toArray('calendar_id');
+					$calendar_id_arr = $this->filterCompanyCalendarIds($this->_post->toArray('calendar_id'));
 					if(count($calendar_id_arr) > 0)
 	            	{
 	            		$pjCalendarDiscountModel = pjCalendarDiscountModel::factory();
@@ -60,7 +61,7 @@ class pjAdminDiscounts extends pjAdmin
 				}
 				pjAppController::jsonResponse(array('status' => 'OK'));
 			} else {
-				$this->set('calendar_arr', pjCalendarModel::factory()
+				$this->set('calendar_arr', pjCalendarModel::factory()->where('t1.company_id', $this->getCompanyId())
 					->select('t1.*, t2.content AS name')
 					->join('pjMultiLang', "t2.model='pjCalendar' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left outer')
 					->orderBy('name ASC')
@@ -83,6 +84,10 @@ class pjAdminDiscounts extends pjAdmin
 		if (!self::isGet() && !$this->_get->check('id') && $this->_get->toInt('id') < 0)
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'HTTP method not allowed.'));
+		}
+		if (!$this->isCompanyRecord(pjDiscountModel::factory(), $this->_get->toInt('id')))
+		{
+			$this->denyCompanyAccess();
 		}
 		if (pjDiscountModel::factory()->set('id', $this->_get->toInt('id'))->erase()->getAffectedRows() == 1)
 		{
@@ -115,7 +120,8 @@ class pjAdminDiscounts extends pjAdmin
 			self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Missing, empty or invalid data.'));
 		}
 		
-		if (pjDiscountModel::factory()->whereIn('id', $record)->eraseAll()->getAffectedRows() > 0)
+		$record = $this->filterCompanyRecordIds(pjDiscountModel::factory(), $record);
+		if (!empty($record) && pjDiscountModel::factory()->whereIn('id', $record)->eraseAll()->getAffectedRows() > 0)
 		{
 			pjMultiLangModel::factory()->where('model', 'pjDiscount')->whereIn('foreign_id', $record)->eraseAll();
 			pjCalendarDiscountModel::factory()->whereIn('discount_id', $record)->eraseAll();
@@ -131,7 +137,8 @@ class pjAdminDiscounts extends pjAdmin
 		
 		if ($record = $this->_post->toArray('record'))
 		{
-			$arr = pjDiscountModel::factory()->whereIn('id', $record)->findAll()->getData();
+			$record = $this->filterCompanyRecordIds(pjDiscountModel::factory(), $record);
+			$arr = empty($record) ? array() : pjDiscountModel::factory()->whereIn('id', $record)->findAll()->getData();
 			$csv = new pjCSV();
 			$csv
 				->setHeader(true)
@@ -149,6 +156,7 @@ class pjAdminDiscounts extends pjAdmin
 		if ($this->isXHR())
 		{
 			$pjDiscountModel = pjDiscountModel::factory()
+				->where('t1.company_id', $this->getCompanyId())
 				->join('pjMultiLang', "t2.foreign_id = t1.id AND t2.model = 'pjDiscount' AND t2.locale = '".$this->getLocaleId()."' AND t2.field = 'name'", 'left');
 			
 			if ($q = $this->_get->toString('q'))
@@ -255,6 +263,14 @@ class pjAdminDiscounts extends pjAdmin
 			self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Missing, empty or invalid parameters.'));
 		}
 		
+		if (!$this->isCompanyRecord(pjDiscountModel::factory(), $params['id']))
+		{
+			$this->denyCompanyAccess();
+		}
+		if (!in_array($params['column'], array('name'), true))
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Invalid column.'));
+		}
 		$pjDiscountModel = pjDiscountModel::factory();
 		if (!in_array($params['column'], $pjDiscountModel->getI18n()))
 		{
@@ -298,6 +314,11 @@ class pjAdminDiscounts extends pjAdmin
 					$data['min_duration'] = $this->_post->toInt('min_duration');
 					$data['max_duration'] = $this->_post->toInt('max_duration');
 				}
+				if (!$this->isCompanyRecord(pjDiscountModel::factory(), $this->_post->toInt('id')))
+				{
+					$this->denyCompanyAccess();
+				}
+				$data['company_id'] = $this->getCompanyId();
 				pjDiscountModel::factory()->set('id', $this->_post->toInt('id'))->modify($data);
 				$i18n_arr = $this->_post->toI18n('i18n');
 				if (!empty($i18n_arr))
@@ -308,7 +329,7 @@ class pjAdminDiscounts extends pjAdmin
 				$pjCalendarDiscountModel = pjCalendarDiscountModel::factory();
 				$pjCalendarDiscountModel->where('discount_id', $this->_post->toInt('id'))->eraseAll();
 				
-				$calendar_id_arr = $this->_post->toArray('calendar_id');
+				$calendar_id_arr = $this->filterCompanyCalendarIds($this->_post->toArray('calendar_id'));
 				if(count($calendar_id_arr) > 0)
             	{
             		$pjCalendarDiscountModel->reset();
@@ -320,13 +341,17 @@ class pjAdminDiscounts extends pjAdmin
 				}
 				pjAppController::jsonResponse(array('status' => 'OK'));				
 			} else {
+				if (!$this->isCompanyRecord(pjDiscountModel::factory(), $this->_get->toInt('id')))
+				{
+					$this->denyCompanyAccess();
+				}
 				$arr = pjDiscountModel::factory()->find($this->_get->toInt('id'))->getData();
 				$arr['i18n'] = pjMultiLangModel::factory()->getMultiLang($arr['id'], 'pjDiscount');
 				$this->set('arr', $arr);
 				
 				$this->setLocalesData();
 				
-				$this->set('calendar_arr', pjCalendarModel::factory()
+				$this->set('calendar_arr', pjCalendarModel::factory()->where('t1.company_id', $this->getCompanyId())
 					->select('t1.*, t2.content AS name')
 					->join('pjMultiLang', "t2.model='pjCalendar' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left outer')
 					->orderBy('name ASC')

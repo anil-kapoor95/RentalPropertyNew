@@ -8,6 +8,7 @@ class pjAuth extends pjAuthAppController
 {
     protected function addLoginAttempts($email)
     {
+        $this->applyCompanyOptionsForEmail($email);
         $params = array();
         $params['email'] = $email;
         $params['ip'] = pjUtil::getClientIp();
@@ -29,6 +30,7 @@ class pjAuth extends pjAuthAppController
 
     protected function lockAfterFailedAttempts($email)
     {
+        $this->applyCompanyOptionsForEmail($email);
         $attempts = $this->getLoginAttempts($email);
         if($attempts >= (int) $this->option_arr['o_failed_login_lock_after'] && (int) $this->option_arr['o_failed_login_lock_after'] > 0)
         {
@@ -110,7 +112,7 @@ class pjAuth extends pjAuthAppController
         $content = NULL;
         $arr = pjBaseMultiLangModel::factory()
         ->select('t1.*')
-        ->where('t1.foreign_id', 1)
+        ->where('t1.foreign_id', $this->optionsFid)
         ->where('t1.model','pjBaseOption')
         ->where('t1.locale', $locale_id)
         ->where('t1.field', $field)
@@ -376,6 +378,7 @@ class pjAuth extends pjAuthAppController
     {
         $params = $this->getParams();
         $email = $params['login_email'];
+        $this->applyCompanyOptionsForEmail($email);
 
         $disable_form = false;
         $disable_form_text = '';
@@ -482,6 +485,7 @@ class pjAuth extends pjAuthAppController
         {
             return array('status' => 'ERR', 'code' => '4', 'text' => 'Missing, empty or invalid email.');
         }
+        $this->applyCompanyOptionsForEmail($params['login_email']);
         $pjAuthUserModel = pjAuthUserModel::factory();
         $user = $pjAuthUserModel
         ->join("pjAuthRole", "t1.role_id=t2.id", "left outer")
@@ -511,6 +515,7 @@ class pjAuth extends pjAuthAppController
         {
             return array('status' => 'ERR', 'code' => '4');
         }
+        $this->applyCompanyOptionsForEmail($params['login_email']);
         $is_backend = isset($params['is_backend']) ? $params['is_backend'] : 'T';
         $pjAuthUserModel = pjAuthUserModel::factory();
         if (isset($params['role_id']) && (int)$params['role_id'] > 0) {
@@ -937,6 +942,7 @@ class pjAuth extends pjAuthAppController
         {
             return array('status' => 'ERR', 'code' => '4');
         }
+        $this->applyCompanyOptionsForEmail($params['forgot_email']);
         $pjAuthUserModel = pjAuthUserModel::factory();
         $user = $pjAuthUserModel
             ->join("pjAuthRole", "t1.role_id=t2.id", "left")

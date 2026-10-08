@@ -6,6 +6,27 @@ if (!defined("ROOT_PATH"))
 }
 class pjFront extends pjAppController
 {
+	/** Company the current public page belongs to (0 = not known). */
+	public $frontCompanyId = 0;
+
+	/** Public pages use the label texts of the page's company. */
+	public function getLabelsCompanyId()
+	{
+		return (int) $this->frontCompanyId;
+	}
+
+	/** Public reference of the page's company (hash). */
+	public function getFrontCompanyHash()
+	{
+		return pjCompanyContext::hashOf($this->frontCompanyId);
+	}
+
+	/** Public pages use the system options of the property's company. */
+	public function getOptionsForeignId()
+	{
+		return $this->frontCompanyId > 0 ? pjCompanyContext::optionsForeignId($this->frontCompanyId) : $this->getForeignId();
+	}
+
 	public $defaultCaptcha = 'PHPJabbersCaptcha';
 	
 	public $defaultLocale = 'front_locale_id';
@@ -58,13 +79,37 @@ class pjFront extends pjAppController
 			$this->setCalendarId(1);
 		}
 		
-		$base_option_arr = pjBaseOptionModel::factory()->getPairs(1);
-		
 		$script_option_arr = pjOptionModel::factory()->getPairs($this->getCalendarId());
-		$this->option_arr = array_merge($base_option_arr, $script_option_arr);
+		
+		// Company of this page: explicit ?company=<hash> (listing / availability embeds),
+		// otherwise the company that owns the property (?cid=ID). The numeric company id is never public.
+		$this->frontCompanyId = 0;
+		$hash_company = $this->_get->check('company') ? pjCompanyContext::idFromHash($this->_get->toString('company')) : 0;
+		if ($hash_company > 0 && (int) pjCompanyModel::factory()->where('t1.id', $hash_company)->where('t1.status', 'T')->findCount()->getData() === 1)
+		{
+			$this->frontCompanyId = $hash_company;
+		} elseif ($this->_get->toInt('cid') > 0) {
+			$this->frontCompanyId = pjCompanyContext::companyOfCalendar($this->_get->toInt('cid'));
+		} else {
+			// Embed codes created before companies existed carry no company: use the first company.
+			$first = pjCompanyModel::factory()->orderBy('t1.id ASC')->limit(1)->findAll()->getDataIndex(0);
+			$this->frontCompanyId = !empty($first) ? (int) $first['id'] : 0;
+		}
+		// System options of the company (currency, formats, email/SMTP, API keys...).
+		$base_option_arr = pjCompanyContext::basePairs($this->frontCompanyId);
+		// Company theme settings override the global/property ones.
+		$company_option_arr = pjCompanyOptionModel::factory()->getPairs($this->frontCompanyId);
+		
+		$this->option_arr = array_merge($base_option_arr, $script_option_arr, $company_option_arr);
 		$this->set('option_arr', $this->option_arr);
 		
 		pjRegistry::getInstance()->set('options', $this->option_arr);
+		pjRegistry::getInstance()->set('options_foreign_id', $this->getOptionsForeignId());
+		if (isset($this->option_arr['o_timezone']))
+		{
+			pjTimezone::factory()->setAllTimezones($this->option_arr['o_timezone']);
+		}
+		pjCurrency::factory()->setCurrencyData();
 		return true;
 	}
 	
@@ -350,8 +395,19 @@ class pjFront extends pjAppController
         }
         
         $admin_arr = pjAuthUserModel::factory()->find(1)->getData();
+        // The property's company receives the "admin" notifications (falls back to the super admin).
+        $company_id = pjCompanyContext::companyOfCalendar($reservation['calendar_id']);
+        $company = $company_id > 0 ? pjCompanyModel::factory()->find($company_id)->getData() : array();
+        if (!empty($company['email']))
+        {
+            $admin_arr['email'] = $company['email'];
+        }
+        if (!empty($company['phone']))
+        {
+            $admin_arr['phone'] = $company['phone'];
+        }
 		/*****Admin Email*******/
-        $notification = $pjNotificationModel->reset()->where('foreign_id', 0)->where('is_general', 1)->where('recipient', 'admin')->where('transport', 'email')->where('variant', $variant)->findAll()->getDataIndex(0);
+        $notification = pjCompanyContext::getGeneralNotification($company_id, 'admin', 'email', $variant);
         if((int) $notification['id'] > 0 && $notification['is_active'] == 1)
         {
             $resp = pjAppController::getSubjectMessage($notification, $locale_id);
@@ -374,7 +430,7 @@ class pjFront extends pjAppController
         
 		/*****Admin SMS*******/
         if (!empty($admin_arr['phone'])) {
-	        $notification = $pjNotificationModel->reset()->where('foreign_id', 0)->where('is_general', 1)->where('recipient', 'admin')->where('transport', 'sms')->where('variant', $variant)->findAll()->getDataIndex(0);
+	        $notification = pjCompanyContext::getGeneralNotification($company_id, 'admin', 'sms', $variant);
 	        if((int) $notification['id'] > 0 && $notification['is_active'] == 1)
 	        {
 	            $resp = pjAppController::getSmsMessage($notification, $locale_id);
@@ -480,7 +536,7 @@ class pjFront extends pjAppController
 					$this->set('country_arr', pjBaseCountryModel::factory()
 						->select('t1.*, t2.content AS name')
 						->join('pjMultiLang', "t2.model='pjBaseCountry' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->pjActionGetLocale()."'", 'left outer')
-						->where('t1.status', 'T')
+						->where(pjCompanyContext::countryActiveSql($this->frontCompanyId))
 						->orderBy('`name` ASC')
 						->findAll()->getData());
 				}
@@ -721,7 +777,7 @@ class pjFront extends pjAppController
 					$this->set('country_arr', pjBaseCountryModel::factory()
 						->select('t1.*, t2.content AS name')
 						->join('pjMultiLang', "t2.model='pjBaseCountry' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->pjActionGetLocale()."'", 'left outer')
-						->where('t1.status', 'T')
+						->where(pjCompanyContext::countryActiveSql($this->frontCompanyId))
 						->find($_SESSION[$this->defaultCalendar]['c_country'])->getData());
 				}
 				
@@ -826,6 +882,10 @@ class pjFront extends pjAppController
 					->join('pjOption', "t3.foreign_id=t1.id AND t3.key='o_bookings_per_day'", 'left outer');
 				$pjReservationModel = pjReservationModel::factory();
 				$pjOptionModel = pjOptionModel::factory();
+				if ($this->frontCompanyId > 0)
+				{
+					$pjCalendarModel->where('t1.company_id', $this->frontCompanyId);
+				}
 				$arr = $pjCalendarModel->orderBy('t1.id ASC')->findAll()->getData();
 				
 				$last_timezone = NULL;
@@ -875,7 +935,12 @@ class pjFront extends pjAppController
 		}
 		
 		$pjOptionModel = pjOptionModel::factory();
-		$arr = pjCalendarModel::factory()->findAll()->getData();
+		$pjCalendarModel = pjCalendarModel::factory();
+		if ($this->frontCompanyId > 0)
+		{
+			$pjCalendarModel->where('t1.company_id', $this->frontCompanyId);
+		}
+		$arr = $pjCalendarModel->findAll()->getData();
 		
 		ob_start();
 		@readfile(PJ_CSS_PATH . 'availability.txt');

@@ -56,6 +56,7 @@
     							</select>
                             </div>
                         </div><!-- /.col-md-3 -->
+                        <?php $user_company_id = null; include PJ_VIEWS_PATH . 'pjLayouts/elements/user-company-field.php'; ?>
                     </div><!-- /.row -->
 
                     <div class="hr-line-dashed"></div>

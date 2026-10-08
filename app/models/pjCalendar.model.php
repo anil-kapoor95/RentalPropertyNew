@@ -14,6 +14,7 @@ class pjCalendarModel extends pjAppModel
 		array('name' => 'id', 'type' => 'int', 'default' => ':NULL'),
 		array('name' => 'uuid', 'type' => 'varchar', 'default' => ':NULL'),
 		array('name' => 'user_id', 'type' => 'int', 'default' => ':NULL'),
+		array('name' => 'company_id', 'type' => 'int', 'default' => ':NULL'),
 	    array('name' => 'y_logo', 'type' => 'varchar', 'default' => ':NULL'),
 	    array('name' => 'y_country', 'type' => 'int', 'default' => ':NULL'),
 	    array('name' => 'y_zip', 'type' => 'varchar', 'default' => ':NULL'),

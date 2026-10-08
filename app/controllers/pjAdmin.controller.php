@@ -102,6 +102,10 @@ class pjAdmin extends pjAppController
 			'pjAdminDiscounts::pjActionGetDiscount' => 'pjAdminDiscounts::pjActionIndex',
 			'pjAdminDiscounts::pjActionSaveDiscount' => 'pjAdminDiscounts::pjActionUpdate',
 		
+			'pjAdminCompanies::pjActionSwitch' => 'pjAdmin::pjActionIndex',
+			'pjAdminCompanies::pjActionGetCompany' => 'pjAdminCompanies::pjActionIndex',
+			'pjAdminCompanies::pjActionSaveCompany' => 'pjAdminCompanies::pjActionUpdate',
+
 			'pjAdminVouchers::pjActionGetVoucher' => 'pjAdminVouchers::pjActionIndex',
 			'pjAdminVouchers::pjActionSaveVoucher' => 'pjAdminVouchers::pjActionUpdate',
 		);
@@ -250,6 +254,11 @@ class pjAdmin extends pjAppController
 		$OptionModel = pjOptionModel::factory();
 		
 		$calendar_option_arr = array();
+		$pjCalendarModel->where('t1.company_id', $this->getCompanyId());
+		if ($this->isRestrictedUser())
+		{
+			$pjCalendarModel->where('t1.user_id', $this->getUserId());
+		}
 		$calendar_arr = $pjCalendarModel->findAll()->getData();
 		foreach ($calendar_arr as $val) {
 			$calendar_option_arr[$val['id']] = $OptionModel->reset()->getPairs($val['id']);
@@ -263,7 +272,8 @@ class pjAdmin extends pjAppController
 			->join('pjCalendar', 't2.id=t1.calendar_id', 'left')
 			->where('DATE(t1.created) BETWEEN "'.$first_date_of_month.'" AND "'.$last_date_of_month.'"')
 			->whereIn('t1.status', array('Confirmed','Pending'));
-		if ($this->isOwner())
+		$pjReservationModel->where('t2.company_id', $this->getCompanyId());
+		if ($this->isRestrictedUser())
 		{
 			$pjReservationModel->where('t2.user_id', $this->getUserId());
 		}
@@ -291,7 +301,8 @@ class pjAdmin extends pjAppController
 			->join('pjMultiLang', "t3.model='pjCalendar' AND t3.foreign_id=t1.calendar_id AND t3.field='name' AND t3.locale='".$this->getLocaleId()."'", 'left')
 			->limit(5)
 			->orderBy('t1.created DESC');
-		if ($this->isOwner())
+		$pjReservationModel->where('t2.company_id', $this->getCompanyId());
+		if ($this->isRestrictedUser())
 		{
 			$pjReservationModel->where('t2.user_id', $this->getUserId());
 		}
@@ -305,7 +316,8 @@ class pjAdmin extends pjAppController
 			->whereIn('t1.status', array('Confirmed','Pending'))
 			->where('t1.date_from', date('Y-m-d'))
 			->orderBy('t1.created DESC');
-		if ($this->isOwner())
+		$pjReservationModel->where('t2.company_id', $this->getCompanyId());
+		if ($this->isRestrictedUser())
 		{
 			$pjReservationModel->where('t2.user_id', $this->getUserId());
 		}
@@ -319,7 +331,8 @@ class pjAdmin extends pjAppController
 			->whereIn('t1.status', array('Confirmed','Pending'))
 			->where('t1.date_to', date('Y-m-d'))
 			->orderBy('t1.created DESC');
-		if ($this->isOwner())
+		$pjReservationModel->where('t2.company_id', $this->getCompanyId());
+		if ($this->isRestrictedUser())
 		{
 			$pjReservationModel->where('t2.user_id', $this->getUserId());
 		}
@@ -333,7 +346,7 @@ class pjAdmin extends pjAppController
 	{
 		if ($this->_get->toInt('calendar_id') > 0)
 		{
-			if ((int) pjCalendarModel::factory()->where('t1.id', $this->_get->toInt('calendar_id'))->findCount()->getData() == 1)
+			if ($this->isCompanyCalendar($this->_get->toInt('calendar_id')))
 			{
 				$this->setCalendarId($this->_get->toInt('calendar_id'));
 			}

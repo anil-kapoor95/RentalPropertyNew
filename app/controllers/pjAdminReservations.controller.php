@@ -38,17 +38,18 @@ class pjAdminReservations extends pjAdmin
 	        return;
 	    }
 
-		if ($this->isOwner())
+		$calendars = $this->get('calendars');
+		if (empty($calendars))
 		{
-			$calendars = $this->get('calendars');
-			if (empty($calendars))
-			{
-				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminReservations&action=pjActionIndex&err=AR19");
-			}
+			pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminReservations&action=pjActionIndex&err=AR19");
 		}
 		
 		if(self::isPost() && $this->_post->check('reservation_create'))
 		{
+			if (!$this->isCompanyCalendar($this->_post->toInt('calendar_id')))
+			{
+				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminReservations&action=pjActionIndex&err=AR04");
+			}
 			$pjReservationModel = pjReservationModel::factory();
 			if (0 != $pjReservationModel->where('t1.uuid', $this->_post->toString('uuid'))->findCount()->getData())
 			{
@@ -94,7 +95,7 @@ class pjAdminReservations extends pjAdmin
 		$this->set('country_arr', pjBaseCountryModel::factory()
 			->select('t1.*, t2.content AS name')
 			->join('pjMultiLang', "t2.model='pjBaseCountry' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left outer')
-			->where('t1.status', 'T')
+			->where(pjCompanyContext::countryActiveSql($this->getCompanyId()))
 			->orderBy('`name` ASC')->findAll()->getData()
 		);
 
@@ -119,6 +120,10 @@ class pjAdminReservations extends pjAdmin
 			self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'HTTP method not allowed.'));
 		}
 		
+		if (!$this->isCompanyReservation($this->_get->toInt('id')))
+		{
+			$this->denyCompanyAccess();
+		}
 		$deleted_reservation = pjReservationModel::factory()->reset()->find($this->_get->toInt('id'))->getData();
 		if (pjReservationModel::factory()->set('id', $this->_get->toInt('id'))->erase()->getAffectedRows() == 1)
 		{
@@ -155,6 +160,11 @@ class pjAdminReservations extends pjAdmin
 			self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Missing, empty or invalid data.'));
 		}
 		
+		$record = $this->filterCompanyReservationIds($record);
+		if (empty($record))
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Missing, empty or invalid data.'));
+		}
 		$deleted_reservations = pjReservationModel::factory()->reset()->select('t1.calendar_id, t1.uuid')->whereIn('id', $record)->findAll()->getData();
 		if (pjReservationModel::factory()->whereIn('id', $record)->eraseAll()->getAffectedRows() > 0)
 		{
@@ -172,7 +182,7 @@ class pjAdminReservations extends pjAdmin
 	
 	public function pjActionExportReservation()
 	{
-		if ($record = $this->_post->toArray('record'))
+		if ($record = $this->filterCompanyReservationIds($this->_post->toArray('record')))
 		{
 			$arr = pjReservationModel::factory()->whereIn('id', $record)->findAll()->getData();
 			$csv = new pjCSV();
@@ -198,7 +208,7 @@ class pjAdminReservations extends pjAdmin
 			{
 				pjAppController::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Given date(s) are empty.'));
 			}
-			if (!$this->_post->check('calendar_id') || $this->_post->toInt('calendar_id') <= 0)
+			if (!$this->_post->check('calendar_id') || $this->_post->toInt('calendar_id') <= 0 || !$this->isCompanyCalendar($this->_post->toInt('calendar_id')))
 			{
 				pjAppController::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'Calendar is empty or invalid.'));
 			}
@@ -229,11 +239,12 @@ class pjAdminReservations extends pjAdmin
 	
 		if ($this->isXHR())
 		{
-			$pjReservationModel = pjReservationModel::factory()->join('pjCalendar', 't2.id=t1.calendar_id', 'inner');
+			$pjReservationModel = pjReservationModel::factory()->join('pjCalendar', 't2.id=t1.calendar_id', 'inner')
+				->where('t2.company_id', $this->getCompanyId());
 			if ($this->_get->check('uuid') && $this->_get->toString('uuid') != '')
 			{
 				$q = $this->_get->toString('uuid');
-				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($q));
+				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($pjReservationModel->escapeStr($q)));
 				$pjReservationModel->where("t1.uuid LIKE '%$q%'");
 			}
 			
@@ -244,7 +255,7 @@ class pjAdminReservations extends pjAdmin
 			
 			if ($this->_get->check('date') && $this->_get->toString('date') != '')
 			{
-				$pjReservationModel->where(sprintf("('%s' BETWEEN t1.date_from AND t1.date_to)", $this->_get->toString('date')));
+				$pjReservationModel->where(sprintf("('%s' BETWEEN t1.date_from AND t1.date_to)", $pjReservationModel->escapeStr($this->_get->toString('date'))));
 			}
 			
 			if ($this->_get->check('status') && $this->_get->toString('status') != '')
@@ -254,26 +265,26 @@ class pjAdminReservations extends pjAdmin
 			
 			if ($q = $this->_get->toString('q'))
 			{
-				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($q));
+				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($pjReservationModel->escapeStr($q)));
 				$pjReservationModel->where("(t1.uuid LIKE '%$q%' OR t1.c_name LIKE '%$q%' OR t1.c_email LIKE '%$q%' OR t1.c_phone LIKE '%$q%')");
 			}
 			
 			if ($this->_get->check('time') && $this->_get->toString('time') != '')
 			{
-				$pjReservationModel->where(sprintf("'%s' BETWEEN `date_from` AND `date_to`", date("Y-m-d", $this->_get->toString('time'))));
+				$pjReservationModel->where(sprintf("'%s' BETWEEN `date_from` AND `date_to`", date("Y-m-d", $this->_get->toInt('time'))));
 			}
 			
 			if ($this->_get->check('c_name') && $this->_get->toString('c_name') != '')
 			{
 				$q = $this->_get->toString('c_name');
-				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($q));
+				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($pjReservationModel->escapeStr($q)));
 				$pjReservationModel->where("t1.c_name LIKE '%$q%'");
 			}
 			
 			if ($this->_get->check('c_email') && $this->_get->toString('c_email') != '')
 			{
 				$q = $this->_get->toString('c_email');
-				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($q));
+				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($pjReservationModel->escapeStr($q)));
 				$pjReservationModel->where("t1.c_email LIKE '%$q%'");
 			}
 			
@@ -370,7 +381,7 @@ class pjAdminReservations extends pjAdmin
 	        return;
 	    }
 		
-		$pjCalendarModel = pjCalendarModel::factory();
+		$pjCalendarModel = pjCalendarModel::factory()->where('t1.company_id', $this->getCompanyId());
 		if ($this->isOwner())
 		{
 			$pjCalendarModel->where('t1.user_id', $this->getUserId());
@@ -397,7 +408,16 @@ class pjAdminReservations extends pjAdmin
 	
 		if ($this->isXHR())
 		{
+			if (!$this->isCompanyReservation($this->_get->toInt('id')))
+			{
+				$this->denyCompanyAccess();
+			}
 			$pjReservationModel = pjReservationModel::factory();
+			// Inline grid edit: only these columns may be changed from the list.
+			if (!in_array($this->_post->toString('column'), array_merge(array('status', 'c_name', 'c_email', 'date_from', 'date_to'), $pjReservationModel->getI18n()), true))
+			{
+				self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Invalid column.'));
+			}
 			if (!in_array($this->_post->toString('column'), $pjReservationModel->getI18n()))
 			{
 				$reservation = $pjReservationModel
@@ -468,12 +488,9 @@ class pjAdminReservations extends pjAdmin
 			pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminReservations&action=pjActionIndex&err=AR09");
 		}
 		
-		if ($this->isOwner())
+		if (!$this->isCompanyCalendar($calendar['id']))
 		{
-			if ($calendar['user_id'] != $this->getUserId())
-			{
-				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminReservations&action=pjActionIndex&err=AR10");
-			}
+			pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminReservations&action=pjActionIndex&err=AR10");
 		}
 		
 		if (self::isPost() && $this->_post->check('reservation_update'))
@@ -543,7 +560,8 @@ class pjAdminReservations extends pjAdmin
 		$this->set('country_arr', pjBaseCountryModel::factory()
 			->select('t1.*, t2.content AS name')
 			->join('pjMultiLang', "t2.model='pjBaseCountry' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left outer')
-			->where(sprintf("t1.status != IF(t1.id != '%u', 'F', 'WHATEVER')", $reservation['c_country']))
+			// company's active countries, plus the reservation's own country even if inactive
+			->where(sprintf("(%s OR t1.id = '%u')", pjCompanyContext::countryActiveSql($this->getCompanyId()), $reservation['c_country']))
 			->orderBy('`name` ASC')->findAll()->getData()
 		);
 		
@@ -605,7 +623,7 @@ class pjAdminReservations extends pjAdmin
 	
 		if ($this->isXHR())
 		{
-			if($this->_get->check('id') && $this->_get->toInt('id') > 0)
+			if($this->_get->check('id') && $this->_get->toInt('id') > 0 && $this->isCompanyCalendar($this->_get->toInt('id')))
 			{
 				$extra_arr = pjExtraModel::factory()
 					->select('t1.*, t2.content AS name')
@@ -634,6 +652,10 @@ class pjAdminReservations extends pjAdmin
 	    if ($this->isXHR())
 	    {
 	        $calendar_id = $this->_get->toInt('id');
+	        if (!$this->isCompanyCalendar($calendar_id))
+	        {
+	            $this->denyCompanyAccess();
+	        }
 	        $this->set('_option_arr', pjOptionModel::factory()->getPairs($calendar_id));	        
 	        if(pjObject::getPlugin('pjPayments') !== NULL)
 	        {
@@ -678,6 +700,7 @@ class pjAdminReservations extends pjAdmin
 		        ->join('pjMultiLang', sprintf("t2.model='pjCalendar' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale=%u", $this->getLocaleId()), 'left outer')
 		        ->join('pjOption', "t3.foreign_id=t1.id AND t3.key='o_bookings_per_day'", 'left outer')
 		        ->orderBy('name ASC, t1.uuid ASC');
+	        $pjCalendarModel->where('t1.company_id', $this->getCompanyId());
 	        if ($this->isOwner())
 	        {
 	            $pjCalendarModel->where('t1.user_id', $this->getUserId());
@@ -717,6 +740,10 @@ class pjAdminReservations extends pjAdmin
         
         if ($this->isXHR())
         {
+        	if (!$this->isCompanyCalendar($this->_get->toInt('calendar_id')))
+        	{
+        		$this->denyCompanyAccess();
+        	}
         	$option_arr = pjOptionModel::factory()->getPairs($this->_get->toInt('calendar_id'));
             self::jsonResponse($option_arr);
         }
@@ -734,6 +761,10 @@ class pjAdminReservations extends pjAdmin
 	        {
 	            if($this->_post->toInt('send_email') && $this->_post->toString('to') && $this->_post->toString('subject') && $this->_post->toString('message') && $this->_post->toInt('id'))
 	            {
+	                if (!$this->isCompanyReservation($this->_post->toInt('id')))
+	                {
+	                    $this->denyCompanyAccess();
+	                }
 	                $Email = self::getMailer($this->option_arr);
 	                $message = pjUtil::textToHtml($this->_post->toString('message'));
 	                $r = $Email
@@ -751,6 +782,10 @@ class pjAdminReservations extends pjAdmin
 	        {
 	            if($reservation_id = $this->_get->toInt('reservation_id'))
 	            {
+	                if (!$this->isCompanyReservation($reservation_id))
+	                {
+	                    $this->denyCompanyAccess();
+	                }
 	                $pjNotificationModel = pjNotificationModel::factory();
 	                $pjReservationModel = pjReservationModel::factory();
 	                
@@ -797,6 +832,10 @@ class pjAdminReservations extends pjAdmin
 	        {
 	            if($this->_post->toInt('send_email') && $this->_post->toString('to') && $this->_post->toString('subject') && $this->_post->toString('message') && $this->_post->toInt('id'))
 	            {
+	                if (!$this->isCompanyReservation($this->_post->toInt('id')))
+	                {
+	                    $this->denyCompanyAccess();
+	                }
 	                $Email = self::getMailer($this->option_arr);
 	                $message = pjUtil::textToHtml($this->_post->toString('message'));
 	                $r = $Email
@@ -814,6 +853,10 @@ class pjAdminReservations extends pjAdmin
 	        {
 	            if($reservation_id = $this->_get->toInt('reservation_id'))
 	            {
+	                if (!$this->isCompanyReservation($reservation_id))
+	                {
+	                    $this->denyCompanyAccess();
+	                }
 	                $pjNotificationModel = pjNotificationModel::factory();
 	                $pjReservationModel = pjReservationModel::factory();
 	                

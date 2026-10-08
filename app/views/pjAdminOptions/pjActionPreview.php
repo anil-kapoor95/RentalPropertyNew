@@ -1,4 +1,4 @@
-<?php $cid = $controller->_get->check('view_cid') && $controller->_get->toInt('view_cid') > 0 ? $controller->_get->toInt('view_cid') : $controller->getCalendarId();?>
+<?php $cid = $controller->_get->check('view_cid') && $controller->_get->toInt('view_cid') > 0 && $controller->isCompanyCalendar($controller->_get->toInt('view_cid')) ? $controller->_get->toInt('view_cid') : (int) $controller->getCalendarId();?>
 <div class="row wrapper border-bottom white-bg page-heading">
     <div class="col-sm-12">
         <div class="row">

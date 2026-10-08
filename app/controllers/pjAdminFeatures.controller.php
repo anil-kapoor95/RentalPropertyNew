@@ -17,6 +17,7 @@ class pjAdminFeatures extends pjAdmin
 				$data = array();
 				$data['status'] = $this->_post->check('status') ? 'T' : 'F';
 				$data['category_id'] = $this->_post->toInt('category_id');
+				$data['company_id'] = $this->getCompanyId();
 				$id = $pjFeatureModel->setAttributes(array_merge($this->_post->raw(), $data))->insert()->getInsertId();
 				if ($id !== false && (int) $id > 0)
 				{
@@ -46,6 +47,10 @@ class pjAdminFeatures extends pjAdmin
 		if (!self::isGet() && !$this->_get->check('id') && $this->_get->toInt('id') < 0)
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'HTTP method not allowed.'));
+		}
+		if (!$this->isCompanyRecord(pjFeatureModel::factory(), $this->_get->toInt('id')))
+		{
+			$this->denyCompanyAccess();
 		}
 		if (pjFeatureModel::factory()->set('id', $this->_get->toInt('id'))->erase()->getAffectedRows() == 1)
 		{
@@ -78,7 +83,8 @@ class pjAdminFeatures extends pjAdmin
 			self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Missing, empty or invalid data.'));
 		}
 
-		if (pjFeatureModel::factory()->whereIn('id', $record)->eraseAll()->getAffectedRows() > 0)
+		$record = $this->filterCompanyRecordIds(pjFeatureModel::factory(), $record);
+		if (!empty($record) && pjFeatureModel::factory()->whereIn('id', $record)->eraseAll()->getAffectedRows() > 0)
 		{
 			pjMultiLangModel::factory()->where('model', 'pjFeature')->whereIn('foreign_id', $record)->eraseAll();
 			pjCalendarFeatureModel::factory()->whereIn('feature_id', $record)->eraseAll();
@@ -95,6 +101,7 @@ class pjAdminFeatures extends pjAdmin
 		if ($this->isXHR())
 		{
 			$pjFeatureModel = pjFeatureModel::factory()
+				->where('t1.company_id', $this->getCompanyId())
 				->join('pjMultiLang', "t2.foreign_id = t1.id AND t2.model = 'pjFeature' AND t2.locale = '".$this->getLocaleId()."' AND t2.field = 'name'", 'left');
 
 			if ($q = $this->_get->toString('q'))
@@ -193,6 +200,14 @@ class pjAdminFeatures extends pjAdmin
 			self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Missing, empty or invalid parameters.'));
 		}
 
+		if (!$this->isCompanyRecord(pjFeatureModel::factory(), $params['id']))
+		{
+			$this->denyCompanyAccess();
+		}
+		if (!in_array($params['column'], array('status', 'name'), true))
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Invalid column.'));
+		}
 		$pjFeatureModel = pjFeatureModel::factory();
 		if (!in_array($params['column'], $pjFeatureModel->getI18n()))
 		{
@@ -213,6 +228,11 @@ class pjAdminFeatures extends pjAdmin
 				$data = array();
 				$data['status'] = $this->_post->check('status') ? 'T' : 'F';
 				$data['category_id'] = $this->_post->toInt('category_id');
+				if (!$this->isCompanyRecord(pjFeatureModel::factory(), $this->_post->toInt('id')))
+				{
+					$this->denyCompanyAccess();
+				}
+				$data['company_id'] = $this->getCompanyId();
 				pjFeatureModel::factory()->set('id', $this->_post->toInt('id'))->modify(array_merge($this->_post->raw(), $data));
 
 				$i18n_arr = $this->_post->toI18n('i18n');
@@ -222,6 +242,10 @@ class pjAdminFeatures extends pjAdmin
 				}
 				pjAppController::jsonResponse(array('status' => 'OK'));
 			} else {
+				if (!$this->isCompanyRecord(pjFeatureModel::factory(), $this->_get->toInt('id')))
+				{
+					$this->denyCompanyAccess();
+				}
 				$arr = pjFeatureModel::factory()->find($this->_get->toInt('id'))->getData();
 				$arr['i18n'] = pjMultiLangModel::factory()->getMultiLang($arr['id'], 'pjFeature');
 				$this->set('arr', $arr);

@@ -198,6 +198,7 @@
 				"year": this.year,
 				"month": this.month,
 				"locale": this.opts.locale,
+				"company": this.opts.company || "",
 				"session_id": this.opts.session_id,
 			}).done(function (data) {
 				self.$abAvailability.html(data);

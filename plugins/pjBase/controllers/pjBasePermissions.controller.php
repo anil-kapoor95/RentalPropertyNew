@@ -61,6 +61,11 @@ class pjBasePermissions extends pjBase
         {
             if($this->_get->toInt('id'))
             {
+                if (class_exists('pjCompanyContext') && !pjCompanyContext::isAdmin($this->getRoleId(), $this->getUserId()) && !pjCompanyContext::isCompanyUser($this->_get->toInt('id'), pjCompanyContext::activeId($this->getRoleId(), $this->getUserId())))
+                {
+                    $this->sendForbidden();
+                    return;
+                }
                 if($this->_get->toInt('id') == 1 && $this->getUserId() != 1)
                 {
                     $this->sendForbidden();
@@ -138,6 +143,10 @@ class pjBasePermissions extends pjBase
             }
             if($this->_post->toInt('user_id'))
             {
+                if (class_exists('pjCompanyContext') && !pjCompanyContext::isAdmin($this->getRoleId(), $this->getUserId()) && !pjCompanyContext::isCompanyUser($this->_post->toInt('user_id'), pjCompanyContext::activeId($this->getRoleId(), $this->getUserId())))
+                {
+                    self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'Access denied.'));
+                }
                 if($this->_post->toInt('user_id') == 1)
                 {
                     self::jsonResponse(array('status' => 'ERR', 'code' => '100'));
@@ -168,6 +177,10 @@ class pjBasePermissions extends pjBase
             if($this->_post->toInt('user_id') == 1)
             {
                 self::jsonResponse(array('status' => 'ERR', 'code' => '100'));
+            }
+            if (class_exists('pjCompanyContext') && !pjCompanyContext::isAdmin($this->getRoleId(), $this->getUserId()) && !pjCompanyContext::isCompanyUser($this->_post->toInt('user_id'), pjCompanyContext::activeId($this->getRoleId(), $this->getUserId())))
+            {
+                self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'Access denied.'));
             }
             self::jsonResponse(pjAuth::init(array('user_id' => $this->_post->toInt('user_id')))->resetUserPermission());
 		}

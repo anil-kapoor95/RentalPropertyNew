@@ -19,6 +19,7 @@ class pjAdminExtras extends pjAdmin
 				$data['required'] = $this->_post->check('required') ? 'T' : 'F';
 				$data['multi'] = $this->_post->check('multi') ? 'T' : 'F';
 				$data['max_count'] = $this->_post->toInt('apply_max_count') == 1 ? $this->_post->toInt('max_count') : ':NULL';				
+				$data['company_id'] = $this->getCompanyId();
 				$id = $pjExtraModel->setAttributes(array_merge($this->_post->raw(), $data))->insert()->getInsertId();
 				if ($id !== false && (int) $id > 0)
 				{
@@ -27,7 +28,7 @@ class pjAdminExtras extends pjAdmin
 					{
 						pjMultiLangModel::factory()->saveMultiLang($i18n_arr, $id, 'pjExtra');
 					}
-					$calendar_id_arr = $this->_post->toArray('calendar_id');
+					$calendar_id_arr = $this->filterCompanyCalendarIds($this->_post->toArray('calendar_id'));
 					if(count($calendar_id_arr) > 0)
 	            	{
 	            		$pjCalendarExtraModel = pjCalendarExtraModel::factory();
@@ -40,7 +41,7 @@ class pjAdminExtras extends pjAdmin
 				}
 				pjAppController::jsonResponse(array('status' => 'OK'));
 			} else {
-				$this->set('calendar_arr', pjCalendarModel::factory()
+				$this->set('calendar_arr', pjCalendarModel::factory()->where('t1.company_id', $this->getCompanyId())
 					->select('t1.*, t2.content AS name')
 					->join('pjMultiLang', "t2.model='pjCalendar' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left outer')
 					->orderBy('name ASC')
@@ -64,6 +65,10 @@ class pjAdminExtras extends pjAdmin
 		if (!self::isGet() && !$this->_get->check('id') && $this->_get->toInt('id') < 0)
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'HTTP method not allowed.'));
+		}
+		if (!$this->isCompanyRecord(pjExtraModel::factory(), $this->_get->toInt('id')))
+		{
+			$this->denyCompanyAccess();
 		}
 		if (pjExtraModel::factory()->set('id', $this->_get->toInt('id'))->erase()->getAffectedRows() == 1)
 		{
@@ -96,7 +101,8 @@ class pjAdminExtras extends pjAdmin
 			self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Missing, empty or invalid data.'));
 		}
 		
-		if (pjExtraModel::factory()->whereIn('id', $record)->eraseAll()->getAffectedRows() > 0)
+		$record = $this->filterCompanyRecordIds(pjExtraModel::factory(), $record);
+		if (!empty($record) && pjExtraModel::factory()->whereIn('id', $record)->eraseAll()->getAffectedRows() > 0)
 		{
 			pjMultiLangModel::factory()->where('model', 'pjExtra')->whereIn('foreign_id', $record)->eraseAll();
 			pjCalendarExtraModel::factory()->whereIn('extra_id', $record)->eraseAll();
@@ -113,6 +119,7 @@ class pjAdminExtras extends pjAdmin
 		if ($this->isXHR())
 		{
 			$pjExtraModel = pjExtraModel::factory()
+				->where('t1.company_id', $this->getCompanyId())
 				->join('pjMultiLang', "t2.foreign_id = t1.id AND t2.model = 'pjExtra' AND t2.locale = '".$this->getLocaleId()."' AND t2.field = 'name'", 'left');
 			
 			if ($q = $this->_get->toString('q'))
@@ -218,6 +225,14 @@ class pjAdminExtras extends pjAdmin
 			self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Missing, empty or invalid parameters.'));
 		}
 		
+		if (!$this->isCompanyRecord(pjExtraModel::factory(), $params['id']))
+		{
+			$this->denyCompanyAccess();
+		}
+		if (!in_array($params['column'], array('status', 'name'), true))
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Invalid column.'));
+		}
 		$pjExtraModel = pjExtraModel::factory();
 		if (!in_array($params['column'], $pjExtraModel->getI18n()))
 		{
@@ -241,6 +256,11 @@ class pjAdminExtras extends pjAdmin
 				$data['required'] = $this->_post->check('required') ? 'T' : 'F';
 				$data['multi'] = $this->_post->check('multi') ? 'T' : 'F';
 				$data['max_count'] = $this->_post->toInt('apply_max_count') == 1 ? $this->_post->toInt('max_count') : ':NULL';				
+				if (!$this->isCompanyRecord(pjExtraModel::factory(), $this->_post->toInt('id')))
+				{
+					$this->denyCompanyAccess();
+				}
+				$data['company_id'] = $this->getCompanyId();
 				pjExtraModel::factory()->set('id', $this->_post->toInt('id'))->modify(array_merge($this->_post->raw(), $data));
 				
 				$i18n_arr = $this->_post->toI18n('i18n');
@@ -252,7 +272,7 @@ class pjAdminExtras extends pjAdmin
 				$pjCalendarExtraModel = pjCalendarExtraModel::factory();
 				$pjCalendarExtraModel->where('extra_id', $this->_post->toInt('id'))->eraseAll();
 				
-				$calendar_id_arr = $this->_post->toArray('calendar_id');
+				$calendar_id_arr = $this->filterCompanyCalendarIds($this->_post->toArray('calendar_id'));
 				if(count($calendar_id_arr) > 0)
             	{
             		$pjCalendarExtraModel->reset();
@@ -264,13 +284,17 @@ class pjAdminExtras extends pjAdmin
 				}
 				pjAppController::jsonResponse(array('status' => 'OK'));
 			} else {
+				if (!$this->isCompanyRecord(pjExtraModel::factory(), $this->_get->toInt('id')))
+				{
+					$this->denyCompanyAccess();
+				}
 				$arr = pjExtraModel::factory()->find($this->_get->toInt('id'))->getData();
 				$arr['i18n'] = pjMultiLangModel::factory()->getMultiLang($arr['id'], 'pjExtra');
 				$this->set('arr', $arr);
 				
 				$this->setLocalesData();
 				
-				$this->set('calendar_arr', pjCalendarModel::factory()
+				$this->set('calendar_arr', pjCalendarModel::factory()->where('t1.company_id', $this->getCompanyId())
 					->select('t1.*, t2.content AS name')
 					->join('pjMultiLang', "t2.model='pjCalendar' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left outer')
 					->orderBy('name ASC')

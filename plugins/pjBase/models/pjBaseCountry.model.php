@@ -15,6 +15,7 @@ class pjBaseCountryModel extends pjBaseAppModel
 		array('name' => 'alpha_2', 'type' => 'varchar', 'default' => ':NULL'),
 		array('name' => 'alpha_3', 'type' => 'varchar', 'default' => ':NULL'),
 		array('name' => 'status', 'type' => 'enum', 'default' => 'T'),
+		array('name' => 'company_id', 'type' => 'int', 'default' => ':NULL'),
 	);
 	
 	protected $i18n = array('name');

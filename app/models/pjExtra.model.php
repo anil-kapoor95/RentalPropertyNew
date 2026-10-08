@@ -12,6 +12,7 @@ class pjExtraModel extends pjAppModel
 	
 	protected $schema = array(
 		array('name' => 'id', 'type' => 'int', 'default' => ':NULL'),
+		array('name' => 'company_id', 'type' => 'int', 'default' => ':NULL'),
 		array('name' => 'price', 'type' => 'decimal', 'default' => ':NULL'),
 		array('name' => 'price_type', 'type' => 'enum', 'default' => ':NULL'),
 		array('name' => 'required', 'type' => 'enum', 'default' => 'F'),

@@ -90,6 +90,21 @@
                 <div class="panel-body">
                     <form action="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjBaseBackup&amp;action=pjActionBackup" method="post"  id="frmCreateBackup" autocomplete="off">
                         <input type="hidden" name="backup" value="1" />
+                        <?php if (class_exists('pjCompanyContext')):
+                            $bkActive = pjCompanyContext::activeCompany($controller->getRoleId(), $controller->getUserId());
+                            $bkAdmin = pjCompanyContext::isAdmin($controller->getRoleId(), $controller->getUserId()); ?>
+                        <div class="form-group">
+                            <label class="control-label"><?php __('lblBackupScope'); ?>:</label>
+                            <div class="radio m-t-xs m-b-none">
+                                <label><input type="radio" name="backup_scope" value="company" checked> <?php __('lblBackupScopeCompany'); ?>: <strong><?php echo $bkActive ? pjSanitize::html($bkActive['name']) : '-'; ?></strong></label>
+                            </div>
+                            <?php if ($bkAdmin): ?>
+                            <div class="radio m-t-none">
+                                <label><input type="radio" name="backup_scope" value="system"> <?php __('lblBackupScopeSystem'); ?></label>
+                            </div>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
 
                         <div class="form-group">
                             <label class="control-label"><?php __('plugin_base_backup_database') ?>:</label>

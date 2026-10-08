@@ -213,6 +213,27 @@ class pjBaseLocale extends pjBase
 		}
 	}
 	
+	/** Labels are saved for the active company (shared texts stay the default). */
+	private function labelFieldName()
+	{
+		$cid = $this->getLabelsCompanyId();
+		return $cid > 0 && class_exists('pjCompanyContext') ? pjCompanyContext::labelField($cid) : 'title';
+	}
+
+	private function toCompanyLabelData($arr)
+	{
+		$name = $this->labelFieldName();
+		$out = array();
+		foreach ((array) $arr as $locale_id => $fields)
+		{
+			foreach ((array) $fields as $field => $content)
+			{
+				$out[$locale_id][$field === 'title' ? $name : $field] = $content;
+			}
+		}
+		return $out;
+	}
+
 	public function pjActionSaveFields()
 	{
 		$this->checkLogin();
@@ -239,6 +260,7 @@ class pjBaseLocale extends pjBase
 					{
 						$data[$locale_id][$name] = $content;
 					}
+					$data = $this->toCompanyLabelData($data);
 					$fids = $MultiLangModel->updateMultiLang($data, $foreign_id, 'pjBaseField');
 					if (!empty($fids))
 					{
@@ -377,13 +399,15 @@ class pjBaseLocale extends pjBase
 			
 			$pjBaseFieldModel
 				->join('pjBaseMultiLang', sprintf("t2.model='pjBaseField' AND t2.foreign_id=t1.id AND t2.locale='%u' AND t2.field='title'", $locale), 'left outer')
-				->join('pjBaseMultiLang', sprintf("t3.model='pjBaseField' AND t3.foreign_id=t1.id AND t3.locale='%u' AND t3.field='title'", $default_locale), 'left outer');
+				->join('pjBaseMultiLang', sprintf("t3.model='pjBaseField' AND t3.foreign_id=t1.id AND t3.locale='%u' AND t3.field='title'", $default_locale), 'left outer')
+				->join('pjBaseMultiLang', sprintf("t4.model='pjBaseField' AND t4.foreign_id=t1.id AND t4.locale='%u' AND t4.field='%s'", $locale, $this->labelFieldName()), 'left outer');
 				
 			if ($this->_get->toString('q'))
 			{
 			    $q = $this->_get->toString('q');
 				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($q));
-				$pjBaseFieldModel->where(sprintf("(t1.key LIKE '%1\$s' OR t2.content LIKE '%1\$s' OR CONCAT(':', t1.id, ':') LIKE '%1\$s')", "%$q%"));
+				$q = $pjBaseFieldModel->escapeStr($q);
+				$pjBaseFieldModel->where(sprintf("(t1.key LIKE '%1\$s' OR t2.content LIKE '%1\$s' OR t4.content LIKE '%1\$s' OR CONCAT(':', t1.id, ':') LIKE '%1\$s')", "%$q%"));
 			}
 			
 			$column = 't1.id';
@@ -406,9 +430,9 @@ class pjBaseLocale extends pjBase
 			
 			if (self::isIDsShown())
 			{
-				$fields = "t1.id, t1.`type` AS `field_type`, t1.source, t3.content AS `default_language`, t2.locale, t2.content, IF(CHAR_LENGTH(t2.content)>70,1,0) AS `expand`, CONCAT(':', t1.id, ':') AS `did`";
+				$fields = "t1.id, t1.`type` AS `field_type`, t1.source, t3.content AS `default_language`, t2.locale, COALESCE(t4.content, t2.content) AS `content`, IF(CHAR_LENGTH(COALESCE(t4.content, t2.content))>70,1,0) AS `expand`, CONCAT(':', t1.id, ':') AS `did`";
 			} else {
-				$fields = "t1.id, t1.`type` AS `field_type`, t1.source, t3.content AS `default_language`, t2.locale, t2.content, IF(CHAR_LENGTH(t2.content)>70,1,0) AS `expand`";
+				$fields = "t1.id, t1.`type` AS `field_type`, t1.source, t3.content AS `default_language`, t2.locale, COALESCE(t4.content, t2.content) AS `content`, IF(CHAR_LENGTH(COALESCE(t4.content, t2.content))>70,1,0) AS `expand`";
 			}
 			
 			$data = $pjBaseFieldModel
@@ -446,7 +470,8 @@ class pjBaseLocale extends pjBase
 			    self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'Missing, empty or invalid parameters.'));
 			}
 			
-			$fids = pjMultiLangModel::factory()->updateMultiLang($this->_post->toI18n('i18n'), $this->_post->toInt('foreign_id'), 'pjBaseField');
+			$fids = pjMultiLangModel::factory()->updateMultiLang($this->toCompanyLabelData($this->_post->toI18n('i18n')), $this->_post->toInt('foreign_id'), 'pjBaseField');
+			$this->updateFieldsIndex();
 			
 			self::jsonResponse(array('status' => 'OK', 'code' => 200, 'text' => 'Label has been saved.', 'f' => $fids));
 		}

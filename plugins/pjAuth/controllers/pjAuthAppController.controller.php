@@ -11,10 +11,44 @@ class pjAuthAppController extends pjPlugin
 		$this->setLayout('pjActionEmpty');
 	}
 	
+	/** foreign_id of the option texts (pjBaseOption i18n) in use. */
+	protected $optionsFid = 1;
+
+	/** Put a company's system options (login & protection, captcha, email...) on top of the shared ones. */
+	protected function applyCompanyOptions($company_id)
+	{
+		if (class_exists('pjCompanyContext') && (int) $company_id > 0)
+		{
+			static $pairs = array();
+			$this->optionsFid = pjCompanyContext::optionsForeignId($company_id);
+			if (!isset($pairs[$this->optionsFid]))
+			{
+				$pairs[$this->optionsFid] = pjBaseOptionModel::factory()->getPairs($this->optionsFid);
+			}
+			$this->option_arr = array_merge((array) $this->option_arr, $pairs[$this->optionsFid]);
+		}
+		return $this;
+	}
+
+	/** Before login: use the company of the account with this e-mail. */
+	protected function applyCompanyOptionsForEmail($email)
+	{
+		if (class_exists('pjCompanyContext') && !empty($email))
+		{
+			$this->applyCompanyOptions(pjCompanyContext::companyOfEmail($email));
+		}
+		return $this;
+	}
+
 	public function beforeFilter()
 	{
 	    $this->models['Option'] = pjBaseOptionModel::factory();
 	    $this->option_arr = $this->models['Option']->getPairs($this->getForeignId());
+	    // Logged in: the rules of the user's active company apply.
+	    if (class_exists('pjCompanyContext') && $this->isLoged())
+	    {
+	        $this->applyCompanyOptions(pjCompanyContext::activeId($this->getRoleId(), $this->getUserId()));
+	    }
 	    $this->set('option_arr', $this->option_arr);
 	    pjRegistry::getInstance()->set('options', $this->option_arr);
 	    if (isset($this->option_arr['o_timezone']))

@@ -12,6 +12,7 @@ class pjVoucherModel extends pjAppModel
 	
 	protected $schema = array(
 		array('name' => 'id', 'type' => 'int', 'default' => ':NULL'),
+		array('name' => 'company_id', 'type' => 'int', 'default' => ':NULL'),
 		array('name' => 'code', 'type' => 'varchar', 'default' => ':NULL'),
 		array('name' => 'used_count', 'type' => 'int', 'default' => ':NULL'),
 		array('name' => 'type', 'type' => 'enum', 'default' => ':NULL'),

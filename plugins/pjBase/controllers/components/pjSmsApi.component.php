@@ -40,7 +40,9 @@ class pjSmsApi extends pjBase
 	public function send()
 	{
 		if (empty($this->apiUsername) || empty($this->apiKey)) {
-            $base_option_arr = pjBaseOptionModel::factory()->getPairs($this->getForeignId());
+            $reg = pjRegistry::getInstance();
+            $fid = $reg->is('options_foreign_id') ? (int) $reg->get('options_foreign_id') : $this->getForeignId();
+            $base_option_arr = array_merge(pjBaseOptionModel::factory()->getPairs($this->getForeignId()), pjBaseOptionModel::factory()->getPairs($fid));
             $this->apiUsername = $base_option_arr['plugin_sms_api_username'];
             $this->apiKey = $base_option_arr['plugin_sms_api_key'];            
 		}

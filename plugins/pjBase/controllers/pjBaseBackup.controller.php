@@ -6,6 +6,53 @@ if (!defined("ROOT_PATH"))
 }
 class pjBaseBackup extends pjBase
 {
+    /* ---- company-wise backups ------------------------------------------------ */
+
+    private function hasCompanies()
+    {
+        return class_exists('pjCompanyContext') && class_exists('pjCompanyBackup');
+    }
+
+    private function backupCompanyId()
+    {
+        return $this->hasCompanies() ? (int) pjCompanyContext::activeId($this->getRoleId(), $this->getUserId()) : 0;
+    }
+
+    /** Only administrators may create / see backups of the whole system (all companies). */
+    private function canSystemBackup()
+    {
+        return !$this->hasCompanies() || pjCompanyContext::isAdmin($this->getRoleId(), $this->getUserId());
+    }
+
+    /**
+     * Resolve a backup id from the grid to a file path, or false.
+     * Company backups: "company-<hash>/<name>" (active company only); system backups: "<name>" (admins only).
+     */
+    private function resolveBackupFile($id)
+    {
+        $id = (string) $id;
+        if (!preg_match('~^(?:company-([a-f0-9]{32})/)?((?:database|files)-backup-\d{10}\.(?:sql|zip))$~', $id, $m))
+        {
+            return false;
+        }
+        if ($m[1] !== '')
+        {
+            if (pjCompanyContext::idFromHash($m[1]) !== $this->backupCompanyId() || $this->backupCompanyId() <= 0)
+            {
+                return false;
+            }
+            $file = PJ_WEB_PATH . 'backup/company-' . $m[1] . '/' . $m[2];
+        } else {
+            if (!$this->canSystemBackup())
+            {
+                return false;
+            }
+            $file = PJ_WEB_PATH . 'backup/' . $m[2];
+        }
+        clearstatcache();
+        return is_file($file) ? $file : false;
+    }
+
     public function pjActionIndex()
     {
     	if (!pjAuth::factory()->hasAccess())
@@ -47,6 +94,34 @@ class pjBaseBackup extends pjBase
 
             @set_time_limit(600);
             $err = 'PBU04';
+
+            // Company-wise backup (default). The whole system is backed up only when an admin asks for it.
+            $company_id = $this->backupCompanyId();
+            $system = !$this->hasCompanies() || ($this->_post->toString('backup_scope') === 'system' && $this->canSystemBackup());
+            if (!$system)
+            {
+                if ($company_id <= 0)
+                {
+                    pjUtil::redirect(PJ_INSTALL_URL . "index.php?controller=pjBaseBackup&action=pjActionIndex&err=PBU04");
+                }
+                $folder = pjCompanyBackup::folder($company_id);
+                $cb = new pjCompanyBackup($company_id);
+                $ts = time();
+                if ($this->_post->check('backup_database') && !$cb->exportSql($folder . 'database-backup-' . $ts . '.sql'))
+                {
+                    pjUtil::redirect(sprintf("%sindex.php?controller=pjBaseBackup&action=pjActionIndex&err=%s", PJ_INSTALL_URL, 'PBU07'));
+                }
+                if ($this->_post->check('backup_files') && !$cb->exportFiles($folder . 'files-backup-' . $ts . '.zip'))
+                {
+                    pjUtil::redirect(sprintf("%sindex.php?controller=pjBaseBackup&action=pjActionIndex&err=%s", PJ_INSTALL_URL, 'PBU08'));
+                }
+                pjUtil::redirect(sprintf("%sindex.php?controller=pjBaseBackup&action=pjActionIndex&err=%s", PJ_INSTALL_URL, 'PBU01'));
+            }
+            if ($this->hasCompanies())
+            {
+                pjCompanyBackup::protect(PJ_WEB_PATH . 'backup/');
+            }
+
             if ($this->_post->check('backup_database'))
             {
                 $app_models = array();
@@ -233,29 +308,40 @@ class pjBaseBackup extends pjBase
             }
             
             $data = $id = $created = $type = $size = array();
-            if ($handle = opendir(PJ_WEB_PATH . 'backup'))
+            // Folders to list: the active company's backups, plus the full-system backups for admins.
+            $folders = array();
+            $company_id = $this->backupCompanyId();
+            if ($this->hasCompanies() && $company_id > 0)
             {
-                $i = 0;
+                pjCompanyBackup::folder($company_id); // creates / migrates the folder
+                $folders['company-' . pjCompanyContext::hashOf($company_id) . '/'] = ' - ' . __('lblBackupScopeCompany', true);
+            }
+            if ($this->canSystemBackup())
+            {
+                $folders[''] = $this->hasCompanies() ? ' - ' . __('lblBackupScopeSystem', true) : '';
+            }
+            $i = 0;
+            foreach ($folders as $sub => $suffix)
+            {
+                if (!is_dir(PJ_WEB_PATH . 'backup/' . $sub) || !($handle = opendir(PJ_WEB_PATH . 'backup/' . $sub)))
+                {
+                    continue;
+                }
                 while (false !== ($entry = readdir($handle)))
                 {
-                    preg_match('/(database-backup|files-backup)-(\d{10})\.(sql|zip)/', $entry, $m);
-                    if (isset($m[2]))
+                    if (!preg_match('/^(database-backup|files-backup)-(\d{10})\.(sql|zip)$/', $entry, $m))
                     {
-                        $id[$i] = $entry;
-                        $created[$i] = $m[2];
-                        $type[$i] = $m[1] == 'database-backup' ? __('plugin_backup_types_ARRAY_database', true) : __('plugin_backup_types_ARRAY_files', true);
-                        
-                        $data[$i]['id'] = $id[$i];
-                        $data[$i]['created'] = $created[$i];
-                        $data[$i]['type'] = $type[$i];
-                        if (isset($m[0]))
-                        {
-                            $file_path = PJ_WEB_PATH . 'backup/' . $m[0];
-                            $size[$i] = filesize($file_path);
-                            $data[$i]['size'] = $size[$i];
-                        }
-                        $i++;
+                        continue;
                     }
+                    $id[$i] = $sub . $entry;
+                    $created[$i] = $m[2];
+                    $type[$i] = ($m[1] == 'database-backup' ? __('plugin_backup_types_ARRAY_database', true) : __('plugin_backup_types_ARRAY_files', true)) . $suffix;
+                    $data[$i]['id'] = $id[$i];
+                    $data[$i]['created'] = $created[$i];
+                    $data[$i]['type'] = $type[$i];
+                    $size[$i] = filesize(PJ_WEB_PATH . 'backup/' . $sub . $entry);
+                    $data[$i]['size'] = $size[$i];
+                    $i++;
                 }
                 closedir($handle);
             }
@@ -322,9 +408,8 @@ class pjBaseBackup extends pjBase
             {
                 self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'Missing, empty or invalid parameters.'));
             }
-            $file = PJ_WEB_PATH . 'backup/' . basename($this->_get->toString('id'));
-            clearstatcache();
-            if (is_file($file))
+            $file = $this->resolveBackupFile($this->_get->toString('id'));
+            if ($file !== false)
             {
                 @unlink($file);
                 pjAppController::jsonResponse(array('status' => 'OK', 'code' => 200, 'text' => 'File has been deleted.'));
@@ -357,9 +442,8 @@ class pjBaseBackup extends pjBase
             
             foreach ($record as $item)
             {
-                $file = PJ_WEB_PATH . 'backup/' . basename($item);
-                clearstatcache();
-                if (is_file($file))
+                $file = $this->resolveBackupFile($item);
+                if ($file !== false)
                 {
                     @unlink($file);
                 }
@@ -381,12 +465,10 @@ class pjBaseBackup extends pjBase
 
         if ($this->_get->toString('id'))
         {
-            $id = basename($this->_get->toString('id'));
-            
-            $file = PJ_WEB_PATH . 'backup/'.$id;
+            $file = $this->resolveBackupFile($this->_get->toString('id'));
+            $id = $file !== false ? basename($file) : '';
             $buffer = "";
-            @clearstatcache();
-            if (is_file($file))
+            if ($file !== false)
             {
                 $handle = @fopen($file, "rb");
                 if ($handle)
@@ -612,6 +694,20 @@ class pjBaseBackup extends pjBase
             if($backup_file == false)
             {
                 return $titles['PBU08'] . ' ' . $bodies['PBU08'];
+            }
+
+            // One backup (database + files) per company as well.
+            if ($this->hasCompanies())
+            {
+                pjCompanyBackup::protect($backup_folder);
+                $ts = time();
+                foreach (pjCompanyModel::factory()->findAll()->getDataPair(null, 'id') as $cid)
+                {
+                    $folder = pjCompanyBackup::folder($cid);
+                    $cb = new pjCompanyBackup($cid);
+                    $cb->exportSql($folder . 'database-backup-' . $ts . '.sql');
+                    $cb->exportFiles($folder . 'files-backup-' . $ts . '.zip');
+                }
             }
             return $titles[$code] . ' ' . $bodies[$code];
 		}

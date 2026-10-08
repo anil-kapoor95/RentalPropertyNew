@@ -12,6 +12,7 @@ class pjFeatureModel extends pjAppModel
 
 	protected $schema = array(
 		array('name' => 'id', 'type' => 'int', 'default' => ':NULL'),
+		array('name' => 'company_id', 'type' => 'int', 'default' => ':NULL'),
 		array('name' => 'category_id', 'type' => 'int', 'default' => ':NULL'),
 		array('name' => 'status', 'type' => 'enum', 'default' => 'T')
 	);

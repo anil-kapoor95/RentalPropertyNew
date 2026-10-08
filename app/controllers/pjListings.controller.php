@@ -14,6 +14,8 @@ class pjListings extends pjFront
 			->join('pjMultiLang', "t2.foreign_id = t1.id AND t2.model = 'pjCalendar' AND t2.locale = '".$locale."' AND t2.field = 'name'", 'left')
 			->join('pjMultiLang', "t3.foreign_id = t1.id AND t3.model = 'pjCalendar' AND t3.locale = '".$locale."' AND t3.field = 'address_city'", 'left')
 			->where('t1.status', 'T')
+			// Only the properties of the requested company (?company=ID).
+			->where('t1.company_id', (int) $this->frontCompanyId)
 			->orderBy('t2.content ASC')
 			->findAll()->getData();
 
@@ -37,16 +39,32 @@ class pjListings extends pjFront
 	}
 
 	/**
+	 * Heading of the listing: the company name, else the global company option.
+	 */
+	private function getListingTitle()
+	{
+		if ($this->frontCompanyId > 0)
+		{
+			$c = pjCompanyModel::factory()->find($this->frontCompanyId)->getData();
+			if (!empty($c['name']))
+			{
+				return $c['name'];
+			}
+		}
+		return isset($this->option_arr['o_company']) ? $this->option_arr['o_company'] : '';
+	}
+
+	/**
 	 * All-properties page.
 	 *   index.php?controller=pjListings&action=pjActionListing
 	 */
 	public function pjActionListing()
 	{
 		$this->set('items', $this->getListingItems());
-		$this->set('company', isset($this->option_arr['o_company']) ? $this->option_arr['o_company'] : '');
+		$this->set('company', $this->getListingTitle());
 		$this->set('base', PJ_INSTALL_URL);
 		$this->set('cssUrl', PJ_INSTALL_URL . 'app/web/css/rpbc-modern.css?v=' . @filemtime(PJ_INSTALL_PATH . 'app/web/css/rpbc-modern.css'));
-		$this->set('themeCss', PJ_INSTALL_URL . 'index.php?controller=pjFront&action=pjActionThemeCss');
+		$this->set('themeCss', PJ_INSTALL_URL . 'index.php?controller=pjFront&action=pjActionThemeCss&company=' . $this->getFrontCompanyHash());
 		$this->setLayout('pjActionEmpty');
 	}
 
@@ -120,10 +138,10 @@ class pjListings extends pjFront
 		$this->set('mapKey', isset($this->option_arr['o_google_maps_api_key']) ? trim((string) $this->option_arr['o_google_maps_api_key']) : '');
 		$this->set('base', $base);
 		$this->set('cssUrl', $base . 'app/web/css/rpbc-modern.css?v=' . @filemtime(PJ_INSTALL_PATH . 'app/web/css/rpbc-modern.css'));
-		$this->set('themeCss', $base . 'index.php?controller=pjFront&action=pjActionThemeCss');
+		$this->set('themeCss', $base . 'index.php?controller=pjFront&action=pjActionThemeCss&cid=' . (int) $cid);
 		$this->set('loadCss', $base . 'index.php?controller=pjFront&action=pjActionLoadCss&cid=' . (int) $cid);
 		$this->set('loadJs', $base . 'index.php?controller=pjFront&action=pjActionLoad&cid=' . (int) $cid . '&view=1');
-		$this->set('listUrl', $base . 'index.php?controller=pjListings&action=pjActionListing');
+		$this->set('listUrl', $base . 'index.php?controller=pjListings&action=pjActionListing&company=' . $this->getFrontCompanyHash());
 		$this->setLayout('pjActionEmpty');
 	}
 
@@ -151,8 +169,8 @@ class pjListings extends pjFront
 		$base  = PJ_INSTALL_URL;
 		$this->set('items', $this->getListingItems());
 		$this->set('base', $base);
-		$this->set('company', isset($this->option_arr['o_company']) ? $this->option_arr['o_company'] : '');
-		$this->set('themeCss', $base . 'index.php?controller=pjFront&action=pjActionThemeCss');
+		$this->set('company', $this->getListingTitle());
+		$this->set('themeCss', $base . 'index.php?controller=pjFront&action=pjActionThemeCss&company=' . $this->getFrontCompanyHash());
 		$this->set('listCss', $base . 'app/web/css/rpbc-modern.css?v=' . @filemtime(PJ_INSTALL_PATH . 'app/web/css/rpbc-modern.css'));
 		$this->setLayout('pjActionEmpty');
 	}

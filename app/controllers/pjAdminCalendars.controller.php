@@ -6,6 +6,39 @@ if (!defined("ROOT_PATH"))
 }
 class pjAdminCalendars extends pjAdmin
 {
+	/** Stop unless the feed belongs to a property of the active company. */
+	private function assertCompanyFeed($feed_id)
+	{
+		$feed = pjFeedModel::factory()->find((int) $feed_id)->getData();
+		if (empty($feed) || !$this->isCompanyCalendar($feed['calendar_id']))
+		{
+			$this->denyCompanyAccess();
+		}
+		return $feed;
+	}
+
+	/** Users that may be set as the property owner in the active company. */
+	private function getOwnerUserList()
+	{
+		// Users of the active company (+ administrators) and owners already used in its properties.
+		return pjAuthUserModel::factory()
+			->where(sprintf("(%s OR t1.id IN (SELECT `user_id` FROM `%s` WHERE `company_id` = %u))", pjCompanyContext::userScopeSql($this->getCompanyId()), pjCalendarModel::factory()->getTable(), $this->getCompanyId()))
+			->orderBy('t1.name ASC')->findAll()->getData();
+	}
+
+	/** Validate a posted owner id against getOwnerUserList(). */
+	private function sanitizeOwnerId($user_id, $fallback)
+	{
+		foreach ($this->getOwnerUserList() as $u)
+		{
+			if ((int) $u['id'] === (int) $user_id)
+			{
+				return (int) $user_id;
+			}
+		}
+		return (int) $fallback;
+	}
+
 	public $sessionPrice = 'pjPrice_session';
 	
 	public function pjActionCheckRefId()
@@ -33,6 +66,11 @@ class pjAdminCalendars extends pjAdmin
 	        return;
 	    }
 		
+		if ($this->getCompanyId() <= 0)
+		{
+			pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminCompanies&action=pjActionIndex&msg=msgNoCompanySelected");
+		}
+
 		if ($this->_post->check('calendar_create'))
 		{
 			$post = $this->_post->raw();
@@ -41,7 +79,8 @@ class pjAdminCalendars extends pjAdmin
 				"calendar_create" => $post['calendar_create'],
 				"uuid" => $post['uuid'],
 				"i18n" => $post['i18n'],
-				"user_id" => $post['user_id'],
+				"user_id" => $this->sanitizeOwnerId(isset($post['user_id']) ? $post['user_id'] : 0, $this->getUserId()),
+				"company_id" => $this->getCompanyId(),
 				"bedrooms" => isset($post['bedrooms']) && $post['bedrooms'] !== '' ? $post['bedrooms'] : ':NULL',
 				"bathrooms" => isset($post['bathrooms']) && $post['bathrooms'] !== '' ? $post['bathrooms'] : ':NULL'
 			);
@@ -76,7 +115,7 @@ class pjAdminCalendars extends pjAdmin
 		} else {
 			$this->setLocalesData();
 			
-			$this->set('user_arr', pjAuthUserModel::factory()->orderBy('t1.name ASC')->findAll()->getData());
+			$this->set('user_arr', $this->getOwnerUserList());
 	
 			$this->appendCss('css/select2.min.css', PJ_THIRD_PARTY_PATH . 'select2/');
 	        $this->appendJs('js/select2.full.min.js', PJ_THIRD_PARTY_PATH . 'select2/');
@@ -108,6 +147,10 @@ class pjAdminCalendars extends pjAdmin
 	    if ($this->_get->check('id') && $this->_get->toInt('id') > 0)
 	    {
 	        $id = $this->_get->toInt('id');
+	        if (!$this->isCompanyCalendar($id))
+	        {
+	            $this->denyCompanyAccess();
+	        }
 	     	if ($id == 1)
 	        {
 	            pjAppController::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'Default calendar can not be deleted.'));
@@ -202,7 +245,7 @@ class pjAdminCalendars extends pjAdmin
 	    {
 	        self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Access denied.'));
 	    }
-		$record = $this->_post->toArray('record');
+		$record = $this->filterCompanyCalendarIds($this->_post->toArray('record'));
 		if (count($record) > 0)
 		{
 		    pjCalendarModel::factory()->where('id !=', 1)->whereIn('id', $record)->where('id !=', $this->getCalendarId())->eraseAll();
@@ -244,7 +287,8 @@ class pjAdminCalendars extends pjAdmin
 		if ($this->isXHR())
 		{
 			$pjCalendarModel = pjCalendarModel::factory()
-				->join('pjMultiLang', "t2.foreign_id = t1.id AND t2.model = 'pjCalendar' AND t2.locale = '".$this->getLocaleId()."' AND t2.field = 'name'", 'left');
+				->join('pjMultiLang', "t2.foreign_id = t1.id AND t2.model = 'pjCalendar' AND t2.locale = '".$this->getLocaleId()."' AND t2.field = 'name'", 'left')
+				->where('t1.company_id', $this->getCompanyId());
 			
 			if($this->isOwner())
 			{
@@ -340,6 +384,16 @@ class pjAdminCalendars extends pjAdmin
         {
             self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Calendar is not found.'));
         }
+        if (!$this->isCompanyCalendar($arr['id']))
+        {
+            $this->denyCompanyAccess();
+        }
+        // Inline grid edit: only the name (translatable) and status may change here.
+        if (!in_array($this->_post->toString('column'), array_merge(array('status'), $pjCalendarModel->getI18n()), true)
+            || ($this->_post->toString('column') === 'status' && !in_array($this->_post->toString('value'), array('T', 'F'), true)))
+        {
+            self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Invalid column.'));
+        }
         if (!in_array($this->_post->toString('column'), $pjCalendarModel->getI18n()))
         {
             $pjCalendarModel->reset()->where('id', $this->_get->toInt('id'))->limit(1)->modifyAll(array($this->_post->toString('column') => $this->_post->toString('value')));
@@ -386,6 +440,10 @@ class pjAdminCalendars extends pjAdmin
 		
 		if ($this->isXHR())
 		{
+			if (!$this->isCompanyCalendar($this->_get->toInt('cid')))
+			{
+				$this->denyCompanyAccess();
+			}
 			$this->__getCalendar($this->_get->toInt('cid'), $this->_get->toInt('year'), $this->_get->toInt('month'));
 		}
 	}
@@ -456,8 +514,11 @@ class pjAdminCalendars extends pjAdmin
         	switch ($this->_post->toInt('tab_id'))
 			{
 				case '1':
+					$current_cal = pjCalendarModel::factory()->find($this->getCalendarId())->getData();
+					$current_owner = !empty($current_cal) ? (int) $current_cal['user_id'] : (int) $this->getUserId();
 					pjCalendarModel::factory()->set('id', $this->getCalendarId())->modify(array(
-						'user_id'   => $this->_post->toInt('user_id'),
+						// Owners can't hand a property to someone else; others pick from the allowed list.
+						'user_id'   => $this->isOwner() ? $current_owner : $this->sanitizeOwnerId($this->_post->toInt('user_id'), $current_owner),
 						'bedrooms'  => $this->_post->toString('bedrooms') !== '' ? $this->_post->toString('bedrooms') : ':NULL',
 						'bathrooms' => $this->_post->toString('bathrooms') !== '' ? $this->_post->toString('bathrooms') : ':NULL'
 					));
@@ -517,7 +578,7 @@ class pjAdminCalendars extends pjAdmin
 				case '16':
 					// Features: full-resync the calendar's feature links.
 					pjCalendarFeatureModel::factory()->where('calendar_id', $calendar_id)->eraseAll();
-					$feature_id_arr = $this->_post->toArray('feature');
+					$feature_id_arr = $this->filterCompanyRecordIds(pjFeatureModel::factory(), $this->_post->toArray('feature'));
 					if (count($feature_id_arr) > 0)
 					{
 						$pjCalendarFeatureModel = pjCalendarFeatureModel::factory();
@@ -793,7 +854,7 @@ class pjAdminCalendars extends pjAdmin
 		$this->set('country_arr', pjBaseCountryModel::factory()
 			->select('t1.*, t2.content AS name')
 			->join('pjMultiLang', "t2.model='pjBaseCountry' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left outer')
-			->where('t1.status', 'T')
+			->where(pjCompanyContext::countryActiveSql($this->getCompanyId()))
 			->orderBy('`name` ASC')->findAll()->getData()
 		);
 
@@ -801,10 +862,10 @@ class pjAdminCalendars extends pjAdmin
 		$pjFeatureModel = pjFeatureModel::factory();
 		$this->set('property_feature_arr', $pjFeatureModel->reset()->select('t1.*, t2.content AS name')
 			->join('pjMultiLang', "t2.model='pjFeature' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left outer')
-			->where('t1.status', 'T')->where('t1.category_id', 2)->orderBy('`name` ASC')->findAll()->getData());
+			->where('t1.status', 'T')->where('t1.company_id', $this->getCompanyId())->where('t1.category_id', 2)->orderBy('`name` ASC')->findAll()->getData());
 		$this->set('community_feature_arr', $pjFeatureModel->reset()->select('t1.*, t2.content AS name')
 			->join('pjMultiLang', "t2.model='pjFeature' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left outer')
-			->where('t1.status', 'T')->where('t1.category_id', 1)->orderBy('`name` ASC')->findAll()->getData());
+			->where('t1.status', 'T')->where('t1.company_id', $this->getCompanyId())->where('t1.category_id', 1)->orderBy('`name` ASC')->findAll()->getData());
 		$this->set('calendar_feature_id_arr', pjCalendarFeatureModel::factory()
 			->where('calendar_id', $arr['id'])->findAll()->getDataPair('feature_id', 'feature_id'));
 		$this->set('feature_categories', __('feature_categories', true, false));
@@ -812,7 +873,7 @@ class pjAdminCalendars extends pjAdmin
 		$this->setLocalesData();
 		
 		$this->__getCalendar($this->getCalendarId(), date("Y"), date("n"));
-		$this->set('user_arr', pjAuthUserModel::factory()->orderBy('t1.name ASC')->findAll()->getData());
+		$this->set('user_arr', $this->getOwnerUserList());
 		
 		$calendar_option_arr = $pjOptionModel
 			->where('t1.foreign_id', $calendar_id)
@@ -922,7 +983,9 @@ class pjAdminCalendars extends pjAdmin
 	public function pjActionCheckAssignCalendar()
 	{
 	    $this->setAjax(true);
-	    if($this->getCalendarId() == false)
+	    // Only block users who have no property AND cannot add one (an admin of an
+	    // empty company must still reach the list to add the first property).
+	    if($this->getCalendarId() == false && !($this->getCompanyId() > 0 && pjAuth::factory('pjAdminCalendars', 'pjActionCreate')->hasAccess()))
 	    {
 	        self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => __('lblNoCalendarAssignedMsg', true), 'btnOK' => __('gridBtnOk', true)));
 	    }else{
@@ -1441,6 +1504,10 @@ class pjAdminCalendars extends pjAdmin
         $pjFeedModel = pjFeedModel::factory()
 	        ->join('pjCalendar', 't2.id=t1.calendar_id', 'left outer')
 	        ->join('pjBaseMultiLang', sprintf("t3.foreign_id = t2.id AND t3.model = 'pjCalendar' AND t3.locale = '%u' AND t3.field = 'name'", $this->getLocaleId()), 'left outer');
+        if (!$this->isCompanyCalendar($this->_get->toInt('calendar_id')))
+        {
+            $this->denyCompanyAccess();
+        }
         $pjFeedModel->where('calendar_id', $this->_get->toInt('calendar_id'));
         
         $column = 'property';
@@ -1521,6 +1588,7 @@ class pjAdminCalendars extends pjAdmin
             }
             if($this->_post->toInt('feed_id') > 0)
             {
+                $this->assertCompanyFeed($this->_post->toInt('feed_id'));
                 $feed = pjFeedModel::factory()->find($this->_post->toInt('feed_id'))->getData();
                 if (!$feed)
                 {
@@ -1535,6 +1603,10 @@ class pjAdminCalendars extends pjAdmin
                 pjAppController::syncFeeds($this->_post->toInt('feed_id'));
                 self::jsonResponse(array('status' => 'OK', 'code' => 200, 'text' => 'Feed has been updated.'));
             }else{
+                if (!$this->isCompanyCalendar($this->_post->toInt('calendar_id')))
+                {
+                    $this->denyCompanyAccess();
+                }
                 $id = pjFeedModel::factory(array_merge($this->_post->raw(), array('provider_id' => $provider_id)))->insert()->getInsertId();
                 if (!$id)
                 {
@@ -1560,11 +1632,7 @@ class pjAdminCalendars extends pjAdmin
             self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Missing, empty or invalid parameters.'));
         }
         
-        $feed = pjFeedModel::factory()->find($this->query['id'])->getData();
-        if (!$feed)
-        {
-            self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Feed not found.'));
-        }
+        $feed = $this->assertCompanyFeed($this->query['id']);
         
         pjUtil::redirect($feed['url']);
     }
@@ -1588,6 +1656,7 @@ class pjAdminCalendars extends pjAdmin
             self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Missing, empty or invalid parameters.'));
         }
         
+        $this->assertCompanyFeed($this->query['id']);
         $response = pjAppController::syncFeeds($this->query['id']);
         self::jsonResponse($response);
     }
@@ -1612,6 +1681,7 @@ class pjAdminCalendars extends pjAdmin
         {
             self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Missing, empty or invalid parameters.'));
         }
+        $this->assertCompanyFeed($this->_get->toInt('id'));
         if (!pjFeedModel::factory()->set('id', $this->_get->toInt('id'))->erase()->getAffectedRows())
         {
             self::jsonResponse(array('status' => 'ERR', 'code' => 105, 'text' => 'Feed has not been deleted.'));
@@ -1638,7 +1708,7 @@ class pjAdminCalendars extends pjAdmin
         {
             self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Missing, empty or invalid parameters.'));
         }
-        $feed = pjFeedModel::factory()->find($this->_get->toInt('id'))->getData();
+        $feed = $this->assertCompanyFeed($this->_get->toInt('id'));
         self::jsonResponse(array('status' => 'OK', 'code' => 200, 'feed' => $feed));
     }
     
@@ -1720,6 +1790,11 @@ class pjAdminCalendars extends pjAdmin
 	        self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Missing, empty or invalid parameters.'));
 	    }
 	    $id = $this->_get->toInt('id');
+	    $pw = pjPasswordModel::factory()->find($id)->getData();
+	    if (empty($pw) || !$this->isCompanyCalendar($pw['calendar_id']))
+	    {
+	        $this->denyCompanyAccess();
+	    }
 	    if (pjPasswordModel::factory()->setAttributes(array('id' => $id))->erase()->getAffectedRows() == 1)
 	    {
 	        self::jsonResponse(array('status' => 'OK', 'code' => 200, 'text' => 'The password has been deleted.'));
@@ -1754,7 +1829,7 @@ class pjAdminCalendars extends pjAdmin
 	    {
 	        self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Missing, empty or invalid parameters.'));
 	    }
-	    pjPasswordModel::factory()->whereIn('id', $record)->eraseAll();
+	    pjPasswordModel::factory()->whereIn('id', array_map('intval', $record))->where($this->companyCalendarSql('calendar_id'))->eraseAll();
 	    self::jsonResponse(array('status' => 'OK', 'code' => 200, 'text' => 'Passwords has been deleted.'));
 	    exit;
 	}
@@ -1765,11 +1840,12 @@ class pjAdminCalendars extends pjAdmin
 	
 		if ($this->isXHR())
 		{
-			$pjReservationModel = pjReservationModel::factory()->join('pjCalendar', 't2.id=t1.calendar_id', 'inner');
+			$pjReservationModel = pjReservationModel::factory()->join('pjCalendar', 't2.id=t1.calendar_id', 'inner')
+				->where('t2.company_id', $this->getCompanyId());
 			if ($this->_get->check('uuid') && $this->_get->toString('uuid') != '')
 			{
 				$q = $this->_get->toString('uuid');
-				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($q));
+				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($pjReservationModel->escapeStr($q)));
 				$pjReservationModel->where("t1.uuid LIKE '%$q%'");
 			}
 			
@@ -1780,7 +1856,7 @@ class pjAdminCalendars extends pjAdmin
 			
 			if ($this->_get->check('date') && $this->_get->toString('date') != '')
 			{
-				$pjReservationModel->where(sprintf("('%s' BETWEEN t1.date_from AND t1.date_to)", $this->_get->toString('date')));
+				$pjReservationModel->where(sprintf("('%s' BETWEEN t1.date_from AND t1.date_to)", $pjReservationModel->escapeStr($this->_get->toString('date'))));
 			}
 			
 			if ($this->_get->check('status') && $this->_get->toString('status') != '')
@@ -1790,13 +1866,13 @@ class pjAdminCalendars extends pjAdmin
 			
 			if ($q = $this->_get->toString('q'))
 			{
-				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($q));
+				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($pjReservationModel->escapeStr($q)));
 				$pjReservationModel->where("(t1.uuid LIKE '%$q%' OR t1.c_name LIKE '%$q%' OR t1.c_email LIKE '%$q%' OR t1.c_phone LIKE '%$q%')");
 			}
 			
 			if ($this->_get->check('time') && $this->_get->toString('time') != '')
 			{
-				$pjReservationModel->where(sprintf("'%s' BETWEEN `date_from` AND `date_to`", date("Y-m-d", $this->_get->toString('time'))));
+				$pjReservationModel->where(sprintf("'%s' BETWEEN `date_from` AND `date_to`", date("Y-m-d", $this->_get->toInt('time'))));
 			}
 			
 			if ($this->_get->check('c_name') && $this->_get->toString('c_name') != '')
@@ -1905,6 +1981,9 @@ class pjAdminCalendars extends pjAdmin
 			$copy_tab = $this->_post->toString('copy_tab');
 			if (!$this->_post->check('calendar_id') || $this->_post->toInt('calendar_id') <= 0 || !$this->_post->check('tab_id') || $this->_post->toInt('tab_id') <= 0) {
 				pjAppController::jsonResponse(array('status' => 'ERR', 'code' => 100, 'copy_tab' => $copy_tab, 'text' => $copy_options_msg[1]));
+			}
+			if (!$this->isCompanyCalendar($this->_post->toInt('calendar_id'))) {
+				$this->denyCompanyAccess();
 			}
 			if ($this->_post->toInt('tab_id') == 11 && !$this->_post->check('confirmed')) {
 				$option_arr = pjOptionModel::factory()->getPairs($this->_post->toInt('calendar_id'));
@@ -2176,6 +2255,10 @@ class pjAdminCalendars extends pjAdmin
 
 			$pjCalendarModel = pjCalendarModel::factory();
 
+			if (!$this->isCompanyCalendar($this->_post->toInt('id')))
+			{
+				$this->denyCompanyAccess();
+			}
 			$arr = $pjCalendarModel->find($this->_post->toInt('id'))->getData(); 
 
 			

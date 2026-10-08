@@ -31,6 +31,7 @@ class pjAdminOptions extends pjAdmin
 	        $this->sendForbidden();
 	        return;
 	    }
+	    pjCompanyContext::ensureNotifications($this->getCompanyId());
 	    $this->setLocalesData();
 	    
 	    $this->appendCss('awesome-bootstrap-checkbox.css', PJ_THIRD_PARTY_PATH . 'awesome_bootstrap_checkbox/');
@@ -61,6 +62,7 @@ class pjAdminOptions extends pjAdmin
 		    ->where('t1.recipient', $this->query['recipient'])
 		    ->where('t1.is_general', 1)
 		    ->where('t1.foreign_id', 0)
+		    ->where('t1.company_id', $this->getCompanyId())
 		    ->orderBy('t1.id ASC')
 		    ->findAll()
 		    ->getData();
@@ -97,6 +99,7 @@ class pjAdminOptions extends pjAdmin
 		    ->where('t1.transport', $this->_get->toString('transport'))
 		    ->where('t1.is_general', 1)
 		    ->where('t1.foreign_id', 0)
+		    ->where('t1.company_id', $this->getCompanyId())
 		    ->limit(1)
 		    ->findAll()
 		    ->getDataIndex(0);	    
@@ -157,6 +160,13 @@ class pjAdminOptions extends pjAdmin
 	        self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Data mismatch.'));
 	    }
 	    
+	    // The notification must be one of the active company's general notifications.
+	    $own = pjNotificationModel::factory()->where('t1.id', $this->_post->toInt('id'))->where('t1.company_id', $this->getCompanyId())->where('t1.is_general', 1)->findCount()->getData();
+	    if ((int) $own !== 1 || $this->getCompanyId() <= 0)
+	    {
+	        $this->denyCompanyAccess();
+	    }
+	    
 	    if ($isToggle)
 	    {
 	        pjNotificationModel::factory()
@@ -195,6 +205,8 @@ class pjAdminOptions extends pjAdmin
 		$this->set('palettes', pjColorHelper::getPalettes());
 
 		$opt = is_array($this->option_arr) ? $this->option_arr : array();
+		// Company colours override the global ones.
+		$opt = array_merge($opt, pjCompanyOptionModel::factory()->getPairs($this->getCompanyId()));
 		$this->set('theme_colors', array(
 			'o_brand_color'           => (isset($opt['o_brand_color'])           && pjColorHelper::isValidHex($opt['o_brand_color']))           ? $opt['o_brand_color']           : '#b45309',
 			'o_accent_color'          => (isset($opt['o_accent_color'])          && pjColorHelper::isValidHex($opt['o_accent_color']))          ? $opt['o_accent_color']          : '#f3f4f6',
@@ -252,17 +264,16 @@ class pjAdminOptions extends pjAdmin
 			$saved['o_color_available'] = $saved['o_text_color'];   // day font colour
 		}
 
+		// Theme colours are stored per company.
+		$company_id = $this->getCompanyId();
+		if ($company_id <= 0)
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => __('msgNoCompanySelected', true)));
+		}
+		$pjCompanyOptionModel = pjCompanyOptionModel::factory();
 		foreach ($saved as $key => $value)
 		{
-			$exists = pjBaseOptionModel::factory()->where('foreign_id', 1)->where('`key`', $key)->limit(1)->findAll()->getData();
-			if (!empty($exists))
-			{
-				pjBaseOptionModel::factory()->where('foreign_id', 1)->where('`key`', $key)->limit(1)->modifyAll(array('value' => $value));
-			} else {
-				pjBaseOptionModel::factory()->setAttributes(array(
-					'foreign_id' => 1, 'key' => $key, 'tab_id' => 99, 'value' => $value, 'type' => 'string', 'is_visible' => 0
-				))->insert();
-			}
+			$pjCompanyOptionModel->saveValue($company_id, $key, $value);
 		}
 
 		self::jsonResponse(array('status' => 'OK', 'text' => 'Saved.'));

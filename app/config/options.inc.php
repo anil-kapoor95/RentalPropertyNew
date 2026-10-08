@@ -109,6 +109,14 @@ $CONFIG['role_permissions_owner'] = array(
     'pjAdminOptions_pjActionPreview',
 	'pjAdminOptions_pjActionInstall'
 );
+$CONFIG['role_permissions_company'] = array(
+    // pjBase permissions
+    'pjBaseUsers_pjActionProfile',
+    // Script dashboard permission
+    'pjAdmin_pjActionIndex',
+    // Company's own profile page
+    'pjAdminCompanies_pjActionProfile'
+);
 $CONFIG['spam_protection'] = array(
     'banned_words' => false,
     'banned_ips' => true,
@@ -127,6 +135,8 @@ $CONFIG['permission_items_order'] = array(
     'pjAdminSetup_pjActionRemoveDemo',
     'pjAdminSetup_pjActionHasDemoData',
     'pjAdminReservations',
+    'pjAdminCompanies',
+    'pjAdminCompanies_pjActionProfile',
 	'pjAdminExtras',
 	'pjAdminFeatures',
 	'pjAdminDiscounts',

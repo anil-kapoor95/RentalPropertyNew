@@ -23,7 +23,7 @@ class pjAdminVouchers extends pjAdmin
 	            echo 'false';
 	            exit;
 	        }
-	        $pjVoucherModel = pjVoucherModel::factory()->where('t1.code', $code);
+	        $pjVoucherModel = pjVoucherModel::factory()->where('t1.code', $code)->where('t1.company_id', $this->getCompanyId());
 	    	if ($this->_get->check('id') && $this->_get->toInt('id') > 0)
 	        {
 	        	$pjVoucherModel->where('t1.id !=', $this->_get->toInt('id'));
@@ -48,10 +48,11 @@ class pjAdminVouchers extends pjAdmin
 				$data['apply_on'] = $this->_post->toString('apply_on');
 				$data['date_from'] = pjDateTime::formatDate($this->_post->toString('date_from'), $this->option_arr['o_date_format']);
 				$data['date_to'] = pjDateTime::formatDate($this->_post->toString('date_to'), $this->option_arr['o_date_format']);
+				$data['company_id'] = $this->getCompanyId();
 				$id = pjVoucherModel::factory($data)->insert()->getInsertId();
 				if ($id !== false && (int) $id > 0)
 				{
-					$calendar_id_arr = $this->_post->toArray('calendar_id');
+					$calendar_id_arr = $this->filterCompanyCalendarIds($this->_post->toArray('calendar_id'));
 					if(count($calendar_id_arr) > 0)
 	            	{
 	            		$pjCalendarVoucherModel = pjCalendarVoucherModel::factory();
@@ -64,7 +65,7 @@ class pjAdminVouchers extends pjAdmin
 				}
 				pjAppController::jsonResponse(array('status' => 'OK'));
 			} else {				
-				$this->set('calendar_arr', pjCalendarModel::factory()
+				$this->set('calendar_arr', pjCalendarModel::factory()->where('t1.company_id', $this->getCompanyId())
 					->select('t1.*, t2.content AS name')
 					->join('pjMultiLang', "t2.model='pjCalendar' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left outer')
 					->orderBy('name ASC')
@@ -86,6 +87,10 @@ class pjAdminVouchers extends pjAdmin
 		if (!self::isGet() && !$this->_get->check('id') && $this->_get->toInt('id') < 0)
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'HTTP method not allowed.'));
+		}
+		if (!$this->isCompanyRecord(pjVoucherModel::factory(), $this->_get->toInt('id')))
+		{
+			$this->denyCompanyAccess();
 		}
 		if (pjVoucherModel::factory()->set('id', $this->_get->toInt('id'))->erase()->getAffectedRows() == 1)
 		{
@@ -117,7 +122,8 @@ class pjAdminVouchers extends pjAdmin
 			self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Missing, empty or invalid data.'));
 		}
 		
-		if (pjVoucherModel::factory()->whereIn('id', $record)->eraseAll()->getAffectedRows() > 0)
+		$record = $this->filterCompanyRecordIds(pjVoucherModel::factory(), $record);
+		if (!empty($record) && pjVoucherModel::factory()->whereIn('id', $record)->eraseAll()->getAffectedRows() > 0)
 		{
 			pjCalendarVoucherModel::factory()->whereIn('voucher_id', $record)->eraseAll();
 			self::jsonResponse(array('status' => 'OK'));
@@ -132,7 +138,8 @@ class pjAdminVouchers extends pjAdmin
 		
 		if ($record = $this->_post->toArray('record'))
 		{
-			$arr = pjVoucherModel::factory()->whereIn('id', $record)->findAll()->getData();
+			$record = $this->filterCompanyRecordIds(pjVoucherModel::factory(), $record);
+			$arr = empty($record) ? array() : pjVoucherModel::factory()->whereIn('id', $record)->findAll()->getData();
 			$csv = new pjCSV();
 			$csv
 				->setHeader(true)
@@ -149,7 +156,7 @@ class pjAdminVouchers extends pjAdmin
 	
 		if ($this->isXHR())
 		{
-			$pjVoucherModel = pjVoucherModel::factory();
+			$pjVoucherModel = pjVoucherModel::factory()->where('t1.company_id', $this->getCompanyId());
 			
 			if ($q = $this->_get->toString('q'))
 			{
@@ -253,6 +260,14 @@ class pjAdminVouchers extends pjAdmin
 			self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Missing, empty or invalid parameters.'));
 		}
 		
+		if (!$this->isCompanyRecord(pjVoucherModel::factory(), $params['id']))
+		{
+			$this->denyCompanyAccess();
+		}
+		if (!in_array($params['column'], array('code'), true))
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Invalid column.'));
+		}
 		$pjVoucherModel = pjVoucherModel::factory();
 		if (!in_array($params['column'], $pjVoucherModel->getI18n()))
 		{
@@ -279,11 +294,16 @@ class pjAdminVouchers extends pjAdmin
 				$data['apply_on'] = $this->_post->toString('apply_on');
 				$data['date_from'] = pjDateTime::formatDate($this->_post->toString('date_from'), $this->option_arr['o_date_format']);
 				$data['date_to'] = pjDateTime::formatDate($this->_post->toString('date_to'), $this->option_arr['o_date_format']);
+				if (!$this->isCompanyRecord(pjVoucherModel::factory(), $this->_post->toInt('id')))
+				{
+					$this->denyCompanyAccess();
+				}
+				$data['company_id'] = $this->getCompanyId();
 				pjVoucherModel::factory()->where('id', $this->_post->toInt('id'))->limit(1)->modifyAll($data);
 				
 				$pjCalendarVoucherModel = pjCalendarVoucherModel::factory();
 				$pjCalendarVoucherModel->where('voucher_id', $this->_post->toInt('id'))->eraseAll();
-				$calendar_id_arr = $this->_post->toArray('calendar_id');
+				$calendar_id_arr = $this->filterCompanyCalendarIds($this->_post->toArray('calendar_id'));
 				if (count($calendar_id_arr) > 0)
 				{
 					$pjCalendarVoucherModel->reset();
@@ -295,10 +315,14 @@ class pjAdminVouchers extends pjAdmin
 				}
 				pjAppController::jsonResponse(array('status' => 'OK'));	
 			} else {
+				if (!$this->isCompanyRecord(pjVoucherModel::factory(), $this->_get->toInt('id')))
+				{
+					$this->denyCompanyAccess();
+				}
 				$arr = pjVoucherModel::factory()->find($this->_get->toInt('id'))->getData();
 				$this->set('arr', $arr);
 				
-				$this->set('calendar_arr', pjCalendarModel::factory()
+				$this->set('calendar_arr', pjCalendarModel::factory()->where('t1.company_id', $this->getCompanyId())
 					->select('t1.*, t2.content AS name')
 					->join('pjMultiLang', "t2.model='pjCalendar' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left outer')
 					->orderBy('name ASC')

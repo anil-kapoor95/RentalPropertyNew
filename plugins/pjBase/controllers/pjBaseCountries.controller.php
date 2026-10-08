@@ -31,6 +31,35 @@ class pjBaseCountries extends pjBase
         exit;
     }
     
+	/* ---- countries per company ----------------------------------------------
+	 * Shared (built-in) countries: each company has its own active/inactive status.
+	 * Countries added while a company is active belong to that company only.
+	 */
+	private function cCompanyId()
+	{
+		return class_exists('pjCompanyContext') ? (int) pjCompanyContext::activeId($this->getRoleId(), $this->getUserId()) : 0;
+	}
+
+	/** 'own' (company's country), 'shared', or false (another company's country / not found). */
+	private function countryScope($id)
+	{
+		$arr = pjBaseCountryModel::factory()->find((int) $id)->getData();
+		if (empty($arr))
+		{
+			return false;
+		}
+		if (empty($arr['company_id']))
+		{
+			return 'shared';
+		}
+		return (int) $arr['company_id'] === $this->cCompanyId() ? 'own' : false;
+	}
+
+	private function denyCountry($text = 'This country is shared by all companies: you can only activate or deactivate it.')
+	{
+		self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => $text));
+	}
+
 	public function pjActionIndex()
 	{
 		$this->checkLogin();
@@ -54,21 +83,29 @@ class pjBaseCountries extends pjBase
 		if ($this->isXHR())
 		{
 		    $pjBaseCountryModel = pjBaseCountryModel::factory()->join('pjBaseMultiLang', "t2.foreign_id = t1.id AND t2.model = 'pjBaseCountry' AND t2.locale = '".$this->getLocaleId()."' AND t2.field = 'name'", 'left');
+		    $company_id = $this->cCompanyId();
+		    $status_expr = 't1.status';
+		    if (class_exists('pjCompanyContext'))
+		    {
+		        // shared countries + the company's own; status as set for this company
+		        $pjBaseCountryModel->where(sprintf("(t1.company_id IS NULL OR t1.company_id = %u)", $company_id));
+		        $status_expr = pjCompanyContext::countryStatusExpr($company_id);
+		    }
 		    
 		    if ($q = $this->_get->toString('q'))
 		    {
-		        $q = str_replace(array('%', '_'), array('\%', '\_'), trim($q));
+		        $q = str_replace(array('%', '_'), array('\%', '\_'), trim($pjBaseCountryModel->escapeStr($q)));
 		        $pjBaseCountryModel->where(sprintf("(t1.alpha_2 LIKE '%1\$s' OR t1.alpha_3 LIKE '%1\$s' OR t2.content LIKE '%1\$s')", "%$q%"));
 		    }
 		    
 		    if (in_array($this->_get->toString('status'), array('T', 'F')))
 		    {
-		        $pjBaseCountryModel->where('t1.status', $this->_get->toString('status'));
+		        $pjBaseCountryModel->where(sprintf("%s = '%s'", $status_expr, $this->_get->toString('status')));
 		    }
 		    
 		    $column = 'name';
 		    $direction = 'ASC';
-		    if ($this->_get->toString('column') && in_array(strtoupper($this->_get->toString('direction')), array('ASC', 'DESC')))
+		    if ($this->_get->toString('column') && in_array($this->_get->toString('column'), array('name', 'alpha_2', 'alpha_3', 'status'), true) && in_array(strtoupper($this->_get->toString('direction')), array('ASC', 'DESC')))
 		    {
 		        $column = $this->_get->toString('column');
 		        $direction = strtoupper($this->_get->toString('direction'));
@@ -85,7 +122,7 @@ class pjBaseCountries extends pjBase
 		    }
 		    
 		    $data = $pjBaseCountryModel
-		    ->select('t1.*, t2.content AS name')
+		    ->select(sprintf('t1.id, t1.alpha_2, t1.alpha_3, t1.company_id, %s AS status, t2.content AS name', $status_expr))
 		    ->orderBy("$column $direction")
 		    ->limit($rowCount, $offset)
 		    ->findAll()->getData();
@@ -109,6 +146,8 @@ class pjBaseCountries extends pjBase
 		    $data = array();
 		    $post = $this->_post->raw();
 		    $data['status'] = $this->_post->check('status') ? 'T' : 'F';
+		    // A country added while a company is active belongs to that company.
+		    $data['company_id'] = $this->cCompanyId() > 0 ? $this->cCompanyId() : ':NULL';
 		    $id = pjBaseCountryModel::factory(array_merge($post, $data))->insert()->getInsertId();
 		    if ($id !== false && (int) $id > 0)
 		    {
@@ -150,6 +189,18 @@ class pjBaseCountries extends pjBase
 		    $data = array();
 		    $post = $this->_post->raw();
 		    $data['status'] = $this->_post->check('status') ? 'T' : 'F';
+		    $scope = class_exists('pjCompanyContext') ? $this->countryScope($this->_post->toInt('id')) : 'own';
+		    if ($scope === false)
+		    {
+		        pjUtil::redirect(PJ_INSTALL_URL. "index.php?controller=pjBaseCountries&action=pjActionIndex&err=PCY08");
+		    }
+		    if ($scope === 'shared' && $this->cCompanyId() > 0)
+		    {
+		        // shared country: only this company's status is saved
+		        pjCompanyContext::setCountryStatus($this->cCompanyId(), $this->_post->toInt('id'), $data['status']);
+		        pjUtil::redirect(PJ_INSTALL_URL. "index.php?controller=pjBaseCountries&action=pjActionIndex&err=PCY01");
+		    }
+		    unset($post['company_id']);
 		    pjBaseCountryModel::factory()->where('id', $this->_post->toInt('id'))->limit(1)->modifyAll(array_merge($post, $data));
 		    if (isset($post['i18n']))
 		    {
@@ -161,6 +212,18 @@ class pjBaseCountries extends pjBase
 		{
 		    $id = $this->_get->toInt('id');
 		    $arr = pjBaseCountryModel::factory()->find($id)->getData();
+		    if (class_exists('pjCompanyContext') && $this->countryScope($id) === false)
+		    {
+		        $arr = array();
+		    }
+		    if (!empty($arr) && class_exists('pjCompanyContext'))
+		    {
+		        $st = pjCompanyCountryModel::factory()->where('company_id', $this->cCompanyId())->where('country_id', $id)->limit(1)->findAll()->getDataIndex(0);
+		        if (!empty($st))
+		        {
+		            $arr['status'] = $st['status'];
+		        }
+		    }
 		    if (count($arr) === 0)
 		    {
 		        pjUtil::redirect(PJ_INSTALL_URL. "index.php?controller=pjBaseCountries&action=pjActionIndex&err=PCY08");
@@ -210,6 +273,23 @@ class pjBaseCountries extends pjBase
 		{
 		    self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Country not found.'));
 		}
+		if (class_exists('pjCompanyContext'))
+		{
+		    $scope = $this->countryScope($arr['id']);
+		    if ($scope === false)
+		    {
+		        $this->denyCountry('This country belongs to another company.');
+		    }
+		    if ($params['column'] === 'status' && $this->cCompanyId() > 0)
+		    {
+		        pjCompanyContext::setCountryStatus($this->cCompanyId(), $arr['id'], $params['value']);
+		        self::jsonResponse(array('status' => 'OK', 'code' => 201, 'text' => 'Country has been updated.'));
+		    }
+		    if ($scope === 'shared' || !in_array($params['column'], array_merge(array('alpha_2', 'alpha_3'), $pjBaseCountryModel->getI18n()), true))
+		    {
+		        $this->denyCountry();
+		    }
+		}
 		
 		if (!in_array($this->_post->toString('column'), $pjBaseCountryModel->getI18n()))
 		{
@@ -242,6 +322,21 @@ class pjBaseCountries extends pjBase
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Missing, empty or invalid parameters.'));
 		}
+		if (class_exists('pjCompanyContext') && $this->cCompanyId() > 0)
+		{
+			// toggle this company's status of each country
+			$cid = $this->cCompanyId();
+			$rows = pjBaseCountryModel::factory()
+				->select(sprintf('t1.id, %s AS st', pjCompanyContext::countryStatusExpr($cid)))
+				->whereIn('t1.id', array_map('intval', $record))
+				->where(sprintf("(t1.company_id IS NULL OR t1.company_id = %u)", $cid))
+				->findAll()->getData();
+			foreach ($rows as $r)
+			{
+				pjCompanyContext::setCountryStatus($cid, $r['id'], $r['st'] == 'T' ? 'F' : 'T');
+			}
+			self::jsonResponse(array('status' => 'OK', 'code' => 200, 'text' => 'Country status has been updated.'));
+		}
 		pjBaseCountryModel::factory()
 			->whereIn('id', $record)
 			->modifyAll(array(
@@ -271,6 +366,10 @@ class pjBaseCountries extends pjBase
 			self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Missing, empty or invalid parameters.'));
 		}
 		
+		if (class_exists('pjCompanyContext') && $this->countryScope($this->_get->toInt('id')) !== 'own')
+		{
+			$this->denyCountry('Only countries added by this company can be deleted. Deactivate shared countries instead.');
+		}
 		if (!pjBaseCountryModel::factory()->set('id', $this->_get->toInt('id'))->erase()->getAffectedRows())
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 105, 'text' => 'Country has not been deleted.'));
@@ -304,7 +403,12 @@ class pjBaseCountries extends pjBase
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Missing, empty or invalid parameters.'));
 		}
-		pjBaseCountryModel::factory()->whereIn('id', $record)->eraseAll();
+		$m = pjBaseCountryModel::factory()->whereIn('id', array_map('intval', $record));
+		if (class_exists('pjCompanyContext'))
+		{
+			$m->where('company_id', $this->cCompanyId()); // own countries only
+		}
+		$m->eraseAll();
 			
 		self::jsonResponse(array('status' => 'OK', 'code' => 200, 'text' => 'Countries has been deleted.'));
 	}

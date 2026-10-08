@@ -109,13 +109,17 @@ class pjBaseAppController extends pjController
         
         $registry = pjRegistry::getInstance();
         $field_arr = $this->session->getData($fields);
+        $labels_company = $this->getLabelsCompanyId();
         if ($force
+            || (int) $this->session->getData('fields_company_id') !== (int) $labels_company
             || !$this->session->has($this->defaultFieldsIndex)
             || $this->session->getData($this->defaultFieldsIndex) != $this->option_arr['o_fields_index']
             || !$this->session->has($fields)
             || empty($field_arr))
         {
             pjAppController::setFields($locale_id);
+            $this->applyCompanyLabels($labels_company, $locale_id);
+            $this->session->setData('fields_company_id', (int) $labels_company);
             
             # Update session
             if ($registry->is('fields'))
@@ -134,6 +138,46 @@ class pjBaseAppController extends pjController
         return TRUE;
     }
     
+    /** Company whose label texts are used (0 = shared texts). */
+    public function getLabelsCompanyId()
+    {
+        if (class_exists('pjCompanyContext') && $this->isLoged())
+        {
+            return (int) pjCompanyContext::activeId($this->getRoleId(), $this->getUserId());
+        }
+        return 0;
+    }
+
+    /** Put the company's own label texts on top of the shared ones. */
+    protected function applyCompanyLabels($company_id, $locale_id)
+    {
+        if ((int) $company_id <= 0 || !class_exists('pjCompanyContext'))
+        {
+            return;
+        }
+        $over = pjCompanyContext::labelOverrides($company_id, $locale_id);
+        if (empty($over))
+        {
+            return;
+        }
+        $registry = pjRegistry::getInstance();
+        $fields = $registry->is('fields') ? $registry->get('fields') : array();
+        foreach ($over as $key => $value)
+        {
+            $fields[$key] = $value;
+            if (strpos($key, '_ARRAY_') !== false)
+            {
+                list($prefix, $suffix) = explode('_ARRAY_', $key, 2);
+                if (!isset($fields[$prefix]) || !is_array($fields[$prefix]))
+                {
+                    $fields[$prefix] = array();
+                }
+                $fields[$prefix][$suffix] = $value;
+            }
+        }
+        $registry->set('fields', $fields);
+    }
+
     protected function setLocalesData()
     {
         $locale_arr = pjLocaleModel::factory()
@@ -300,6 +344,24 @@ class pjBaseAppController extends pjController
         return 1;
     }
     
+    /**
+     * foreign_id of the system options being worked on: the active company's own
+     * copy when a company is selected, otherwise the global options (1).
+     * Login & Protection / Captcha keep using getForeignId() (global).
+     */
+    public function getOptionsForeignId()
+    {
+        if (class_exists('pjCompanyContext') && $this->isLoged())
+        {
+            $company_id = pjCompanyContext::activeId($this->getRoleId(), $this->getUserId());
+            if ($company_id > 0)
+            {
+                return pjCompanyContext::optionsForeignId($company_id);
+            }
+        }
+        return $this->getForeignId();
+    }
+    
     public function beforeFilter()
     {
         $this->resetCss();
@@ -340,6 +402,13 @@ class pjBaseAppController extends pjController
         {
             $this->models['Option'] = pjBaseOptionModel::factory();
             $base_option_arr = $this->models['Option']->getPairs($this->getForeignId());
+            $options_fid = $this->getOptionsForeignId();
+            pjRegistry::getInstance()->set('options_foreign_id', $options_fid);
+            if ($options_fid != $this->getForeignId())
+            {
+                // Company system options on top of the global ones.
+                $base_option_arr = array_merge($base_option_arr, $this->models['Option']->reset()->getPairs($options_fid));
+            }
             $script_option_arr = pjOptionModel::factory()->getPairs($this->getForeignId());
             $this->option_arr = array_merge($base_option_arr, $script_option_arr);
             $this->set('option_arr', $this->option_arr);

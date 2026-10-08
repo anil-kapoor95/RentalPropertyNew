@@ -29,7 +29,7 @@ class pjBaseSms extends pjBase
             $pjBaseOptionModel = pjBaseOptionModel::factory();
             
         	if (0 != $pjBaseOptionModel
-                ->where('foreign_id', $this->getForeignId())
+                ->where('foreign_id', $this->getOptionsForeignId())
                 ->where('`key`', 'plugin_sms_api_username')
                 ->findCount()->getData()
                 )
@@ -41,7 +41,7 @@ class pjBaseSms extends pjBase
                 ));
             } else {
                 $pjBaseOptionModel->setAttributes(array(
-                    'foreign_id' => $this->getForeignId(),
+                    'foreign_id' => $this->getOptionsForeignId(),
                     'key' => 'plugin_sms_api_username',
                     'tab_id' => '99',
                     'value' => $this->_post->toString('plugin_sms_api_username'),
@@ -51,7 +51,7 @@ class pjBaseSms extends pjBase
             }
             
             if (0 != $pjBaseOptionModel->reset()
-                ->where('foreign_id', $this->getForeignId())
+                ->where('foreign_id', $this->getOptionsForeignId())
                 ->where('`key`', 'plugin_sms_api_key')
                 ->findCount()->getData()
                 )
@@ -63,7 +63,7 @@ class pjBaseSms extends pjBase
                 ));
             } else {
                 $pjBaseOptionModel->setAttributes(array(
-                    'foreign_id' => $this->getForeignId(),
+                    'foreign_id' => $this->getOptionsForeignId(),
                     'key' => 'plugin_sms_api_key',
                     'tab_id' => '99',
                     'value' => $this->_post->toString('plugin_sms_api_key'),
@@ -74,7 +74,7 @@ class pjBaseSms extends pjBase
             
             $pjBaseOptionModel->reset();
             if (0 != $pjBaseOptionModel
-                ->where('foreign_id', $this->getForeignId())
+                ->where('foreign_id', $this->getOptionsForeignId())
                 ->where('`key`', 'plugin_sms_country_code')
                 ->findCount()->getData()
                 )
@@ -86,7 +86,7 @@ class pjBaseSms extends pjBase
                 ));
             } else {
                 $pjBaseOptionModel->setAttributes(array(
-                    'foreign_id' => $this->getForeignId(),
+                    'foreign_id' => $this->getOptionsForeignId(),
                     'key' => 'plugin_sms_country_code',
                     'tab_id' => '99',
                     'value' => $this->_post->toString('plugin_sms_country_code'),
@@ -97,7 +97,7 @@ class pjBaseSms extends pjBase
             
             $pjBaseOptionModel->reset();
             if (0 != $pjBaseOptionModel
-                ->where('foreign_id', $this->getForeignId())
+                ->where('foreign_id', $this->getOptionsForeignId())
                 ->where('`key`', 'plugin_sms_phone_number_length')
                 ->findCount()->getData()
                 )
@@ -109,7 +109,7 @@ class pjBaseSms extends pjBase
                 ));
             } else {
                 $pjBaseOptionModel->setAttributes(array(
-                    'foreign_id' => $this->getForeignId(),
+                    'foreign_id' => $this->getOptionsForeignId(),
                     'key' => 'plugin_sms_phone_number_length',
                     'tab_id' => '99',
                     'value' => $this->_post->toString('plugin_sms_phone_number_length'),

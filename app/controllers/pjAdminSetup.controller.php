@@ -134,6 +134,9 @@ class pjAdminSetup extends pjAdmin
             $locales = array(1);
         }
         $created = 0;
+        $company_id = $this->getCompanyId();
+        // Demo features refer to the default amenity list (ids 1..n); map them to this company's copy.
+        $company_features = array_values(array_map('intval', pjFeatureModel::factory()->where('t1.company_id', $company_id)->orderBy('t1.id ASC')->findAll()->getDataPair(null, 'id')));
         foreach (self::demoProperties() as $p) {
             list($uuid, $name, $desc, $city, $state, $zip, $lat, $lng, $beds, $baths, $features, $image) = $p;
 
@@ -144,6 +147,7 @@ class pjAdminSetup extends pjAdmin
 
             $id = pjCalendarModel::factory()->reset()->setAttributes(array(
                 'user_id'        => 1,
+                'company_id'     => $company_id > 0 ? $company_id : ':NULL',
                 'uuid'           => $uuid,
                 'status'         => 'T',
                 'bedrooms'       => $beds,
@@ -173,7 +177,10 @@ class pjAdminSetup extends pjAdmin
 
             // features
             foreach ($features as $fid) {
-                pjCalendarFeatureModel::factory()->reset()->setAttributes(array('calendar_id' => $id, 'feature_id' => (int) $fid))->insert();
+                if (!isset($company_features[(int) $fid - 1])) {
+                    continue;
+                }
+                pjCalendarFeatureModel::factory()->reset()->setAttributes(array('calendar_id' => $id, 'feature_id' => $company_features[(int) $fid - 1]))->insert();
             }
 
             // base default-season price (random per property, same for every weekday)
@@ -230,7 +237,7 @@ class pjAdminSetup extends pjAdmin
 
     private function removeDemoProperties()
     {
-        $ids = pjCalendarModel::factory()->reset()->where('t1.uuid LIKE', self::DEMO_UUID_PREFIX . '%')->findAll()->getDataPair(NULL, 'id');
+        $ids = pjCalendarModel::factory()->reset()->where('t1.uuid LIKE', self::DEMO_UUID_PREFIX . '%')->where('t1.company_id', $this->getCompanyId())->findAll()->getDataPair(NULL, 'id');
         $removed = 0;
         if (is_array($ids)) {
             foreach ($ids as $id) {

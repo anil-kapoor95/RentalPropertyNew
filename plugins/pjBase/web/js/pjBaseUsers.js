@@ -164,11 +164,12 @@ var jQuery_1_8_2 = jQuery_1_8_2 || jQuery.noConflict();
 				          {text: myLabel.email, type: "text", sortable: true, editable: editable, renderer: formatEmail},
 				          {text: myLabel.last_login, type: "date", sortable: true, editable: false, renderer: $.datagrid._formatDate, dateFormat: pjGrid.jsDateFormat},
 				          {text: myLabel.role, type: "text", sortable: true, renderer: formatRole},
+				          {text: myLabel.company || "Company", type: "text", sortable: true, editable: false},
 				          {text: myLabel.status, type: "toggle", sortable: true, editable: editable, positiveLabel: myLabel.active, positiveValue: "T", negativeLabel: myLabel.inactive, negativeValue: "F"},
                           {text: myLabel.account_locked, type: "toggle", sortable: true, editable: editable, positiveLabel: myLabel.yesno['F'], positiveValue: "F", negativeLabel: myLabel.yesno['T'], negativeValue: "T"}],
 				dataUrl: "index.php?controller=pjBaseUsers&action=pjActionGetUser",
 				dataType: "json",
-				fields: ['name', 'email', 'last_login', 'role', 'status', 'locked'],
+				fields: ['name', 'email', 'last_login', 'role', 'company', 'status', 'locked'],
 				paginator: {
 					actions: actions,
 					gotoPage: true,
@@ -235,6 +236,13 @@ var jQuery_1_8_2 = jQuery_1_8_2 || jQuery.noConflict();
 			$grid.datagrid("option", "cache", cache);
 			$grid.datagrid("load", $grid.data('datagrid').settings.dataUrl, content.column, content.direction, content.page, content.rowCount);
 			
+		}).on("change", "#pjUserCompanyFilter", function () {
+			// show the users of one company (or administrators only)
+			var content = $grid.datagrid("option", "content"),
+				cache = $grid.datagrid("option", "cache");
+			$.extend(cache, {company: $(this).val(), page: 1});
+			$grid.datagrid("option", "cache", cache);
+			$grid.datagrid("load", $grid.data('datagrid').settings.dataUrl, content.column, content.direction, 1, content.rowCount);
 		}).on("submit", ".frm-filter", function (e) {
 			if (e && e.preventDefault) {
 				e.preventDefault();

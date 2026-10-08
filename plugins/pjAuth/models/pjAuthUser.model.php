@@ -13,6 +13,7 @@ class pjAuthUserModel extends pjAuthAppModel
     protected $schema = array(
         array('name' => 'id', 'type' => 'int', 'default' => ':NULL'),
         array('name' => 'role_id', 'type' => 'int', 'default' => ':NULL'),
+        array('name' => 'company_id', 'type' => 'int', 'default' => ':NULL'),
         array('name' => 'email', 'type' => 'varchar', 'default' => ':NULL'),
         array('name' => 'password', 'type' => 'blob', 'default' => ':NULL', 'encrypt' => 'AES'),
         array('name' => 'name', 'type' => 'varchar', 'default' => ':NULL'),

@@ -12,6 +12,7 @@ class pjDiscountModel extends pjAppModel
 	
 	protected $schema = array(
 		array('name' => 'id', 'type' => 'int', 'default' => ':NULL'),
+		array('name' => 'company_id', 'type' => 'int', 'default' => ':NULL'),
 		array('name' => 'type', 'type' => 'enum', 'default' => ':NULL'),
 		array('name' => 'discount', 'type' => 'decimal', 'default' => ':NULL'),
 		array('name' => 'date_from', 'type' => 'date', 'default' => ':NULL'),

@@ -29,6 +29,13 @@
     			<?php
     			require dirname(__FILE__) . '/elements/menu-top.php'; 
     			
+    			// Which company do these System Options belong to?
+    			$scope_file = PJ_VIEWS_PATH . 'pjLayouts/elements/company-scope.php';
+    			if (is_file($scope_file))
+    			{
+    				include $scope_file;
+    			}
+    			
     			require $content_tpl;
     			
     			include dirname(__FILE__) . '/elements/footer-default.php'; 

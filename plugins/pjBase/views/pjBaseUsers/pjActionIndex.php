@@ -72,6 +72,17 @@
     							</form>
                             </div><!-- /.col-md-3 -->
         
+                            <?php if (class_exists('pjCompanyContext') && pjCompanyContext::isAdmin($controller->getRoleId(), $controller->getUserId())): ?>
+                            <div class="col-md-3 col-sm-4">
+                                <select class="form-control" id="pjUserCompanyFilter">
+                                    <option value=""><?php __('lblFilterAllCompanies'); ?></option>
+                                    <?php foreach (pjCompanyContext::allowedCompanies($controller->getRoleId(), $controller->getUserId()) as $fcId => $fcRow): ?>
+                                    <option value="<?php echo pjCompanyContext::hashOf($fcId); ?>"><?php echo pjSanitize::html($fcRow['name']); ?></option>
+                                    <?php endforeach; ?>
+                                    <option value="none"><?php __('lblUserAllCompanies'); ?></option>
+                                </select>
+                            </div>
+                            <?php endif; ?>
                             <div class="col-md-4 text-right">
                                 <div class="btn-group" role="group" aria-label="...">
                                     <button type="button" class="btn btn-primary btn-all active"><?php __('plugin_base_lbl_all');?></button>
@@ -108,6 +119,7 @@ myLabel.name = <?php x__encode('plugin_base_name'); ?>;
 myLabel.email = <?php x__encode('plugin_base_email'); ?>;
 myLabel.last_login = <?php x__encode('plugin_base_last_login'); ?>;
 myLabel.role = <?php x__encode('plugin_base_role'); ?>;
+myLabel.company = <?php x__encode('lblUserCompany'); ?>;
 myLabel.status = <?php x__encode('plugin_base_status'); ?>;
 myLabel.account_locked = <?php x__encode('plugin_base_account_locked'); ?>;
 myLabel.yesno = <?php x__encode('plugin_base_yesno'); ?>;

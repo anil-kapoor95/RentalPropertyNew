@@ -11,6 +11,8 @@ class pjBaseOptions extends pjBase
 		if (self::isPost())
 		{
 			$pjBaseOptionModel = new pjBaseOptionModel();
+			// Options belong to the active company; only the admin login-screen keys stay shared.
+			$company_fid = $this->getOptionsForeignId();
 			
 			foreach ($this->_post->raw() as $key => $value)
 			{
@@ -49,7 +51,7 @@ class pjBaseOptions extends pjBase
 				
 						$pjBaseOptionModel
 							->reset()
-							->where('foreign_id', $this->getForeignId())
+							->where('foreign_id', class_exists('pjCompanyContext') ? pjCompanyContext::fidForKey($k, $company_fid) : $company_fid)
 							->where('`key`', $k)
 							->limit(1)
 							->modifyAll(array('value' => $_value));
@@ -59,7 +61,7 @@ class pjBaseOptions extends pjBase
 			$i18n_arr = $this->_post->toI18n('i18n');
 			if (!empty($i18n_arr))
 			{
-				pjBaseMultiLangModel::factory()->updateMultiLang($i18n_arr, 1, 'pjBaseOption');
+				pjBaseMultiLangModel::factory()->updateMultiLang($i18n_arr, $company_fid, 'pjBaseOption');
 			}
 			
 			switch ($this->_post->toString('next_action'))
@@ -96,7 +98,7 @@ class pjBaseOptions extends pjBase
 		}
 		
 		$arr = pjBaseOptionModel::factory()
-			->where('t1.foreign_id', $this->getForeignId())
+			->where('t1.foreign_id', $this->getOptionsForeignId())
 			->where('t1.tab_id', 1)
 			->orderBy('t1.order ASC')
 			->findAll()
@@ -114,15 +116,13 @@ class pjBaseOptions extends pjBase
 			return;
 		}
 
-		$arr = pjBaseOptionModel::factory()
-			->where('t1.foreign_id', $this->getForeignId())
-			->whereIn('t1.tab_id', array(4, 5, 6, 7))
-			->orderBy('t1.tab_id ASC, t1.order ASC, t1.key ASC')
-			->findAll()
-			->getData();
-		$arr['i18n'] = pjBaseMultiLangModel::factory()->getMultiLang(1, 'pjBaseOption');
+		$company_fid = $this->getOptionsForeignId();
+		$arr = class_exists('pjCompanyContext')
+			? pjCompanyContext::optionRows(array(4, 5, 6, 7), $company_fid)
+			: pjBaseOptionModel::factory()->where('t1.foreign_id', $company_fid)->whereIn('t1.tab_id', array(4, 5, 6, 7))->orderBy('t1.tab_id ASC, t1.order ASC, t1.key ASC')->findAll()->getData();
+		$tmp = $arr;
+		$arr['i18n'] = pjBaseMultiLangModel::factory()->getMultiLang($company_fid, 'pjBaseOption');
 
-		$tmp = pjBaseOptionModel::factory()->reset()->where('foreign_id', $this->getForeignId())->whereIn('t1.tab_id', array(4, 5, 6, 7))->findAll()->getData();
 		$o_arr = array();
 		foreach ($tmp as $item)
 		{
@@ -153,7 +153,7 @@ class pjBaseOptions extends pjBase
 		}
 
 		$arr = pjBaseOptionModel::factory()
-			->where('t1.foreign_id', $this->getForeignId())
+			->where('t1.foreign_id', $this->getOptionsForeignId())
 			->where('t1.tab_id', 2)
 			->orderBy('t1.order ASC')
 			->findAll()
@@ -174,13 +174,16 @@ class pjBaseOptions extends pjBase
 
 		$pjBaseOptionModel = pjBaseOptionModel::factory();
 		
-		$arr = $pjBaseOptionModel
-			->where('t1.foreign_id', $this->getForeignId())
-			->where('t1.tab_id', 8)
-			->orderBy('t1.order ASC')
-			->findAll()
-			->getDataPair('key');
-		$arr['i18n'] = pjBaseMultiLangModel::factory()->getMultiLang(1, 'pjBaseOption');
+		$company_fid = $this->getOptionsForeignId();
+		$rows = class_exists('pjCompanyContext')
+			? pjCompanyContext::optionRows(array(8), $company_fid)
+			: $pjBaseOptionModel->where('t1.foreign_id', $company_fid)->where('t1.tab_id', 8)->orderBy('t1.order ASC')->findAll()->getData();
+		$arr = array();
+		foreach ($rows as $row)
+		{
+			$arr[$row['key']] = $row;
+		}
+		$arr['i18n'] = pjBaseMultiLangModel::factory()->getMultiLang($company_fid, 'pjBaseOption');
 		
 		$this->setLocalesData();
 		
@@ -215,7 +218,7 @@ class pjBaseOptions extends pjBase
 		}
 		
 		pjBaseOptionModel::factory()
-			->where('foreign_id', $this->getForeignId())
+			->where('foreign_id', $this->getOptionsForeignId())
 			->where('`key`', 'o_base_theme')
 			->limit(1)
 			->modifyAll(array('value' => 'theme1|theme2|theme3::' . $this->_post->toString('theme')));
@@ -232,7 +235,7 @@ class pjBaseOptions extends pjBase
 		}
 
 		$arr = pjBaseOptionModel::factory()
-			->where('t1.foreign_id', $this->getForeignId())
+			->where('t1.foreign_id', $this->getOptionsForeignId())
 			->where('t1.tab_id', 3)
 			->orderBy('t1.order ASC')
 			->findAll()
@@ -251,7 +254,7 @@ class pjBaseOptions extends pjBase
 		}
 
 		$arr = pjBaseOptionModel::factory()
-			->where('t1.foreign_id', $this->getForeignId())
+			->where('t1.foreign_id', $this->getOptionsForeignId())
 			->where('t1.tab_id', 10)
 			->orderBy('t1.order ASC')
 			->findAll()

@@ -105,6 +105,7 @@ var pjQ = pjQ || {},
 		pj_jquery_url: "<?php echo PJ_INSTALL_URL . $dm->getPath('pj_validate'); ?>",
 		index: <?php echo $index; ?>,
 		locale: <?php echo $controller->_get->check('locale') && $controller->_get->toInt('locale') > 0 ? $controller->_get->toInt('locale') : 'null'; ?>,
+		company: "<?php echo $controller->getFrontCompanyHash(); ?>",
 		year: <?php echo $controller->_get->check('year') && preg_match('/^(19|20)\d{2}$/', $controller->_get->toInt('year')) ? $controller->_get->toInt('year') : date("Y"); ?>,
 		month: <?php echo $controller->_get->check('month') && preg_match('/^(0?[1-9]|1[012])$/', $controller->_get->toInt('month')) ? $controller->_get->toInt('month') : date("n"); ?>
 	};
