@@ -1,0 +1,186 @@
+/* ==========================================================================
+   RPBC — Modern front-end (properties listing + property detail)
+   Colours come from CSS variables emitted by pjActionThemeCss
+   (Admin → Display → Theme colours). This file contains no hard-coded colours.
+   ========================================================================== */
+
+/* ---- base ---------------------------------------------------------------- */
+.rpbc *{box-sizing:border-box;margin:0;padding:0}
+.rpbc{font-family:var(--themeFontFamily,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif);background:var(--pageBackground,#f5f3ec);color:var(--textPrimary,#17211d);line-height:1.6;-webkit-font-smoothing:antialiased}
+.rpbc a{text-decoration:none;color:inherit}
+.rpbc img{display:block;max-width:100%}
+.rpbc-wrap{max-width:1180px;margin:0 auto;padding:0 clamp(16px,4vw,36px)}
+html{scroll-behavior:smooth}
+body.rpbc{height:auto !important;min-height:0 !important}
+
+/* ---- listing: header + grid --------------------------------------------- */
+.rpbc-head{padding:clamp(28px,5vw,52px) 0 22px}
+.rpbc-eyebrow{font-size:.72rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--brandColor,#1f5f4e)}
+.rpbc-head h1{font-size:clamp(2rem,4.6vw,3.2rem);margin-top:10px;letter-spacing:-.02em}
+.rpbc-head p{margin-top:12px;color:var(--textMuted,#6b7178);max-width:52ch}
+.rpbc-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;padding-bottom:70px}
+@media(max-width:940px){.rpbc-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.rpbc-grid{grid-template-columns:1fr}}
+
+/* ---- listing: card ------------------------------------------------------- */
+.rpbc-card{background:var(--surfaceBase,#fff);border:1px solid var(--borderColor,#e7e2d8);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;transition:transform .3s,box-shadow .3s,border-color .3s}
+.rpbc-card:hover{transform:translateY(-6px);box-shadow:var(--shadowMd,0 12px 30px rgba(0,0,0,.1));border-color:var(--brandColorLight,#8bbcae)}
+.rpbc-card .rpbc-ph{display:block;aspect-ratio:4/3;overflow:hidden;background:linear-gradient(135deg,var(--brandColorUltraLight,#eef3f0),var(--brandColorLight,#cfe3db))}
+.rpbc-card .rpbc-ph img{width:100%;height:100%;object-fit:cover;transition:transform .5s}
+.rpbc-card:hover .rpbc-ph img{transform:scale(1.05)}
+.rpbc-card .rpbc-body{padding:16px 18px 19px;display:flex;flex-direction:column;gap:12px;flex:1}
+.rpbc-card h3{font-size:1.24rem;letter-spacing:-.01em;font-weight:700}
+.rpbc-cloc{display:flex;align-items:center;gap:5px;font-size:.85rem;color:var(--textMuted,#6b7178);margin-top:-4px}
+.rpbc-cloc svg{width:14px;height:14px;flex:0 0 auto;color:var(--brandColor,#1f5f4e)}
+.rpbc-specs{display:flex;gap:7px;flex-wrap:wrap;margin-top:auto}
+.rpbc-spec{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:var(--brandColorUltraLight,#eef3f0);border:1px solid var(--borderColor,#e7e2d8);border-radius:999px;font-size:.86rem;font-weight:600;color:var(--textSecondary,#4d525d)}
+.rpbc-spec svg{width:16px;height:16px;color:var(--brandColor,#1f5f4e)}
+.rpbc-foot{border-top:1px solid var(--borderColor,#e7e2d8);padding-top:14px;display:flex;justify-content:flex-end}
+.rpbc-viewbtn{display:inline-flex;align-items:center;gap:7px;height:40px;padding:0 17px;border-radius:999px;background:var(--brandColor,#1f5f4e);color:#fff;font-size:.86rem;font-weight:600;transition:gap .25s,background .25s}
+.rpbc-card:hover .rpbc-viewbtn{gap:11px;background:var(--brandColorDark,#163f34)}
+.rpbc-viewbtn svg{width:15px;height:15px}
+.rpbc-empty{padding:60px 0;text-align:center;color:var(--textMuted,#6b7178)}
+
+/* ---- detail: header ------------------------------------------------------ */
+.rpbc-back{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 16px 0 12px;margin:22px 0 4px;border:1px solid var(--borderColor,#e7e2d8);border-radius:999px;background:var(--surfaceBase,#fff);font-weight:600;font-size:.88rem;color:var(--textSecondary,#4d525d)}
+.rpbc-back:hover{border-color:var(--brandColor,#1f5f4e);color:var(--brandColor,#1f5f4e)}
+.rpbc-back svg{width:16px;height:16px}
+.rpbc-dhead{padding:12px 0 16px}
+.rpbc-dhead h1{font-size:clamp(1.9rem,4.2vw,2.9rem);letter-spacing:-.02em;max-width:24ch}
+.rpbc-loc{display:inline-flex;align-items:center;gap:6px;color:var(--textMuted,#6b7178);font-size:.98rem;margin-top:8px}
+.rpbc-loc svg{width:16px;height:16px;color:var(--brandColor,#1f5f4e)}
+.rpbc-specrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.rpbc-specrow .rpbc-spec i{width:26px;height:26px;flex:0 0 auto;border-radius:7px;background:var(--brandColorUltraLight,#eef3f0);display:grid;place-items:center;padding:0}
+.rpbc-specrow .rpbc-spec i svg{width:15px;height:15px;color:var(--brandColor,#1f5f4e)}
+.rpbc-specrow .rpbc-spec{padding:9px 15px;background:var(--surfaceBase,#fff);font-size:.92rem;color:var(--textSecondary,#4d525d)}
+.rpbc-specrow .rpbc-spec b{color:var(--textPrimary,#17211d);font-weight:700}
+
+/* ---- detail: split (gallery + accordion) --------------------------------- */
+.rpbc-split{display:grid;grid-template-columns:1.1fr 1fr;gap:32px;align-items:start;margin-top:22px}
+@media(max-width:900px){.rpbc-split{grid-template-columns:1fr}}
+.rpbc-gmain{border-radius:18px;overflow:hidden;background:linear-gradient(135deg,var(--brandColorUltraLight,#eef3f0),var(--brandColorLight,#cfe3db));aspect-ratio:4/3;box-shadow:0 18px 40px -24px rgba(0,0,0,.4)}
+.rpbc-gmain img{width:100%;height:100%;object-fit:cover;transition:transform .6s cubic-bezier(.2,.7,.2,1)}
+.rpbc-gmain:hover img{transform:scale(1.04)}
+.rpbc-thumbs{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+.rpbc-thumb{width:92px;height:70px;border:1px solid var(--borderColor,#e7e2d8);border-radius:12px;overflow:hidden;background:none;cursor:pointer;padding:0}
+.rpbc-thumb img{width:100%;height:100%;object-fit:cover}
+.rpbc-thumb:hover{border-color:var(--brandColor,#1f5f4e)}
+
+/* ---- detail: accordion --------------------------------------------------- */
+.rpbc-acc{border:1px solid var(--borderColor,#e7e2d8);border-radius:14px;background:var(--surfaceBase,#fff);margin-bottom:12px;overflow:hidden}
+.rpbc-acc summary{list-style:none;cursor:pointer;padding:16px 18px;font-weight:600;font-size:1.05rem;display:flex;align-items:center;justify-content:space-between;gap:10px;color:var(--textPrimary,#17211d)}
+.rpbc-acc summary::-webkit-details-marker{display:none}
+.rpbc-acc summary .chev{display:inline-flex;transition:transform .25s}
+.rpbc-acc summary .chev svg{width:18px;height:18px;color:var(--textMuted,#6b7178)}
+.rpbc-acc[open] summary .chev{transform:rotate(180deg)}
+.rpbc-acc[open] summary{border-bottom:1px solid var(--borderColor,#e7e2d8)}
+.rpbc-acc-b{padding:16px 18px}
+.rpbc-acc-b p{color:var(--textSecondary,#4d525d);white-space:pre-line}
+.rpbc-acc-empty{color:var(--textMuted,#6b7178)}
+.rpbc-acc[open] .rpbc-featgrid{max-height:360px;overflow-y:auto}
+
+/* read-more clamp */
+.rpbc-more-toggle{position:absolute;opacity:0;width:0;height:0;pointer-events:none}
+.rpbc-clamp{max-height:230px;overflow:hidden;position:relative;transition:max-height .35s ease}
+.rpbc-clamp::after{content:"";position:absolute;left:0;right:0;bottom:0;height:66px;background:linear-gradient(transparent,var(--surfaceBase,#fff));pointer-events:none;transition:opacity .3s}
+.rpbc-more-toggle:checked + .rpbc-clamp{max-height:3000px}
+.rpbc-more-toggle:checked + .rpbc-clamp::after{opacity:0}
+.rpbc-more-btn{display:inline-block;margin-top:12px;color:var(--brandColor,#1f5f4e);font-weight:600;cursor:pointer;font-size:.92rem;user-select:none}
+.rpbc-more-btn::after{content:attr(data-more) " \25BE"}
+.rpbc-more-toggle:checked ~ .rpbc-more-btn::after{content:attr(data-less) " \25B4"}
+.rpbc-404{font:16px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:40px}
+
+/* features */
+.rpbc-featgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:420px){.rpbc-featgrid{grid-template-columns:1fr}}
+.rpbc-feat{display:flex;align-items:center;gap:10px;padding:11px 13px;border:1px solid var(--borderColor,#e7e2d8);border-radius:11px;background:var(--surfaceBase,#fff);font-size:.9rem;font-weight:500;color:var(--textSecondary,#4d525d);transition:border-color .2s,transform .2s}
+.rpbc-feat:hover{border-color:var(--brandColorLight,#8bbcae);transform:translateY(-2px)}
+.rpbc-feat i{width:22px;height:22px;flex:0 0 auto;border-radius:6px;background:var(--brandColorUltraLight,#eef3f0);display:grid;place-items:center}
+.rpbc-feat i svg{width:13px;height:13px;color:var(--brandColor,#1f5f4e)}
+
+/* ---- detail: CTA --------------------------------------------------------- */
+.rpbc-cta{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;margin-top:18px;height:56px;border-radius:14px;background:var(--brandColor,#1f5f4e);color:#fff;font-weight:700;font-size:1.06rem;letter-spacing:.01em;transition:background .25s,transform .2s;box-shadow:0 14px 30px -14px var(--brandColor,#1f5f4e)}
+.rpbc-cta:hover{background:var(--brandColorDark,#163f34);transform:translateY(-2px)}
+.rpbc-cta svg{width:18px;height:18px}
+
+/* ---- detail: booking band ------------------------------------------------ */
+.rpbc-booksec{background:var(--brandColorUltraLight,#eef3f0);border-top:1px solid var(--borderColor,#e7e2d8);border-bottom:1px solid var(--borderColor,#e7e2d8);padding:clamp(40px,6vw,72px) 0;margin-top:52px}
+.rpbc-booksec-in{max-width:1180px;margin:0 auto;padding:0 clamp(16px,4vw,36px)}
+.rpbc-booksec-h{font-size:clamp(1.5rem,3vw,2.1rem);text-align:center;letter-spacing:-.02em;font-weight:700}
+.rpbc-booksec-sub{text-align:center;color:var(--textMuted,#6b7178);margin:8px 0 26px}
+.rpbc-bookcard{max-width:720px;margin:0 auto;background:var(--surfaceBase,#fff);border:1px solid var(--borderColor,#e7e2d8);border-radius:20px;box-shadow:0 24px 60px -34px rgba(0,0,0,.45);padding:22px 20px}
+#pjBookMount{min-height:520px}
+
+/* ---- detail: sections + map ---------------------------------------------- */
+.rpbc-sec{margin-top:40px}
+.rpbc-sec h2{font-size:1.4rem;margin-bottom:16px;letter-spacing:-.01em;position:relative;padding-bottom:11px}
+.rpbc-sec h2::after{content:"";position:absolute;left:0;bottom:0;width:42px;height:3px;border-radius:3px;background:var(--brandColor,#1f5f4e)}
+.rpbc-loccard{display:flex;align-items:stretch;border:1px solid var(--borderColor,#e7e2d8);border-radius:18px;overflow:hidden;background:var(--surfaceElevated,#fff);text-decoration:none;min-height:172px;transition:box-shadow .25s,transform .2s,border-color .25s}
+.rpbc-loccard:hover{transform:translateY(-2px);border-color:var(--brandColor,#1f5f4e);box-shadow:var(--shadowLg,0 12px 30px -12px rgba(0,0,0,.18))}
+.rpbc-locmap{position:relative;flex:0 0 44%;overflow:hidden;background:
+  repeating-linear-gradient(0deg, transparent 0 27px, var(--borderColor,#e7e2d8) 27px 28px),
+  repeating-linear-gradient(90deg, transparent 0 27px, var(--borderColor,#e7e2d8) 27px 28px),
+  var(--brandColorUltraLight,#eef3f0);
+  display:flex;align-items:center;justify-content:center}
+.rpbc-locmap::before{content:"";position:absolute;inset:0;background:
+  linear-gradient(118deg, transparent 44%, var(--brandColorLight,#cfe3db) 44% 51%, transparent 51%);opacity:.55}
+.rpbc-locpin{position:relative;z-index:1;width:56px;height:56px;border-radius:50%;background:var(--brandColor,#1f5f4e);display:flex;align-items:center;justify-content:center;color:var(--brandContrast,#fff);box-shadow:0 12px 26px -8px var(--brandColor,#1f5f4e)}
+.rpbc-locpin svg{width:27px;height:27px}
+.rpbc-locpin::after{content:"";position:absolute;width:100%;height:100%;border-radius:50%;background:var(--brandColor,#1f5f4e);opacity:.35;animation:rpbcLocPulse 2.6s ease-out infinite}
+@keyframes rpbcLocPulse{0%{transform:scale(1);opacity:.35}70%{transform:scale(2.1);opacity:0}100%{opacity:0}}
+.rpbc-locbody{flex:1;display:flex;flex-direction:column;justify-content:center;gap:8px;padding:26px 30px}
+.rpbc-loceyebrow{font-size:.72rem;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--brandColor,#1f5f4e)}
+.rpbc-locaddr{font-size:1.28rem;font-weight:700;color:var(--textPrimary,#1a1c1e);line-height:1.22}
+.rpbc-locbtn{margin-top:8px;display:inline-flex;align-items:center;gap:6px;align-self:flex-start;height:40px;padding:0 18px;border-radius:999px;background:var(--brandColor,#1f5f4e);color:var(--brandContrast,#fff);font-weight:600;font-size:.9rem}
+.rpbc-loccard:hover .rpbc-locbtn{background:var(--brandColorDark,#163f34)}
+@media(max-width:620px){.rpbc-loccard{flex-direction:column}.rpbc-locmap{flex:0 0 140px}}
+.rpbc-foot-space{height:70px}
+
+/* ==========================================================================
+   Booking widget theming (native pjActionLoad embed), scoped to #pjBookMount
+   ========================================================================== */
+#pjBookMount .abWrapper,#pjBookMount .abWrapper13,#pjBookMount .abLayout{height:auto !important;min-height:0 !important;width:100% !important}
+#pjBookMount .abCalendarTable{max-width:540px !important;margin:0 auto !important;float:none !important}
+#pjBookMount .abCalendarLegend{max-width:540px !important;margin:12px auto 0 !important;float:none !important}
+#pjBookMount .abCalendarNote{display:none !important}
+#pjBookMount .abMenu{display:none !important}
+#pjBookMount .abError:empty:not(input):not(select):not(textarea){display:none !important}
+#pjBookMount .abPaymentForm > .abBox.abGray:first-child{padding:0 !important;margin:0 !important}
+#pjBookMount .abButtonDefault,#pjBookMount .abWrapper .abButtonDefault,#pjBookMount input[type=submit]{background:var(--brandColor,#1f5f4e) !important;background-image:none !important;border:1px solid var(--brandColor,#1f5f4e) !important;color:#fff !important;text-shadow:none !important;opacity:1 !important}
+#pjBookMount .abButtonDefault:hover,#pjBookMount .abWrapper .abButtonDefault:hover,#pjBookMount input[type=submit]:hover{background:var(--brandColorDark,#163f34) !important;border-color:var(--brandColorDark,#163f34) !important}
+#pjBookMount .abCalendarSelect,#pjBookMount .abCalendarMark{background:var(--brandColor,#1f5f4e) !important;color:var(--brandContrast,#fff) !important}
+#pjBookMount .abPromoText,#pjBookMount .abForm a,#pjBookMount .abParagraph a,#pjBookMount a.abControl{color:var(--brandColor,#1f5f4e) !important}
+#pjBookMount .abForm .abParagraph{padding:11px 0 !important}
+#pjBookMount .abForm .abTitle{font-weight:600 !important;color:var(--textPrimary,#17211d) !important}
+#pjBookMount .abForm .abText,#pjBookMount .abForm .abTextarea,#pjBookMount .abForm .abSelect,#pjBookMount .abForm input[type=text],#pjBookMount .abForm input[type=email],#pjBookMount .abForm input[type=tel],#pjBookMount .abForm input[type=number],#pjBookMount .abForm input[type=password],#pjBookMount .abForm select,#pjBookMount .abForm textarea{box-sizing:border-box !important;border:1px solid var(--borderColor,#e7e2d8) !important;border-radius:10px !important;padding:10px 13px !important;min-height:44px !important;height:auto !important;background:var(--surfaceBase,#fff) !important;color:var(--textPrimary,#17211d) !important;font-size:14px !important;line-height:1.4 !important;box-shadow:none !important}
+#pjBookMount .abForm textarea,#pjBookMount .abForm .abTextarea{min-height:92px !important}
+#pjBookMount .abForm .abStretch,#pjBookMount .abForm .abTextarea,#pjBookMount .abForm .abSelect:not(.abW80),#pjBookMount .abForm select:not(.abW80){width:100% !important;max-width:100% !important}
+#pjBookMount .abForm select,#pjBookMount .abForm .abSelect{-webkit-appearance:none !important;-moz-appearance:none !important;appearance:none !important;background-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%2716%27%20height%3D%2716%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%236b7178%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M6%209l6%206%206-6%27%2F%3E%3C%2Fsvg%3E") !important;background-repeat:no-repeat !important;background-position:right 13px center !important;background-size:15px !important;padding-right:38px !important;cursor:pointer !important}
+#pjBookMount .abForm .abSelect.abW80,#pjBookMount .abForm select.abW80{width:80px !important;min-width:80px !important}
+#pjBookMount .abForm .abText:focus,#pjBookMount .abForm .abSelect:focus,#pjBookMount .abForm input:focus,#pjBookMount .abForm select:focus,#pjBookMount .abForm textarea:focus{border-color:var(--brandColor,#1f5f4e) !important;box-shadow:0 0 0 3px var(--brandColorUltraLight,#eef3f0) !important;outline:none !important}
+#pjBookMount .abPrice,#pjBookMount .abBold{color:var(--priceColor,#1f5f4e) !important}
+
+/* ---- theme the booking calendar month header (was teal) to the brand colour ---- */
+#pjBookMount td.abCalendarMonth,
+#pjBookMount .abCalendarMonth,
+#pjBookMount .abCalendarMonthInner{
+	background-color:var(--brandColor,#1f5f4e) !important;
+	border-color:var(--brandColorDark,#163f34) !important;
+	color:#fff !important;
+}
+#pjBookMount td.abCalendarMonth a,
+#pjBookMount td.abCalendarMonth a:link,
+#pjBookMount td.abCalendarMonth a:visited,
+#pjBookMount td.abCalendarMonth a:hover,
+#pjBookMount .abCalendarMonth a{color:#fff !important}
+#pjBookMount .abCalendarLinkMonthPrev,
+#pjBookMount .abCalendarLinkMonthNext{background-color:var(--brandColorDark,#163f34) !important;color:#fff !important}
+#pjBookMount .abCalendarLinkMonthPrev a,
+#pjBookMount .abCalendarLinkMonthNext a{color:#fff !important}
+
+/* ---- force white text on brand buttons (override any card-link colour) ---- */
+.rpbc-viewbtn,.rpbc-viewbtn:link,.rpbc-viewbtn:visited,.rpbc-viewbtn:hover,.rpbc-cta,.rpbc-cta:link,.rpbc-cta:visited,.rpbc-cta:hover{color:#fff !important}
+.rpbc-viewbtn svg,.rpbc-cta svg{color:#fff !important;stroke:#fff !important}
+
+/* breathing room at top of listing (header text removed) */
+.rpbc-grid{padding-top:clamp(40px,6vw,72px)}

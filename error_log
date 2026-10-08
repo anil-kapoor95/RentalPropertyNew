@@ -1,0 +1,16 @@
+[24-Jul-2026 07:25:01 Europe/London] PHP Fatal error:  Uncaught mysqli_sql_exception: Unknown column 't1.address_country' in 'field list' in /home2/allal4y6/public_html/phpjabbers/scripts/RentalPropertyBookingCalendarDev/core/framework/pjMysqliDriver.class.php:1
+Stack trace:
+#0 /home2/allal4y6/public_html/phpjabbers/scripts/RentalPropertyBookingCalendarDev/core/framework/pjMysqliDriver.class.php(1): mysqli_query(Object(mysqli), 'SELECT t1.id, t...')
+#1 /home2/allal4y6/public_html/phpjabbers/scripts/RentalPropertyBookingCalendarDev/core/framework/pjModel.class.php(1): pjMysqliDriver->query('SELECT t1.id, t...')
+#2 /home2/allal4y6/public_html/phpjabbers/scripts/RentalPropertyBookingCalendarDev/app/controllers/pjAdmin.controller.php(241): pjModel->findAll()
+#3 /home2/allal4y6/public_html/phpjabbers/scripts/RentalPropertyBookingCalendarDev/core/framework/pjDispatcher.class.php(104): pjAdmin->pjActionIndex()
+#4 /home2/allal4y6/public_html/phpjabbers/scripts/RentalPropertyBookingCalendarDev/core/framework/pjObserver.class.php(56): pjDispatcher->dispatch(Array, Array)
+#5 /home2/allal4y6/public_html/phpjabbers/scripts/RentalPropertyBookingCalendarDev/index.php(51): pjObserver->init()
+#6 {main}
+  thrown in /home2/allal4y6/public_html/phpjabbers/scripts/RentalPropertyBookingCalendarDev/core/framework/pjMysqliDriver.class.php on line 1
+[24-Jul-2026 01:25:11 America/Chicago] PHP Warning:  compact(): Undefined variable $column in /home2/allal4y6/public_html/phpjabbers/scripts/RentalPropertyBookingCalendarDev/plugins/pjInstaller/controllers/pjInstaller.controller.php on line 1535
+[24-Jul-2026 01:25:11 America/Chicago] PHP Warning:  compact(): Undefined variable $direction in /home2/allal4y6/public_html/phpjabbers/scripts/RentalPropertyBookingCalendarDev/plugins/pjInstaller/controllers/pjInstaller.controller.php on line 1535
+[24-Jul-2026 01:25:11 America/Chicago] PHP Warning:  Cannot modify header information - headers already sent by (output started at /home2/allal4y6/public_html/phpjabbers/scripts/RentalPropertyBookingCalendarDev/plugins/pjInstaller/controllers/pjInstaller.controller.php:1535) in /home2/allal4y6/public_html/phpjabbers/scripts/RentalPropertyBookingCalendarDev/app/controllers/pjAppController.controller.php on line 362
+[24-Jul-2026 01:25:22 America/Chicago] PHP Warning:  compact(): Undefined variable $column in /home2/allal4y6/public_html/phpjabbers/scripts/RentalPropertyBookingCalendarDev/plugins/pjInstaller/controllers/pjInstaller.controller.php on line 1535
+[24-Jul-2026 01:25:22 America/Chicago] PHP Warning:  compact(): Undefined variable $direction in /home2/allal4y6/public_html/phpjabbers/scripts/RentalPropertyBookingCalendarDev/plugins/pjInstaller/controllers/pjInstaller.controller.php on line 1535
+[24-Jul-2026 01:25:22 America/Chicago] PHP Warning:  Cannot modify header information - headers already sent by (output started at /home2/allal4y6/public_html/phpjabbers/scripts/RentalPropertyBookingCalendarDev/plugins/pjInstaller/controllers/pjInstaller.controller.php:1535) in /home2/allal4y6/public_html/phpjabbers/scripts/RentalPropertyBookingCalendarDev/app/controllers/pjAppController.controller.php on line 362

@@ -1,0 +1,38 @@
+/* Booking calendar follows the theme palette. --brandColor comes from
+   pjActionThemeCss (saved) or the live-preview injection (on palette click).
+   Selectors include the widget's own #pjWrapperRPBC_* container so this wins. */
+td.abCalendarMonth,
+[id^="pjWrapperRPBC"] td.abCalendarMonth,
+[id^="pjWrapperRPBC"] .abCalendarMonth{
+	background-color: var(--brandColor, #248faf) !important;
+}
+td.abCalendarMonth, td.abCalendarMonth a,
+[id^="pjWrapperRPBC"] td.abCalendarMonth,
+[id^="pjWrapperRPBC"] td.abCalendarMonth a{
+	color: #ffffff !important;
+}
+[id^="pjWrapperRPBC"] .abCalendarLinkMonthPrev,
+[id^="pjWrapperRPBC"] .abCalendarLinkMonthNext,
+.abCalendarLinkMonthPrev, .abCalendarLinkMonthNext{
+	background-color: var(--brandColorDark, #1c6f88) !important;
+}
+[id^="pjWrapperRPBC"] .abCalendarLinkMonthPrev a,
+[id^="pjWrapperRPBC"] .abCalendarLinkMonthNext a{ color:#fff !important; }
+
+/* AVAILABILITY calendar header (shown in the preview) — follows the palette */
+.abAvailability .abMenu,
+.abAvailability .abCal-head-row span,
+[id^="pjWrapper"] .abAvailability .abMenu,
+[id^="pjWrapper"] .abAvailability .abCal-head-row span{
+	background-color: var(--brandColor, #248faf) !important;
+	color: #ffffff !important;
+}
+
+/* date-range selection follows the palette (same classes the detail page uses) */
+.abCalendarSelect,.abCalendarFirstSelect,.abCalendarMark,
+[id^="pjWrapper"] .abCalendarSelect,
+[id^="pjWrapper"] .abCalendarFirstSelect,
+[id^="pjWrapper"] .abCalendarMark{
+	background:var(--brandColor,#248faf)!important;
+	color:#ffffff!important;
+}

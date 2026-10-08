@@ -1,0 +1,233 @@
+/* =========================================================================
+   RPBC admin — modern white theme (Shopping Cart v6 pattern)
+   Layered last over the INSPINIA base theme; overrides only the shell.
+   ========================================================================= */
+:root{
+	--pjOrange:#F97618; --pjOrangeDark:#e0640c; --pjOrangeSoft:#fff3ea;
+	--pjCanvas:#f5f6f8; --pjCard:#ffffff; --pjBorder:#e9ecf1;
+	--pjText:#1f2430; --pjMuted:#6b7280; --pjGreen:#16a34a;
+	--pjRadius:14px; --pjShadow:0 1px 3px rgba(16,24,40,.05),0 1px 2px rgba(16,24,40,.04);
+}
+
+/* ---- canvas ---- */
+body.pace-done,body{background:var(--pjCanvas)}
+#page-wrapper.gray-bg,#page-wrapper{background:var(--pjCanvas)!important}
+body,.font-bold,h1,h2,h3,h4,h5{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+
+/* ---- sidebar ---- */
+.navbar-default.navbar-static-side,.navbar-static-side{background:var(--pjCard)!important;border-right:1px solid var(--pjBorder)}
+.nav-header{background:var(--pjCard)!important;border-bottom:1px solid var(--pjBorder);padding:20px 22px 18px!important}
+.nav-header a,.nav-header *,.nav-header .text-muted{color:var(--pjText)!important}
+#side-menu{background:var(--pjCard)!important;padding-top:8px}
+#side-menu>li>a{color:var(--pjMuted)!important;font-weight:500;border-left:3px solid transparent;padding:12px 22px;transition:background .15s,color .15s,border-color .15s}
+#side-menu>li>a i{color:var(--pjMuted)!important;transition:color .15s}
+#side-menu>li>a:hover{background-color:#f5f6f8!important;color:var(--pjText)!important}
+#side-menu>li>a:hover i{color:var(--pjText)!important}
+#side-menu>li.active,#side-menu>li.active>a{background:var(--pjOrangeSoft)!important;color:var(--pjOrangeDark)!important;border-left-color:var(--pjOrange)!important}
+#side-menu>li.active>a i,#side-menu>li.active>a .nav-label{color:var(--pjOrangeDark)!important}
+#side-menu .nav-second-level{background:#fafbfc!important}
+#side-menu .nav-second-level li a{color:var(--pjMuted)!important;padding:10px 22px 10px 52px!important}
+#side-menu .nav-second-level li.active a{color:var(--pjOrangeDark)!important;font-weight:600;background:transparent!important}
+.profile-element,.logo-element{color:var(--pjText)!important}
+
+/* ---- top bar ---- */
+.navbar-static-top,.navbar.navbar-static-top{background:var(--pjCard)!important;border-bottom:1px solid var(--pjBorder);box-shadow:none}
+.navbar-top-links>li>a,.nav.navbar-top>li>a,.navbar-static-top a{color:var(--pjText)!important}
+.navbar-static-top a:hover{color:var(--pjOrange)!important}
+.navbar-top-links .count-info .label{background:var(--pjOrange)!important}
+.hamburger,.navbar-minimalize{color:var(--pjText)!important}
+
+/* ---- cards / boxes ---- */
+.ibox,.widget{background:var(--pjCard);border:1px solid var(--pjBorder);border-radius:var(--pjRadius);box-shadow:var(--pjShadow);margin-bottom:24px;overflow:hidden}
+.ibox-title{background:var(--pjCard)!important;border:0!important;border-bottom:1px solid var(--pjBorder)!important;border-radius:var(--pjRadius) var(--pjRadius) 0 0;padding:16px 22px;min-height:0}
+.ibox-title h5{font-weight:700;color:var(--pjText);font-size:15px}
+.ibox-content{background:var(--pjCard)!important;border:0!important;padding:22px}
+
+/* ---- KPI stat cards (dashboard) ---- */
+.ibox .stat,.stat{display:flex;flex-direction:column;gap:6px}
+.stat .stat-percent,.stat-percent{align-self:flex-start;display:inline-flex;align-items:center;gap:4px;background:#e9f9ef;color:var(--pjGreen);font-weight:700;font-size:12px;padding:3px 9px;border-radius:999px}
+.huge,.stat h1,.stat .h1{font-size:30px;font-weight:800;color:var(--pjText);margin:2px 0}
+label.stat-label,.stat small,.stat .text-muted{color:var(--pjMuted)!important;font-weight:500}
+
+/* stat icon badges — rounded squares */
+.stat-icon,.widget .icon-box{width:52px;height:52px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;margin-bottom:14px}
+.stat-icon.slate{background:#5b6472}.stat-icon.blue{background:#3b82f6}.stat-icon.green{background:#16a34a}.stat-icon.orange{background:var(--pjOrange)}
+
+/* ---- buttons: primary = brand orange ---- */
+.btn{border-radius:8px;font-weight:600}
+.btn-primary,.btn-info{background:var(--pjOrange)!important;border-color:var(--pjOrange)!important;color:#fff!important}
+.btn-primary:hover,.btn-info:hover{background:var(--pjOrangeDark)!important;border-color:var(--pjOrangeDark)!important}
+.btn-white,.btn-default{background:var(--pjCard)!important;border:1px solid var(--pjBorder)!important;color:var(--pjText)!important}
+.btn-white:hover,.btn-default:hover{border-color:var(--pjOrange)!important;color:var(--pjOrange)!important}
+
+/* ---- filter pills (date range) ---- */
+.btn-group .btn.active,.btn-outline.active{background:var(--pjOrange)!important;border-color:var(--pjOrange)!important;color:#fff!important}
+
+/* ---- misc INSPINIA accent recolours ---- */
+.text-navy,.nav.navbar-top .fa{color:var(--pjOrange)!important}
+.navy-bg{background:var(--pjOrange)!important}
+a{color:var(--pjOrangeDark)}
+.table thead th{color:var(--pjMuted);border-bottom:1px solid var(--pjBorder)!important;font-weight:600}
+.pagination>.active>a,.pagination>.active>span{background:var(--pjOrange)!important;border-color:var(--pjOrange)!important}
+
+/* ---- match leftover INSPINIA primary (#1ab394 green) to the brand orange ---- */
+/* dashboard pills / primary labels + badges */
+.label-primary,.badge-primary,.label.label-primary,span.label-primary{background:var(--pjOrange)!important;border-color:var(--pjOrange)!important;color:#fff!important}
+/* active sub-menu item (e.g. Reservations List) — was green, now orange like the parent */
+#side-menu .nav-second-level li.active,#side-menu .nav-second-level li.active>a{background:var(--pjOrangeSoft)!important;color:var(--pjOrangeDark)!important;border-left-color:var(--pjOrange)!important}
+/* primary text / navy helpers */
+.text-primary,.text-navy{color:var(--pjOrange)!important}
+/* dashboard KPI number links shouldn't be green/navy */
+.ibox-content .h1 a,.ibox-content h1 a,.ibox-content .no-margins a{color:var(--pjText)!important}
+.ibox-content .h1 a:hover,.ibox-content h1 a:hover{color:var(--pjOrange)!important}
+/* tabs, progress, misc primaries */
+.nav.nav-tabs:not(.nav-stacked)>li.active>a{color:var(--pjOrange)!important}
+.pace .pace-progress{background:var(--pjOrange)!important}
+.pagination>.active>a,.pagination>.active>span{background:var(--pjOrange)!important;border-color:var(--pjOrange)!important}
+/* keep semantic status colours consistent */
+.label-success,.badge-success,.bg-success{background:var(--pjGreen)!important;border-color:var(--pjGreen)!important;color:#fff!important}
+
+/* ---- BULLETPROOF: kill any green on second-level menu items (active OR hover) ---- */
+#side-menu .nav-second-level li.active,
+#side-menu .nav-second-level li.active > a,
+#side-menu .nav-second-level li.active a,
+#side-menu .nav-second-level > li.active > a,
+#side-menu ul.nav-second-level li.active > a,
+#side-menu .nav-second-level li:hover,
+#side-menu .nav-second-level li > a:hover,
+#side-menu .nav-second-level li a:hover,
+#side-menu .nav-second-level a:hover,
+#side-menu .nav-second-level a:focus{
+	background: var(--pjOrangeSoft) !important;
+	background-color: var(--pjOrangeSoft) !important;
+	color: var(--pjOrangeDark) !important;
+	border-left-color: var(--pjOrange) !important;
+}
+
+
+/* ---- Request customization button (bottom of sidebar) ---- */
+.pj-request-quote{display:flex;align-items:center;gap:10px;margin:16px 14px;padding:14px 16px;border-radius:12px;background:var(--pjOrangeSoft);color:var(--pjOrangeDark)!important;font-weight:600;font-size:.92rem;line-height:1.3;transition:background .2s,box-shadow .2s}
+.pj-request-quote:hover{background:#ffe6d3;color:var(--pjOrangeDark)!important;box-shadow:0 6px 16px -8px rgba(224,100,12,.5)}
+.pj-request-quote i{font-size:1.15rem;flex:0 0 auto}
+/* ---- logo block (match Shopping Cart: tidy, left-aligned brand) ---- */
+#side-menu .nav-header{padding:20px 18px 16px!important;background:transparent!important}
+#side-menu .nav-header .profile-element strong{display:block;font-size:1rem;font-weight:700;color:var(--pjText);line-height:1.25}
+#side-menu .nav-header .text-muted{color:var(--pjMuted)!important}
+
+
+/* ---- logo: left-aligned brand (closer to Shopping Cart) ---- */
+#side-menu .nav-header{text-align:left!important;padding:18px 18px 16px!important}
+#side-menu .nav-header .profile-element{text-align:left!important;margin:0!important}
+#side-menu .nav-header .profile-element strong{font-size:1.02rem;font-weight:800}
+#side-menu .nav-header img,#side-menu .nav-header .logo-element img{max-height:40px;width:auto;margin:0 0 6px!important}
+
+/* ---- cleaner KPI / stat cards (fix border issues, match Shopping Cart) ---- */
+.ibox{border:1px solid var(--pjBorder)!important;border-radius:14px!important;box-shadow:0 1px 2px rgba(16,24,40,.04)!important}
+.ibox .ibox-title{border-bottom:0!important;padding:18px 22px 4px!important;min-height:0!important}
+.ibox .ibox-content,.ibox .ibox-content-stats{border:0!important}
+.ibox-content-stats{padding:4px 22px 22px!important}
+.ibox .ibox-title .label-primary{background:var(--pjOrange)!important;border:0!important;color:#fff!important;font-weight:600;border-radius:999px;padding:4px 10px}
+/* number + currency spacing */
+.ibox-content-stats .h1{font-size:2.1rem!important;font-weight:800!important;color:var(--pjText)!important}
+
+
+/* ---- LOGIN page: recolour green -> brand orange (match Shopping Cart) ---- */
+.login-img-background:after{background:linear-gradient(to left bottom, rgba(249,118,24,.95) 0%, rgba(249,118,24,.95) 50%, #ffffff 50.1%, #ffffff 50%)!important}
+.middle-box .btn-primary,.login-box .btn-primary,.login-box-footer .btn-primary,form .btn-primary{background:var(--pjOrange)!important;border-color:var(--pjOrange)!important;color:#fff!important}
+.middle-box .btn-primary:hover,.login-box .btn-primary:hover{background:var(--pjOrangeDark)!important;border-color:var(--pjOrangeDark)!important}
+.login-box a,.login-box-footer a{color:var(--pjOrange)!important}
+/* input-group icons (were pink/green) */
+.login-box .input-group-addon,.login-box .input-group-prepend .input-group-text{background:var(--pjOrangeSoft)!important;color:var(--pjOrangeDark)!important;border-color:var(--pjBorder)!important}
+.login-box .form-control:focus{border-color:var(--pjOrange)!important;box-shadow:0 0 0 3px rgba(249,118,24,.15)!important}
+
+
+/* ---- logo: small icon LEFT, brand text RIGHT (Shopping Cart style) ---- */
+.navbar-default .nav > .nav-header{display:flex!important;align-items:center;gap:12px;text-align:left!important;padding:18px 16px 16px!important}
+.navbar-default .nav > li > .navbar-brand,.navbar-default .nav-header .navbar-brand{width:46px!important;height:42px!important;margin:0!important;background-size:contain!important;background-position:left center!important;flex:0 0 auto}
+.nav-header .profile-element{flex:1 1 auto;min-width:0;margin:0!important;text-align:left!important}
+.nav-header .profile-element strong{font-size:.98rem;font-weight:800;line-height:1.2}
+.nav-header .profile-element .text-muted{font-size:11px}
+/* ---- request customization: larger, clearer text ---- */
+.pj-request-quote{font-size:.98rem!important;padding:15px 16px!important}
+.pj-request-quote span{font-weight:700}
+
+/* version badge next to the brand name (like Shopping Cart v6.1) */
+.nav-header .profile-element .pj-ver{font-size:.72em;font-weight:600;color:var(--pjMuted);margin-left:2px;white-space:nowrap}
+
+/* ---- kill the dark green/black focus & expanded state on top-level menu items ---- */
+body .navbar-default #side-menu > li > a:hover,
+body .navbar-default #side-menu > li > a:focus,
+body .navbar-default #side-menu > li.active > a,
+body .navbar-default #side-menu > li.active > a:hover,
+body .navbar-default #side-menu > li.active > a:focus,
+body .navbar-default #side-menu.metismenu > li.active > a,
+body .navbar-default #side-menu > li > a:active{
+	background-color: var(--pjOrangeSoft) !important;
+	color: var(--pjOrangeDark) !important;
+	border-left-color: var(--pjOrange) !important;
+	outline: none !important;
+}
+/* non-active items keep normal look until hovered */
+body .navbar-default #side-menu > li > a{background-color: transparent !important; color: var(--pjText) !important}
+body .navbar-default #side-menu > li.active > a,
+body .navbar-default #side-menu > li > a:hover,
+body .navbar-default #side-menu > li > a:focus{color: var(--pjOrangeDark) !important}
+
+/* ---- logo: keep text colours on hover; never touch the logo image background ---- */
+#side-menu li.nav-header .profile-element strong,
+#side-menu li.nav-header:hover .profile-element strong{color:var(--pjText)!important}
+#side-menu li.nav-header .profile-element .text-muted,
+#side-menu li.nav-header:hover .profile-element .text-muted,
+#side-menu li.nav-header .pj-ver,
+#side-menu li.nav-header:hover .pj-ver{color:var(--pjMuted)!important}
+
+/* ---- keep the logo image on hover (never let menu-hover backgrounds cover it) ---- */
+#side-menu li.nav-header .navbar-brand,
+#side-menu li.nav-header .navbar-brand:hover,
+#side-menu li.nav-header:hover .navbar-brand{
+	background-image:url(../../../plugins/pjBase/web/img/logo.png)!important;
+	background-repeat:no-repeat!important;
+	background-position:left center!important;
+	background-size:contain!important;
+	background-color:transparent!important;
+}
+
+/* ---- no left accent bar on the logo (hover or active) ---- */
+#side-menu li.nav-header,
+#side-menu li.nav-header:hover,
+#side-menu li.nav-header > a,
+#side-menu li.nav-header:hover > a,
+#side-menu li.nav-header .navbar-brand,
+#side-menu li.nav-header:hover .navbar-brand{border-left:0!important;box-shadow:none!important}
+
+
+/* ---- Remove demo data menu button (top of sidebar) ---- */
+#side-menu > li.pj-demo-remove{margin:0 0 6px!important}
+#side-menu > li.pj-demo-remove > a{background:var(--pjOrangeSoft)!important;color:var(--pjOrangeDark)!important;font-weight:600;border-left:3px solid var(--pjOrange)!important}
+#side-menu > li.pj-demo-remove > a:hover{background:#ffe6d3!important;color:var(--pjOrangeDark)!important}
+#side-menu > li.pj-demo-remove > a i{color:var(--pjOrangeDark)!important}
+
+/* ---- property-editor vertical tabs: single clean active border (fix double border) ---- */
+/* tabs-left > .nav-tabs > li.active > a (vertical clean) */
+.tabs-container .tabs-left > .nav-tabs > li > a,
+.tabs-container .tabs-left > .nav-tabs > li > a:hover,
+.tabs-container .tabs-left > .nav-tabs > li > a:focus{
+	border:1px solid transparent !important;
+	border-left:3px solid transparent !important;
+	outline:none !important;
+	color:var(--pjText) !important;
+	background:transparent !important;
+}
+.tabs-container .tabs-left > .nav-tabs > li > a:hover{
+	background:#f5f6f8 !important;
+	color:var(--pjText) !important;
+}
+.tabs-container .tabs-left > .nav-tabs > li.active > a,
+.tabs-container .tabs-left > .nav-tabs > li.active > a:hover,
+.tabs-container .tabs-left > .nav-tabs > li.active > a:focus{
+	background:var(--pjOrangeSoft) !important;
+	color:var(--pjOrangeDark) !important;
+	border:1px solid var(--pjBorder) !important;
+	border-left:3px solid var(--pjOrange) !important;
+	border-right-color:transparent !important;
+}

@@ -1,0 +1,68 @@
+/* RPBC admin UI — Theme colours picker + Install-code page */
+
+/* from pjActionColors.php */
+.pjtc-layout{display:flex;gap:20px;align-items:flex-start;padding:18px 15px 40px}
+.pjtc-controls{width:440px;flex:0 0 440px;min-width:0}
+.pjtc-previewcol{flex:1;min-width:0;position:sticky;top:14px}
+@media(max-width:1100px){.pjtc-layout{flex-direction:column}.pjtc-controls{width:100%;flex:1 1 auto}.pjtc-previewcol{position:static;width:100%}}
+.pjtc-card{background:#fff;border:1px solid #e7eaec;border-radius:10px;padding:22px;margin-bottom:20px}
+.pjtc-card h3{font-size:14px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5b6770;margin:0 0 14px;display:flex;align-items:center;gap:8px}
+.pjtc-surprise{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px}
+.pjtc-surprise .lbl{font-size:14px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5b6770;display:flex;align-items:center;gap:8px}
+.pjtc-surprise .opts{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+#pjtcRandom{border:1px dashed #e0872c;color:#b45309;background:#fff7ee;border-radius:8px;padding:11px 20px;font-weight:600;width:100%;margin-top:14px}
+#pjtcRandom:hover{background:#fdeedd}
+.pjtc-palettes{display:grid;grid-template-columns:repeat(2,1fr);gap:13px}
+.pjpal{position:relative;text-align:left;background:#fff;border:1.5px solid #e7eaec;border-radius:12px;padding:9px 9px 11px;cursor:pointer;transition:border-color .15s,box-shadow .15s,transform .15s;overflow:hidden}
+.pjpal:hover{border-color:#c9ccce;transform:translateY(-2px);box-shadow:0 8px 20px -12px rgba(0,0,0,.35)}
+.pjpal.sel{border-color:#1ab394;box-shadow:0 0 0 3px rgba(26,179,148,.16)}
+.pjpal-check{position:absolute;top:14px;right:14px;z-index:2;width:22px;height:22px;border-radius:999px;background:#1ab394;color:#fff;display:none;align-items:center;justify-content:center;font-size:11px;box-shadow:0 2px 6px rgba(0,0,0,.2)}
+.pjpal.sel .pjpal-check{display:flex}
+.pjpal-preview{display:block;border-radius:9px;padding:14px;overflow:hidden}
+.pjpal-mini{display:block;border:1px solid;border-radius:8px;overflow:hidden;box-shadow:0 3px 10px -4px rgba(0,0,0,.25)}
+.pjpal-img{display:block;height:44px}
+.pjpal-b{display:block;padding:9px 9px 10px}
+.pjpal-ttl{display:block;height:7px;width:72%;border-radius:4px;margin-bottom:8px;opacity:.9}
+.pjpal-chip{display:inline-block;height:13px;width:34px;border:1px solid;border-radius:999px;margin-bottom:10px}
+.pjpal-foot{display:flex;align-items:center;justify-content:space-between}
+.pjpal-price{display:block;height:9px;width:34px;border-radius:4px}
+.pjpal-btn{display:block;height:16px;width:40px;border-radius:6px}
+.pjpal-name{display:flex;align-items:center;gap:8px;font-weight:600;color:#2f3941;font-size:13px;padding:9px 4px 2px}
+.pjpal-dots{display:inline-flex;gap:3px}
+.pjpal-dots i{width:11px;height:11px;border-radius:999px;display:block;border:1px solid rgba(0,0,0,.08)}
+.pjtc-custom{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+.pjtc-field{display:flex;flex-direction:column;gap:6px}
+.pjtc-field span{font-size:12px;font-weight:600;color:#6b7178}
+.pjtc-color{display:flex;align-items:center;gap:9px;border:1px solid #e7eaec;border-radius:8px;padding:6px 10px}
+.pjtc-color input[type=color]{width:34px;height:34px;border:none;background:none;padding:0;cursor:pointer}
+.pjtc-color input[type=text]{border:none;width:100%;font-family:monospace;font-size:13px;color:#2f3941;outline:none}
+.pjtc-field input[type=text].pjtc-font{border:1px solid #e7eaec;border-radius:8px;padding:9px 11px;outline:none}
+.pjtc-frame{border:1px solid #e7eaec;border-radius:12px;overflow:hidden;background:#fff}
+.pjtc-frame iframe{width:100%;height:calc(100vh - 220px);min-height:560px;border:0;display:block}
+.pjtc-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:6px;align-items:center}
+#pjtcSave{background:#1ab394;border-color:#1ab394;color:#fff;border-radius:8px;padding:11px 26px;font-weight:600;border:1px solid}
+#pjtcSave:hover{background:#18a689}
+.pjtc-saved{color:#1ab394;font-weight:600;opacity:0;transition:opacity .2s}
+.pjtc-saved.on{opacity:1}
+.pjtc-pvhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.pjtc-pvhead .t{font-size:14px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5b6770}
+.pjtc-reload{border:1px solid #e7eaec;background:#fff;border-radius:8px;padding:6px 12px;color:#5b6770;font-weight:600;font-size:13px}
+.pjtc-reload:hover{border-color:#c9ccce}
+
+/* from pjActionInstallListing.php */
+.pjemb-wrap{max-width:1000px;margin:18px auto 0;padding:0 15px 50px}
+.pjemb-card{background:#fff;border:1px solid #e7eaec;border-radius:10px;padding:22px;margin-bottom:20px}
+.pjemb-card h3{font-size:14px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#5b6770;margin:0 0 6px}
+.pjemb-card p.sub{color:#9aa0a6;font-size:13px;margin:0 0 14px}
+.pjemb-codewrap{position:relative}
+.pjemb-code{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:18px 18px;font-family:Menlo,Consolas,monospace;font-size:13px;line-height:1.7;white-space:pre;overflow:auto;margin:0}
+.pjemb-copy{position:absolute;top:12px;right:12px;background:#1ab394;border:none;color:#fff;border-radius:7px;padding:7px 14px;font-weight:600;font-size:12px;cursor:pointer}
+.pjemb-copy:hover{background:#18a689}
+.pjemb-copy.done{background:#0e9f6e}
+.pjemb-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
+.pjemb-btn{display:inline-flex;align-items:center;gap:7px;border:1px solid #e7eaec;background:#fff;border-radius:8px;padding:10px 16px;font-weight:600;color:#2f3941}
+.pjemb-btn:hover{border-color:#c9ccce}
+.pjemb-btn.primary{background:#1ab394;border-color:#1ab394;color:#fff}
+.pjemb-btn.primary:hover{background:#18a689}
+
+.pjtc-viewsel{margin-left:12px;height:32px;border:1px solid #e9ecf1;border-radius:8px;padding:0 10px;font-size:13px;background:#fff;color:#1f2430;vertical-align:middle}
