@@ -660,6 +660,20 @@ class pjBaseBackup extends pjBase
             }
 
             $code = 'PBU01';
+
+            // Cron job running for one company: back up that company only.
+            $cron_company = $this->hasCompanies() ? (int) pjCompanyContext::$cronCompanyId : 0;
+            if ($cron_company > 0)
+            {
+                pjCompanyBackup::protect($backup_folder);
+                $ts = time();
+                $folder = pjCompanyBackup::folder($cron_company);
+                $cb = new pjCompanyBackup($cron_company);
+                $cb->exportSql($folder . 'database-backup-' . $ts . '.sql');
+                $cb->exportFiles($folder . 'files-backup-' . $ts . '.zip');
+                return $titles[$code] . ' ' . $bodies[$code];
+            }
+
             $app_models = array();
             pjToolkit::readDir($app_models, PJ_MODELS_PATH);
 

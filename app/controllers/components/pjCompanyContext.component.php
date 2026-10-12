@@ -688,6 +688,55 @@ class pjCompanyContext
 	{
 		return (int) pjCompanyLocaleModel::factory()->where('t1.locale_id', (int) $locale_id)->findCount()->getData();
 	}
+
+	/* ------------------------------------------------------------------
+	 * Cron jobs per company
+	 * ------------------------------------------------------------------ */
+
+	/** Company a cron job is running for (0 = all companies / system). */
+	public static $cronCompanyId = 0;
+
+	/** Creates the table if the update SQL has not been run yet (once per request). */
+	public static function ensureCronTable()
+	{
+		static $done = false;
+		if ($done)
+		{
+			return;
+		}
+		$done = true;
+		$m = pjCompanyCronModel::factory();
+		$m->prepare(sprintf("CREATE TABLE IF NOT EXISTS `%s` (`company_id` int(10) unsigned NOT NULL, `cron_id` int(10) unsigned NOT NULL, `is_active` tinyint(1) unsigned NOT NULL DEFAULT 1, `next_run` datetime DEFAULT NULL, `last_run` datetime DEFAULT NULL, `status` text, PRIMARY KEY (`company_id`, `cron_id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8", $m->getTable()))->exec();
+	}
+
+	/**
+	 * The company's row for every cron job (created on first use; on/off
+	 * starts like the system switch of the job).
+	 * @return array cron_id => row
+	 */
+	public static function companyCronRows($company_id)
+	{
+		self::ensureCronTable();
+		$company_id = (int) $company_id;
+		$m = pjCompanyCronModel::factory();
+		$rows = $m->where('t1.company_id', $company_id)->findAll()->getDataPair('cron_id');
+		foreach (pjBaseCronJobModel::factory()->findAll()->getData() as $job)
+		{
+			if (!isset($rows[$job['id']]))
+			{
+				$m->reset()->setAttributes(array('company_id' => $company_id, 'cron_id' => $job['id'], 'is_active' => (int) $job['is_active'] ? 1 : 0))->insert();
+				$rows[$job['id']] = array('company_id' => $company_id, 'cron_id' => $job['id'], 'is_active' => (int) $job['is_active'] ? 1 : 0, 'next_run' => null, 'last_run' => null, 'status' => null);
+			}
+		}
+		return $rows;
+	}
+
+	public static function saveCronRow($company_id, $cron_id, $data)
+	{
+		self::companyCronRows($company_id);
+		pjCompanyCronModel::factory()->where('company_id', (int) $company_id)->where('cron_id', (int) $cron_id)->limit(1)->modifyAll($data);
+	}
 }
+
 
 ?>

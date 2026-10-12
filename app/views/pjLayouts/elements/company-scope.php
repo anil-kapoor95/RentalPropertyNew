@@ -13,8 +13,8 @@ if (class_exists('pjCompanyContext'))
 		$pjcsName = $pjcsCompany ? pjSanitize::html($pjcsCompany['name']) : '-';
 		if ($pjcsc === 'pjBaseCron')
 		{
-			$pjcsText = __('lblScopeCron', true);
-			$pjcsIcon = 'fa-globe';
+			$pjcsText = sprintf('%s <strong>%s</strong> &middot; %s', __('lblScopeCompany', true), $pjcsName, __('lblScopeCron', true));
+			$pjcsIcon = 'fa-building';
 		} else {
 			$pjcsText = sprintf('%s <strong>%s</strong>', __('lblScopeCompany', true), $pjcsName);
 			if ($pjcsc === 'pjBaseLocale')

@@ -3,6 +3,27 @@ var jQuery_1_8_2 = jQuery_1_8_2 || jQuery.noConflict();
 	$(function () {
 		var $document = $(document);
 
+		// Company: switch a job on/off for the active company only.
+		$document.on("click", ".btn-cron-toggle", function (e) {
+			if (e && e.preventDefault) {
+				e.preventDefault();
+			}
+			var $this = $(this);
+			$this.prop("disabled", true);
+			$.post('index.php?controller=pjBaseCron&action=pjActionToggle', {
+				"id" : $this.data('id')
+			}).done(function (data) {
+				if (data && data.status && data.status === 'OK') {
+					window.location.reload(true);
+				} else {
+					$this.prop("disabled", false);
+				}
+			}).fail(function () {
+				$this.prop("disabled", false);
+			});
+			return false;
+		});
+
 		$document.on("click", ".btn-run-now", function (e) {
 			if (e && e.preventDefault) {
 				e.preventDefault();

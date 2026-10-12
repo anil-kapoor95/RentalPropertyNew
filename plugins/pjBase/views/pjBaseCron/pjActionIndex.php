@@ -67,7 +67,10 @@
                                 	        <tr>
                                                 <td><?php echo !empty($cron_title) ? $cron_title : $v['name'];?></td>
                                                 <td>
-                                                    <?php if ($v['is_active']): ?>
+                                                    <?php if (!empty($tpl['company_cron']) && !empty($v['system_active'])): ?>
+                                                        <?php /* on/off for the active company only */ ?>
+                                                        <button type="button" class="btn btn-xs no-margins btn-cron-toggle <?php echo $v['is_active'] ? 'btn-primary' : 'btn-default'; ?>" data-id="<?php echo $v['id'];?>"><i class="fa <?php echo $v['is_active'] ? 'fa-check' : 'fa-times'; ?>"></i> <?php echo $v['is_active'] ? $statuses['active'] : $statuses['inactive']; ?></button>
+                                                    <?php elseif ($v['is_active']): ?>
                                                         <div role="button" tabindex="0" aria-disabled="false" class="btn btn-primary btn-xs no-margins"><i class="fa fa-check"></i> <?php echo $statuses['active'] ?></div>
                                                     <?php else: ?>
                                                         <div role="button" tabindex="0" aria-disabled="false" class="btn btn-default btn-xs no-margins"><i class="fa fa-times"></i> <?php echo $statuses['inactive'] ?></div>

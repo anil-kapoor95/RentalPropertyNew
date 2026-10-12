@@ -13,7 +13,13 @@ class pjCron extends pjAppController
 
 	public function pjActionSyncIcalUrls()
 	{
-		$rows = pjIcalUrlsModel::factory()->reset()->findAll()->getData();
+		$pjIcalUrlsModel = pjIcalUrlsModel::factory()->reset();
+		// Cron job running for one company: only that company's properties.
+		if (class_exists('pjCompanyContext') && (int) pjCompanyContext::$cronCompanyId > 0)
+		{
+			$pjIcalUrlsModel->where(sprintf("t1.calendar_id IN (SELECT `id` FROM `%s` WHERE `company_id` = %u)", pjCalendarModel::factory()->getTable(), (int) pjCompanyContext::$cronCompanyId));
+		}
+		$rows = $pjIcalUrlsModel->findAll()->getData();
 
 		$calendar_ids = array();
 		foreach ($rows as $row)
@@ -60,7 +66,8 @@ class pjCron extends pjAppController
 			header('Content-Type: text/plain; charset=utf-8');
 			header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 		}
-		return "Property reservations have been synced successfully." . "\n";
+		// The result shows which properties were synced (per company when run for one company).
+		return "Property reservations have been synced successfully." . "\n" . implode("\n", array_filter(array_slice($report, 1), function ($l) { return strpos($l, '---') !== 0; }));
 		exit;
 	}
 }
