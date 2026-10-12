@@ -133,6 +133,11 @@ class pjBaseUsers extends pjBase
 		
 		if ($this->isXHR())
 		{
+			// Only users who may open the Users page get the list (it holds e-mail addresses).
+			if (!pjAuth::factory('pjBaseUsers')->hasAccess())
+			{
+				self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Access denied.'));
+			}
 		    $pjAuthUserModel = pjAuthUserModel::factory()
 		    					->join('pjAuthRole', 't2.id=t1.role_id', 'left')
 		    					->where('t2.is_backend', 'T')

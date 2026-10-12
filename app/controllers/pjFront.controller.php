@@ -54,6 +54,11 @@ class pjFront extends pjAppController
 	        $this->pjActionSetLocale($this->_get->toInt('locale'));
 	    }
 	    
+	    if ($this->pjActionGetLocale() !== FALSE && $this->frontCompanyId > 0
+	        && !in_array((int) $this->pjActionGetLocale(), pjCompanyContext::companyLocaleIds($this->frontCompanyId), true))
+	    {
+	        unset($_SESSION[$this->defaultLocale]); // language of another company
+	    }
 	    if ($this->pjActionGetLocale() === FALSE)
 	    {
 	        $locale_arr = pjLocaleModel::factory()->where('is_default', 1)->limit(1)->findAll()->getData();
@@ -75,8 +80,27 @@ class pjFront extends pjAppController
 		$this->set('locale_arr', $locale_arr);
 	}
 	
+	/** Company of a public page: ?company=<hash>, else the owner of ?cid, else the first company. */
+	private function resolveFrontCompany()
+	{
+		$hash_company = $this->_get->check('company') ? pjCompanyContext::idFromHash($this->_get->toString('company')) : 0;
+		if ($hash_company > 0 && (int) pjCompanyModel::factory()->where('t1.id', $hash_company)->where('t1.status', 'T')->findCount()->getData() === 1)
+		{
+			return $hash_company;
+		} elseif ($this->_get->toInt('cid') > 0) {
+			return pjCompanyContext::companyOfCalendar($this->_get->toInt('cid'));
+		}
+		// Embed codes created before companies existed carry no company: use the first company.
+		$first = pjCompanyModel::factory()->orderBy('t1.id ASC')->limit(1)->findAll()->getDataIndex(0);
+		return !empty($first) ? (int) $first['id'] : 0;
+	}
+
 	public function beforeFilter()
 	{
+		// Languages of the page's company (also used while the parent loads the locale).
+		$this->frontCompanyId = $this->resolveFrontCompany();
+		pjCompanyContext::setLocaleScope($this->frontCompanyId);
+		
 		parent::beforeFilter();
 		 
 		if($this->_get->toInt('cid') > 0)
@@ -90,18 +114,7 @@ class pjFront extends pjAppController
 		
 		// Company of this page: explicit ?company=<hash> (listing / availability embeds),
 		// otherwise the company that owns the property (?cid=ID). The numeric company id is never public.
-		$this->frontCompanyId = 0;
-		$hash_company = $this->_get->check('company') ? pjCompanyContext::idFromHash($this->_get->toString('company')) : 0;
-		if ($hash_company > 0 && (int) pjCompanyModel::factory()->where('t1.id', $hash_company)->where('t1.status', 'T')->findCount()->getData() === 1)
-		{
-			$this->frontCompanyId = $hash_company;
-		} elseif ($this->_get->toInt('cid') > 0) {
-			$this->frontCompanyId = pjCompanyContext::companyOfCalendar($this->_get->toInt('cid'));
-		} else {
-			// Embed codes created before companies existed carry no company: use the first company.
-			$first = pjCompanyModel::factory()->orderBy('t1.id ASC')->limit(1)->findAll()->getDataIndex(0);
-			$this->frontCompanyId = !empty($first) ? (int) $first['id'] : 0;
-		}
+		// $this->frontCompanyId was resolved at the start (resolveFrontCompany).
 		// System options of the company (currency, formats, email/SMTP, API keys...).
 		$base_option_arr = pjCompanyContext::basePairs($this->frontCompanyId);
 		// Company theme settings override the global/property ones.

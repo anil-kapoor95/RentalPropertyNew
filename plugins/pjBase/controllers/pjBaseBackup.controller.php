@@ -295,6 +295,13 @@ class pjBaseBackup extends pjBase
     }
     public function pjActionGet()
     {
+		// Same permission as the page this list/action belongs to (the plugin does not check it otherwise).
+		if ($this->isLoged() && !pjAuth::factory('pjBaseBackup')->hasAccess())
+		{
+			if ($this->isXHR()) { self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Access denied.')); }
+			$this->sendForbidden();
+			return;
+		}
         $this->setAjax(true);
         
         if ($this->isXHR())
@@ -490,6 +497,13 @@ class pjBaseBackup extends pjBase
     
     public function pjActionSetBackup()
     {
+		// Same permission as the page this list/action belongs to (the plugin does not check it otherwise).
+		if ($this->isLoged() && !pjAuth::factory('pjBaseBackup')->hasAccess())
+		{
+			if ($this->isXHR()) { self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Access denied.')); }
+			$this->sendForbidden();
+			return;
+		}
         $this->setAjax(true);
         if ($this->isXHR())
         {

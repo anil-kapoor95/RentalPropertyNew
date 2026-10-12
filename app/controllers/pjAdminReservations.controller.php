@@ -593,6 +593,10 @@ class pjAdminReservations extends pjAdmin
 		{
 			$date_from = pjDateTime::formatDate($this->_get->toString('date_from'), $this->option_arr['o_date_format']);
 			$date_to = pjDateTime::formatDate($this->_get->toString('date_to'), $this->option_arr['o_date_format']);
+			if (!$this->isCompanyCalendar($this->_get->toInt('calendar_id')))
+			{
+				$this->denyCompanyAccess();
+			}
 			$resp = $this->pjActionCheckDt($date_from, $date_to, $this->_get->toInt('calendar_id'), $this->_get->toInt('id'), true);
 			pjAppController::jsonResponse($resp);
 		}
@@ -604,6 +608,10 @@ class pjAdminReservations extends pjAdmin
 	
 		if ($this->isXHR())
 		{
+			if (!$this->isCompanyCalendar($this->_get->toInt('id')))
+			{
+				$this->denyCompanyAccess();
+			}
 			$this->set('option_arr', pjOptionModel::factory()->getPairs($this->_get->toInt('id')));
 		}
 	}
@@ -613,6 +621,10 @@ class pjAdminReservations extends pjAdmin
 	
 		if ($this->isXHR())
 		{
+			if (!$this->isCompanyCalendar($this->_get->toInt('id')))
+			{
+				$this->denyCompanyAccess();
+			}
 			$this->set('option_arr', pjOptionModel::factory()->getPairs($this->_get->toInt('id')));
 		}
 	}

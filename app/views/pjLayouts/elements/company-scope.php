@@ -20,7 +20,7 @@ if (class_exists('pjCompanyContext'))
 			if ($pjcsc === 'pjBaseLocale')
 			{
 				$pjcsText .= ' &middot; ' . __('lblScopeLanguages', true);
-			} elseif ($pjcsc === 'pjBaseOptions' && $pjcsa === 'pjActionCaptchaSpam') {
+			} elseif ($pjcsc === 'pjBaseOptions' && in_array($pjcsa, array('pjActionCaptchaSpam', 'pjActionLoginProtection'), true)) {
 				$pjcsText .= ' &middot; ' . __('lblScopeLoginCaptcha', true);
 			}
 			$pjcsIcon = 'fa-building';

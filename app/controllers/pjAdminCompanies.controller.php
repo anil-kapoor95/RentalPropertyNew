@@ -271,6 +271,7 @@ class pjAdminCompanies extends pjAdmin
 			pjMultiLangModel::factory()->where('model', 'pjNotification')->whereIn('foreign_id', $nids)->eraseAll();
 		}
 		pjCompanyOptionModel::factory()->where('company_id', $company_id)->eraseAll();
+		pjCompanyLocaleModel::factory()->where('company_id', $company_id)->eraseAll(); // its language list
 		pjBaseOptionModel::factory()->where('foreign_id', pjCompanyContext::OPTIONS_OFFSET + $company_id)->eraseAll();
 		pjMultiLangModel::factory()->where('model', 'pjBaseOption')->where('foreign_id', pjCompanyContext::OPTIONS_OFFSET + $company_id)->eraseAll();
 		pjMultiLangModel::factory()->where('model', 'pjBaseField')->where('field', pjCompanyContext::labelField($company_id))->eraseAll();
@@ -314,7 +315,15 @@ class pjAdminCompanies extends pjAdmin
 		{
 			pjUtil::redirect($_SERVER['PHP_SELF'] . '?controller=pjAdmin&action=pjActionIndex');
 		}
-		pjCompanyContext::setActive($this->idParam($this->_get->toString('id')), $this->getRoleId(), $this->getUserId());
+		if (pjCompanyContext::setActive($this->idParam($this->_get->toString('id')), $this->getRoleId(), $this->getUserId()))
+		{
+			// admin language: the new company's default language
+			$lid = pjCompanyContext::companyDefaultLocale(pjCompanyContext::activeId($this->getRoleId(), $this->getUserId()));
+			if ($lid > 0)
+			{
+				$this->setLocale($lid);
+			}
+		}
 		unset($_SESSION[$this->defaultCalendarId]); // pick the new company's first property
 
 		// Go back to the same section (its list page) when possible.
@@ -447,6 +456,7 @@ class pjAdminCompanies extends pjAdmin
 			pjCompanyContext::clearCache();
 			pjCompanyContext::seedFeatures($id);
 			pjCompanyContext::ensureNotifications($id);
+			pjCompanyContext::seedNewCompanyLocales($id); // starts with the system default language
 
 			$msg = 'msgCompanyAdded';
 			$logo = $this->handleLogo($id, null);

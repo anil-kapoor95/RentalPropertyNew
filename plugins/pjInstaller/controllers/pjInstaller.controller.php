@@ -105,6 +105,22 @@ class pjInstaller extends pjInstallerAppController
 
 			$arr = $tmp;
 
+			// Company label texts (field "title_c<company>") belong to a label key. Updates that
+			// re-create a label (delete + insert, new id) would drop them: keep them by key and
+			// attach them to the label again after the update. Nothing else is changed.
+			$t_fields = $prefix . $scriptPrefix . 'plugin_base_fields';
+			$t_ml = $prefix . $scriptPrefix . 'plugin_base_multi_lang';
+			$keep_labels = false;
+			try {
+				if (isset($query) && $query && $query->num_rows > 0 && $dbo->query("DROP TEMPORARY TABLE IF EXISTS `pj_keep_company_labels`")
+					&& $dbo->query(sprintf("CREATE TEMPORARY TABLE `pj_keep_company_labels` AS SELECT f.`key`, m.`locale`, m.`field`, m.`content` FROM `%s` AS m INNER JOIN `%s` AS f ON f.`id` = m.`foreign_id` WHERE m.`model` = 'pjBaseField' AND m.`field` LIKE 'title\\_c%%'", $t_ml, $t_fields)))
+				{
+					$keep_labels = true;
+				}
+			} catch (\Throwable $e) {
+				$keep_labels = false; // fresh install: no label tables yet
+			}
+
 			$dbo->query("START TRANSACTION;");
 			foreach ($arr as $statement)
 			{
@@ -119,7 +135,15 @@ class pjInstaller extends pjInstallerAppController
 					}
 				}
 			}
+			if ($keep_labels)
+			{
+				try { $dbo->query(sprintf("INSERT IGNORE INTO `%s` (`foreign_id`, `model`, `locale`, `field`, `content`) SELECT f.`id`, 'pjBaseField', k.`locale`, k.`field`, k.`content` FROM `pj_keep_company_labels` AS k INNER JOIN `%s` AS f ON f.`key` = k.`key`", $t_ml, $t_fields)); } catch (\Throwable $e) {}
+			}
 			$dbo->query("COMMIT;");
+			if ($keep_labels)
+			{
+				$dbo->query("DROP TEMPORARY TABLE IF EXISTS `pj_keep_company_labels`");
+			}
 
 			$name = basename($file);
 			$text = sprintf("File '%s' have been executed.", $name);
@@ -2253,4 +2277,4 @@ class pjInstaller extends pjInstallerAppController
 		return array('status' => 'ERR', 'code' => 100, 'text' => 'Key is wrong or not valid. Please check you data again.');
 	}
 }
-?>
+?>

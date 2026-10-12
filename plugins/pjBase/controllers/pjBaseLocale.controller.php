@@ -108,12 +108,192 @@ class pjBaseLocale extends pjBase
 	
 	protected static function checkDefault()
 	{
-		if (0 == pjLocaleModel::factory()->where('is_default', 1)->findCount()->getData())
+		if (0 == pjLocaleModel::factory()->unscoped()->where('is_default', 1)->findCount()->getData())
 		{
 			pjLocaleModel::factory()->limit(1)->modifyAll(array('is_default' => 1));
 		}
 	}
 	
+	/* ------------------------------------------------------------------
+	 * Languages per company
+	 * ------------------------------------------------------------------ */
+
+	/** Company whose language list is edited (0 = system list, e.g. no companies). */
+	private function cLocaleCompany()
+	{
+		return class_exists('pjCompanyContext') && class_exists('pjCompanyLocaleModel') ? (int) pjCompanyContext::localeScopeId() : 0;
+	}
+
+	/** Make sure the company has exactly one default language. */
+	private static function cCheckDefault($cid)
+	{
+		$m = pjCompanyLocaleModel::factory();
+		if ((int) $m->where('t1.company_id', $cid)->where('t1.is_default', 1)->findCount()->getData() === 0)
+		{
+			$first = $m->reset()->where('t1.company_id', $cid)->orderBy('t1.sort ASC')->limit(1)->findAll()->getDataIndex(0);
+			if (!empty($first))
+			{
+				$m->reset()->where('company_id', $cid)->where('locale_id', $first['locale_id'])->limit(1)->modifyAll(array('is_default' => 1));
+			}
+		}
+	}
+
+	/** Renumber the company's language order 1..n. */
+	private static function cResort($cid)
+	{
+		$m = pjCompanyLocaleModel::factory();
+		$rows = $m->where('t1.company_id', $cid)->orderBy('t1.sort ASC, t1.locale_id ASC')->findAll()->getData();
+		foreach ($rows as $i => $r)
+		{
+			if ((int) $r['sort'] !== $i + 1)
+			{
+				$m->reset()->where('company_id', $cid)->where('locale_id', $r['locale_id'])->limit(1)->modifyAll(array('sort' => $i + 1));
+			}
+		}
+	}
+
+	/**
+	 * Fill texts missing in language $to with the texts of language $from
+	 * (only empty places are filled, nothing is overwritten).
+	 */
+	private static function cCopyTexts($from, $to)
+	{
+		if ((int) $from <= 0 || (int) $to <= 0 || (int) $from === (int) $to)
+		{
+			return;
+		}
+		$pjMultiLangModel = pjMultiLangModel::factory();
+		$sql = sprintf("INSERT IGNORE INTO `%1\$s` (`foreign_id`, `model`, `locale`, `field`, `content`)
+			SELECT t1.foreign_id, t1.model, :to_locale, t1.field, t1.content
+			FROM `%1\$s` AS t1
+			WHERE t1.locale = :from_locale", $pjMultiLangModel->getTable());
+		$pjMultiLangModel->prepare($sql)->exec(array('to_locale' => (int) $to, 'from_locale' => (int) $from));
+	}
+
+	/**
+	 * System language for an ISO code, created if it does not exist yet
+	 * (new languages start with the texts of $source_locale).
+	 */
+	private function cSystemLocale($iso, $source_locale)
+	{
+		$row = pjLocaleModel::factory()->unscoped()->where('t1.language_iso', $iso)->limit(1)->findAll()->getDataIndex(0);
+		if (!empty($row))
+		{
+			return (int) $row['id'];
+		}
+		$result = self::addLocale($iso, $source_locale);
+		return $result['status'] === 'OK' ? (int) $result['id'] : 0;
+	}
+
+	/** Remove a system language that no company uses any more. */
+	private function cDropIfUnused($locale_id)
+	{
+		if (pjCompanyContext::localeUsage($locale_id) > 0)
+		{
+			return;
+		}
+		$arr = pjLocaleModel::factory()->unscoped()->find($locale_id)->getData();
+		if (empty($arr))
+		{
+			return;
+		}
+		pjLocaleModel::factory()->set('id', $locale_id)->erase();
+		if (!empty($arr['flag']) && is_file($arr['flag']))
+		{
+			@unlink($arr['flag']);
+		}
+		pjMultiLangModel::factory()->where('locale', $locale_id)->eraseAll();
+		self::checkDefault();
+	}
+
+	/** Company: add a language (the first one it does not have yet). */
+	private function cAddLocale($cid)
+	{
+		$own = pjCompanyContext::companyLocaleIds($cid);
+		$own_iso = empty($own) ? array() : pjLocaleModel::factory()->unscoped()->whereIn('t1.id', $own)->findAll()->getDataPair(null, 'language_iso');
+		$m = pjLocaleLanguageModel::factory()->where('t1.file IS NOT NULL');
+		if (!empty($own_iso))
+		{
+			$m->whereNotIn('t1.iso', $own_iso);
+		}
+		$lang = $m->orderBy('t1.title ASC')->limit(1)->findAll()->getDataPair(null, 'iso');
+		if (empty($lang))
+		{
+			return array('status' => 'ERR', 'code' => 100, 'text' => 'Locale has not been added.');
+		}
+		$default = pjCompanyContext::companyDefaultLocale($cid);
+		$locale_id = $this->cSystemLocale($lang[0], $default);
+		if ($locale_id <= 0)
+		{
+			return array('status' => 'ERR', 'code' => 100, 'text' => 'Locale has not been added.');
+		}
+		// texts of this company's records that do not exist yet in that language
+		self::cCopyTexts($default, $locale_id);
+		$m = pjCompanyLocaleModel::factory();
+		$sorts = $m->where('t1.company_id', $cid)->findAll()->getDataPair(null, 'sort');
+		$max = empty($sorts) ? 0 : max(array_map('intval', $sorts));
+		$m->reset()->setAttributes(array('company_id' => $cid, 'locale_id' => $locale_id, 'sort' => $max + 1, 'is_default' => 0))->insert();
+		return array('status' => 'OK', 'code' => 200, 'text' => 'Locale has been added.', 'id' => $locale_id);
+	}
+
+	/** Company: change which language a row of its list is (other companies keep theirs). */
+	private function cChangeLocale($cid, $old_id, $iso)
+	{
+		$old = pjLocaleModel::factory()->unscoped()->find($old_id)->getData();
+		if (empty($old) || $old['language_iso'] === $iso)
+		{
+			return;
+		}
+		$target = pjLocaleModel::factory()->unscoped()->where('t1.language_iso', $iso)->limit(1)->findAll()->getDataIndex(0);
+		if (empty($target) && pjCompanyContext::localeUsage($old_id) <= 1)
+		{
+			// only this company uses the row: change it in place (as before)
+			$tmp = pjLocaleLanguageModel::factory()->where('t1.iso', $iso)->limit(1)->findAll()->getDataIndex(0);
+			pjLocaleModel::factory()->set('id', $old_id)->modify(array('language_iso' => $iso, 'dir' => @$tmp['dir'], 'name' => @$tmp['native'], 'flag' => ':NULL'));
+			return;
+		}
+		if (!empty($target) && in_array((int) $target['id'], pjCompanyContext::companyLocaleIds($cid), true))
+		{
+			return; // the company has that language already
+		}
+		$new_id = !empty($target) ? (int) $target['id'] : $this->cSystemLocale($iso, $old_id);
+		if ($new_id <= 0)
+		{
+			return;
+		}
+		self::cCopyTexts($old_id, $new_id);
+		pjCompanyLocaleModel::factory()->where('company_id', $cid)->where('locale_id', $old_id)->limit(1)->modifyAll(array('locale_id' => $new_id));
+		if ((int) $this->getLocaleId() === (int) $old_id)
+		{
+			$this->setLocale($new_id);
+		}
+		$this->cDropIfUnused($old_id);
+	}
+
+	/**
+	 * Company label text: stored in the company's own field; the system text
+	 * ("title") is not changed. A text equal to the system text with no own
+	 * text yet is not stored.
+	 */
+	private function cSaveLabelOverride($field_id, $locale_id, $label_field, $content, $base)
+	{
+		$m = pjMultiLangModel::factory();
+		$own = $m->where('t1.model', 'pjBaseField')->where('t1.foreign_id', (int) $field_id)->where('t1.locale', (int) $locale_id)->where('t1.field', $label_field)->limit(1)->findAll()->getDataIndex(0);
+		if (!empty($own))
+		{
+			if ($own['content'] !== $content)
+			{
+				$m->reset()->set('id', $own['id'])->modify(array('content' => $content));
+			}
+			return;
+		}
+		if ((string) $content === (string) $base)
+		{
+			return;
+		}
+		$m->reset()->setAttributes(array('foreign_id' => (int) $field_id, 'model' => 'pjBaseField', 'locale' => (int) $locale_id, 'field' => $label_field, 'content' => $content))->insert();
+	}
+
 	protected static function updateFieldsIndex()
 	{
 		return pjBaseOptionModel::factory()
@@ -291,6 +471,32 @@ class pjBaseLocale extends pjBase
 		    }
 		    $id = $this->_get->toInt('id');
 		    
+			$cid = $this->cLocaleCompany();
+			if ($cid > 0)
+			{
+				// Remove the language from this company only. The system language and
+				// its texts are deleted when no company uses it any more.
+				$own = pjCompanyContext::companyLocaleIds($cid);
+				if (!in_array($id, $own, true))
+				{
+					self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Locale not found.'));
+				}
+				if (count($own) <= 1)
+				{
+					self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'The last language can not be deleted.'));
+				}
+				pjCompanyLocaleModel::factory()->where('company_id', $cid)->where('locale_id', $id)->limit(1)->eraseAll();
+				self::cResort($cid);
+				self::cCheckDefault($cid);
+				if ((int) $this->getLocaleId() === $id)
+				{
+					$this->setLocale(pjCompanyContext::companyDefaultLocale($cid));
+				}
+				$this->cDropIfUnused($id);
+				$this->updateFieldsIndex();
+				self::jsonResponse(array('status' => 'OK', 'code' => 200, 'text' => 'Locale has been deleted.'));
+			}
+			
 			$pjLocaleModel = pjLocaleModel::factory();
 			$arr = $pjLocaleModel->find($id)->getData();
 			if (empty($arr))
@@ -337,6 +543,13 @@ class pjBaseLocale extends pjBase
 	
 	public function pjActionGetLocale()
 	{
+		// Same permission as the page this list/action belongs to (the plugin does not check it otherwise).
+		if ($this->isLoged() && !pjAuth::factory('pjBaseLocale')->hasAccess())
+		{
+			if ($this->isXHR()) { self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Access denied.')); }
+			$this->sendForbidden();
+			return;
+		}
 		$this->setAjax(true);
 	
 		if ($this->isXHR())
@@ -380,6 +593,13 @@ class pjBaseLocale extends pjBase
 	
 	public function pjActionGetLabels()
 	{
+		// Same permission as the page this list/action belongs to (the plugin does not check it otherwise).
+		if ($this->isLoged() && !pjAuth::factory('pjBaseLocale')->hasAccess())
+		{
+			if ($this->isXHR()) { self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Access denied.')); }
+			$this->sendForbidden();
+			return;
+		}
 		$this->setAjax(true);
 		
 		if ($this->isXHR())
@@ -457,6 +677,13 @@ class pjBaseLocale extends pjBase
 	
 	public function pjActionSaveLabel()
 	{
+		// Same permission as the page this list/action belongs to (the plugin does not check it otherwise).
+		if ($this->isLoged() && !pjAuth::factory('pjBaseLocale')->hasAccess())
+		{
+			if ($this->isXHR()) { self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Access denied.')); }
+			$this->sendForbidden();
+			return;
+		}
 		$this->setAjax(true);
 		
 		if ($this->isXHR())
@@ -497,6 +724,17 @@ class pjBaseLocale extends pjBase
 			    && $this->_post->toString('column')
 				&& $this->_get->toInt('id') > 0)
 			{
+			    $cid = $this->cLocaleCompany();
+			    if ($cid > 0 && !in_array($this->_get->toInt('id'), pjCompanyContext::companyLocaleIds($cid), true))
+			    {
+			        self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Locale not found.'));
+			    }
+			    if ($cid > 0 && $this->_post->toString('column') == 'language_iso')
+			    {
+			        $this->cChangeLocale($cid, $this->_get->toInt('id'), $this->_post->toString('value'));
+			        $this->updateFieldsIndex();
+			        self::jsonResponse(array('status' => 'OK', 'code' => 201, 'text' => 'Locale has been updated.'));
+			    }
 			    $data = array($this->_post->toString('column') => $this->_post->toString('value'));
 			    if ($this->_post->toString('column') == 'language_iso')
 				{
@@ -509,6 +747,16 @@ class pjBaseLocale extends pjBase
 					
 				pjLocaleModel::factory()->set('id', $this->_get->toInt('id'))->modify($data);
 				self::jsonResponse(array('status' => 'OK', 'code' => 201, 'text' => 'Locale has been updated.'));
+			}
+			
+			if ($this->cLocaleCompany() > 0)
+			{
+				$result = $this->cAddLocale($this->cLocaleCompany());
+				if ($result['status'] === 'OK')
+				{
+					$this->updateFieldsIndex();
+				}
+				self::jsonResponse($result);
 			}
 			
 			$lang = pjLocaleLanguageModel::factory()
@@ -531,6 +779,13 @@ class pjBaseLocale extends pjBase
 	
 	public function pjActionAddLocale()
 	{
+		// Same permission as the page this list/action belongs to (the plugin does not check it otherwise).
+		if ($this->isLoged() && !pjAuth::factory('pjBaseLocale')->hasAccess())
+		{
+			if ($this->isXHR()) { self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Access denied.')); }
+			$this->sendForbidden();
+			return;
+		}
 		$params = $this->getParams();
 		
 		return $this->addLocale($params['iso'], @$params['locale']);
@@ -538,6 +793,13 @@ class pjBaseLocale extends pjBase
 	
 	public function pjActionSaveDefault()
 	{
+		// Same permission as the page this list/action belongs to (the plugin does not check it otherwise).
+		if ($this->isLoged() && !pjAuth::factory('pjBaseLocale')->hasAccess())
+		{
+			if ($this->isXHR()) { self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Access denied.')); }
+			$this->sendForbidden();
+			return;
+		}
 		$this->setAjax(true);
 	
 		if ($this->isXHR())
@@ -552,6 +814,19 @@ class pjBaseLocale extends pjBase
 				self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'Missing, empty or invalid parameters.'));
 			}
 			$id = $this->_get->toInt('id');
+			$cid = $this->cLocaleCompany();
+			if ($cid > 0)
+			{
+				// default language of this company only
+				if (!in_array($id, pjCompanyContext::companyLocaleIds($cid), true))
+				{
+					self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Locale not found.'));
+				}
+				pjCompanyLocaleModel::factory()->where('company_id', $cid)->modifyAll(array('is_default' => 0))
+					->reset()->where('company_id', $cid)->where('locale_id', $id)->limit(1)->modifyAll(array('is_default' => 1));
+				$this->setLocale($id);
+				self::jsonResponse(array('status' => 'OK', 'code' => 200, 'text' => 'Default choise has been made.'));
+			}
 			pjLocaleModel::factory()
 				->where(1,1)
 				->modifyAll(array('is_default' => '0'))
@@ -568,11 +843,33 @@ class pjBaseLocale extends pjBase
 	
 	public function pjActionSortLocale()
 	{
+		// Same permission as the page this list/action belongs to (the plugin does not check it otherwise).
+		if ($this->isLoged() && !pjAuth::factory('pjBaseLocale')->hasAccess())
+		{
+			if ($this->isXHR()) { self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Access denied.')); }
+			$this->sendForbidden();
+			return;
+		}
 		$this->setAjax(true);
 	
 		if ($this->isXHR())
 		{
 		    $sort_arr = $this->_post->toArray('sort');
+			$cid = $this->cLocaleCompany();
+			if ($cid > 0)
+			{
+				// order of this company's languages only
+				$own = pjCompanyContext::companyLocaleIds($cid);
+				$n = 0;
+				foreach ($sort_arr as $lid)
+				{
+					if (in_array((int) $lid, $own, true))
+					{
+						pjCompanyLocaleModel::factory()->where('company_id', $cid)->where('locale_id', (int) $lid)->limit(1)->modifyAll(array('sort' => ++$n));
+					}
+				}
+				exit;
+			}
 			$LocaleModel = new pjLocaleModel();
 			$arr = $LocaleModel->whereIn('id', $sort_arr)->orderBy("t1.sort ASC")->findAll()->getDataPair('id', 'sort');
 			$fliped = array_flip($sort_arr);
@@ -844,8 +1141,11 @@ class pjBaseLocale extends pjBase
     	            {
     	                $pjMultiLangModel = pjMultiLangModel::factory();
     	                
+    	                // Company: imported texts are saved for this company only (label override
+    	                // field), the system texts of the other companies stay as they are.
+    	                $label_field = $this->labelFieldName();
     	                $multi_lang_arr = $pjMultiLangModel
-        	                ->select('t1.locale, t1.id AS `mid`, t2.id, t2.key')
+        	                ->select('t1.locale, t1.id AS `mid`, t1.content AS `base`, t2.id, t2.key')
         	                ->join('pjBaseField', 't2.id=t1.foreign_id', 'inner')
         	                ->where('t1.model', 'pjBaseField')
         	                ->where('t1.field', 'title')
@@ -871,6 +1171,7 @@ class pjBaseLocale extends pjBase
     	                        );
     	                    }
     	                    $import_arr[$item['key']]['locales'][$item['locale']] = $item['mid'];
+    	                    $import_arr[$item['key']]['base'][$item['locale']] = $item['base'];
     	                }
     	                
     	                if (empty($import_arr))
@@ -903,10 +1204,16 @@ class pjBaseLocale extends pjBase
     	                                if (($index = array_search($locale_id, $locales)) !== FALSE
     	                                    && $data[$key] == $import_arr[$data[$key]]['key'])
     	                                {
+    	                                    $content = str_replace(array('\n', '\t'), array("\r\n", "\t"), $data[$index]);
+    	                                    if ($label_field !== 'title')
+    	                                    {
+    	                                        $this->cSaveLabelOverride($import_arr[$data[$key]]['id'], $locale_id, $label_field, $content, $import_arr[$data[$key]]['base'][$locale_id]);
+    	                                        continue;
+    	                                    }
     	                                    $pjMultiLangModel
     	                                    ->set('id', $mid)
     	                                    ->modify(array(
-    	                                        'content' => str_replace(array('\n', '\t'), array("\r\n", "\t"), $data[$index])
+    	                                        'content' => $content
     	                                    ));
     	                                }
     	                            }
@@ -986,9 +1293,12 @@ class pjBaseLocale extends pjBase
 	            exit;
 	        }
 	        
+	        // Company: export the texts as this company sees them (its own label texts first).
+	        $label_field = $this->labelFieldName();
 	        $multi_lang_arr = $pjMultiLangModel
-    	        ->select('t1.locale, t1.content, t2.id, t2.key')
+    	        ->select('t1.locale, COALESCE(t3.content, t1.content) AS `content`, t2.id, t2.key')
     	        ->join('pjBaseField', 't2.id=t1.foreign_id', 'left outer')
+    	        ->join('pjMultiLang', sprintf("t3.model='pjBaseField' AND t3.foreign_id=t1.foreign_id AND t3.locale=t1.locale AND t3.field='%s'", $pjMultiLangModel->escapeStr($label_field)), 'left outer')
     	        ->where('t1.model', 'pjBaseField')
     	        ->where('t1.field', 'title')
     	        ->whereIn('t1.locale', array_keys($locale_arr))

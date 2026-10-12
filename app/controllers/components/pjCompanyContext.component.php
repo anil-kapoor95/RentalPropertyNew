@@ -548,5 +548,146 @@ class pjCompanyContext
 		$arr = pjCalendarModel::factory()->select('t1.company_id')->find((int) $calendar_id)->getData();
 		return !empty($arr) ? (int) $arr['company_id'] : 0;
 	}
+
+	/* ------------------------------------------------------------------
+	 * Languages per company
+	 * ------------------------------------------------------------------ */
+
+	/** Company whose languages are used in this request (NULL = not decided yet). */
+	private static $localeScope = null;
+
+	private static $localesReady = array();
+
+	/** Front-end pages tell which company they show; the back-office uses the active company. */
+	public static function setLocaleScope($company_id)
+	{
+		self::$localeScope = (int) $company_id;
+	}
+
+	/** Creates the language table if the update SQL has not been run yet (once per session). */
+	private static function ensureLocaleTable()
+	{
+		if (!empty($_SESSION['pj_companies_locales_ok']))
+		{
+			return;
+		}
+		$m = pjCompanyLocaleModel::factory();
+		$m->prepare(sprintf("CREATE TABLE IF NOT EXISTS `%s` (`company_id` int(10) unsigned NOT NULL, `locale_id` int(10) unsigned NOT NULL, `sort` int(10) unsigned DEFAULT NULL, `is_default` tinyint(1) unsigned NOT NULL DEFAULT 0, PRIMARY KEY (`company_id`, `locale_id`), KEY `locale_id` (`locale_id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8", $m->getTable()))->exec();
+		$_SESSION['pj_companies_locales_ok'] = 1;
+	}
+
+	/** 0 = no company (installer, login screen, cron): the system language list is used. */
+	public static function localeScopeId()
+	{
+		self::ensureLocaleTable();
+		if (self::$localeScope !== null)
+		{
+			$cid = self::$localeScope;
+		} elseif (isset($_SESSION['admin_user']['id'], $_SESSION['admin_user']['role_id'])) {
+			$cid = (int) self::activeId($_SESSION['admin_user']['role_id'], $_SESSION['admin_user']['id']);
+		} else {
+			$cid = 0;
+		}
+		if ($cid > 0)
+		{
+			self::ensureLocales($cid);
+		}
+		return $cid;
+	}
+
+	/**
+	 * First use after the update: every company that has no language list yet
+	 * gets all system languages (same order and default as before languages
+	 * became per company). New companies get their list when they are created
+	 * (seedNewCompanyLocales).
+	 */
+	public static function ensureLocales($company_id)
+	{
+		$company_id = (int) $company_id;
+		if ($company_id <= 0 || isset(self::$localesReady[$company_id]))
+		{
+			return;
+		}
+		self::$localesReady[$company_id] = true;
+		$m = pjCompanyLocaleModel::factory();
+		if ((int) $m->where('t1.company_id', $company_id)->findCount()->getData() > 0)
+		{
+			return;
+		}
+		$missing = pjCompanyModel::factory()
+			->where(sprintf("t1.id NOT IN (SELECT `company_id` FROM `%s`)", $m->getTable()))
+			->findAll()->getDataPair(null, 'id');
+		if (!in_array($company_id, array_map('intval', $missing), true))
+		{
+			$missing[] = $company_id;
+		}
+		$locales = pjBaseLocaleModel::factory()->unscoped()->orderBy('t1.sort ASC')->findAll()->getData();
+		foreach ($missing as $cid)
+		{
+			self::seedLocales((int) $cid, $locales);
+		}
+	}
+
+	/** A new company starts with the system default language only. */
+	public static function seedNewCompanyLocales($company_id)
+	{
+		$default = pjBaseLocaleModel::factory()->unscoped()->orderBy('t1.is_default DESC, t1.sort ASC')->limit(1)->findAll()->getData();
+		self::seedLocales((int) $company_id, $default);
+		self::$localesReady[(int) $company_id] = true;
+	}
+
+	private static function seedLocales($company_id, $locales)
+	{
+		if ($company_id <= 0 || empty($locales))
+		{
+			return;
+		}
+		$m = pjCompanyLocaleModel::factory();
+		if ((int) $m->where('t1.company_id', $company_id)->findCount()->getData() > 0)
+		{
+			return;
+		}
+		$has_default = false;
+		foreach (array_values($locales) as $i => $l)
+		{
+			$is_default = ((int) $l['is_default'] === 1 && !$has_default) ? 1 : 0;
+			$has_default = $has_default || $is_default === 1;
+			$m->reset()->setAttributes(array('company_id' => $company_id, 'locale_id' => $l['id'], 'sort' => $i + 1, 'is_default' => $is_default))->insert();
+		}
+		if (!$has_default)
+		{
+			$first = array_values($locales);
+			$m->reset()->where('company_id', $company_id)->where('locale_id', $first[0]['id'])->limit(1)->modifyAll(array('is_default' => 1));
+		}
+	}
+
+	/** FROM clause for pjBaseLocaleModel: the system languages the company uses, with its order and default. */
+	public static function localeFromSql($company_id)
+	{
+		return sprintf("(SELECT l.`id`, l.`language_iso`, l.`name`, l.`flag`, l.`dir`, cl.`sort`, cl.`is_default` FROM `%s` AS l INNER JOIN `%s` AS cl ON cl.`locale_id` = l.`id` AND cl.`company_id` = %u)",
+			pjBaseLocaleModel::factory()->getTable(), pjCompanyLocaleModel::factory()->getTable(), (int) $company_id);
+	}
+
+	/** Default language id of a company (0 if none). */
+	public static function companyDefaultLocale($company_id)
+	{
+		self::ensureLocales($company_id);
+		$row = pjCompanyLocaleModel::factory()->where('t1.company_id', (int) $company_id)->orderBy('t1.is_default DESC, t1.sort ASC')->limit(1)->findAll()->getDataIndex(0);
+		return !empty($row) ? (int) $row['locale_id'] : 0;
+	}
+
+	/** Language ids of a company. */
+	public static function companyLocaleIds($company_id)
+	{
+		self::ensureLocales($company_id);
+		return array_map('intval', pjCompanyLocaleModel::factory()->where('t1.company_id', (int) $company_id)->findAll()->getDataPair(null, 'locale_id'));
+	}
+
+	/** How many companies use a system language. */
+	public static function localeUsage($locale_id)
+	{
+		return (int) pjCompanyLocaleModel::factory()->where('t1.locale_id', (int) $locale_id)->findCount()->getData();
+	}
 }
+
 ?>

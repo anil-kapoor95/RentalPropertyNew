@@ -420,6 +420,14 @@ class pjBaseAppController extends pjController
             }
             pjCurrency::factory()->setCurrencyData();
 
+            // Languages are per company: a language the current company does not use
+            // (e.g. after switching company) falls back to the company's default.
+            if ($this->session->has($this->defaultLocale) && class_exists('pjCompanyContext') && class_exists('pjCompanyLocaleModel')
+                && ($lcid = (int) pjCompanyContext::localeScopeId()) > 0
+                && !in_array((int) $this->session->getData($this->defaultLocale), pjCompanyContext::companyLocaleIds($lcid), true))
+            {
+                $this->session->unsetData($this->defaultLocale);
+            }
             if (!$this->session->has($this->defaultLocale))
             {
                 $locale_arr = pjLocaleModel::factory()->where('is_default', 1)->limit(1)->findAll()->getData();

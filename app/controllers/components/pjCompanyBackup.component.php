@@ -154,6 +154,7 @@ class pjCompanyBackup
 		$mods = array(
 			'companies' => pjCompanyModel::factory(),
 			'co_options' => pjCompanyOptionModel::factory(),
+			'co_locales' => pjCompanyLocaleModel::factory(),
 			'base_opt' => pjBaseOptionModel::factory(),
 			'calendars' => pjCalendarModel::factory(),
 			'multi_lang' => pjMultiLangModel::factory(),
@@ -184,6 +185,7 @@ class pjCompanyBackup
 		$t = array(
 			'companies'   => pjCompanyModel::factory()->getTable(),
 			'co_options'  => pjCompanyOptionModel::factory()->getTable(),
+			'co_locales'  => pjCompanyLocaleModel::factory()->getTable(),
 			'base_opt'    => pjBaseOptionModel::factory()->getTable(),
 			'calendars'   => pjCalendarModel::factory()->getTable(),
 			'multi_lang'  => pjMultiLangModel::factory()->getTable(),
@@ -259,6 +261,7 @@ class pjCompanyBackup
 			$this->del($t[$tb], sprintf("`company_id` = %u", $X));
 		}
 		$this->del($t['co_options'], sprintf("`company_id` = %u", $X));
+		$this->del($t['co_locales'], sprintf("`company_id` = %u", $X));
 		$this->del($t['multi_lang'], sprintf("(`model` = 'pjBaseField' AND `field` = '%s')", pjCompanyContext::labelField($X)));
 		$this->del($t['multi_lang'], sprintf("(`model` = 'pjBaseOption' AND `foreign_id` = %u)", $fid));
 		$this->del($t['multi_lang'], sprintf("(`model` = 'pjBaseCountry' AND `foreign_id` IN (SELECT `id` FROM `%s` WHERE `company_id` = %u))", $mods['countries']->getTable(), $X));
@@ -272,6 +275,7 @@ class pjCompanyBackup
 		$this->write("\n-- Data\n");
 		$this->dump($mods['companies'], sprintf("`id` = %u", $X));
 		$this->dump($mods['co_options'], sprintf("`company_id` = %u", $X));
+		$this->dump($mods['co_locales'], sprintf("`company_id` = %u", $X));
 		$this->dump($mods['countries'], sprintf("`company_id` = %u", $X));
 		$this->dump($mods['co_countries'], sprintf("`company_id` = %u", $X));
 		$this->dump($mods['multi_lang'], sprintf("(`model` = 'pjBaseField' AND `field` = '%s')", pjCompanyContext::labelField($X)));
