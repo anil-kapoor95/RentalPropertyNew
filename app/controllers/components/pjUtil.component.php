@@ -214,18 +214,27 @@ class pjUtil extends pjToolkit
     
     static public function getWeekRange($date, $week_start)
     {
-        $week_arr = array(0=>'sunday',
-            1=>'monday',
-            2=>'tuesday',
-            3=>'wednesday',
-            4=>'thursday',
-            5=>'friday',
-            6=>'saturday');
-        
+        // First day of the week: 0 = Sunday ... 6 = Saturday. An empty or invalid
+        // value used to give a 1970 range (so "This week" exports were empty);
+        // fall back to Monday.
+        $week_start = is_numeric($week_start) ? (int) $week_start : 1;
+        if ($week_start < 0 || $week_start > 6)
+        {
+            $week_start = 1;
+        }
+
         $ts = strtotime($date);
-        $start = (date('w', $ts) == 0) ? $ts : strtotime('last ' . $week_arr[$week_start], $ts);
-        $week_start = ($week_start == 0 ? 6 : $week_start -1);
-        return array(date('Y-m-d', $start), date('Y-m-d', strtotime('next ' . $week_arr[$week_start], $start)));
+        if ($ts === false)
+        {
+            $ts = time();
+        }
+        // Days since the start of the week (0 when $date is the first day itself).
+        // The old "last <weekday>" logic returned the previous week on the first
+        // day of the week and an 8-day range on Sundays.
+        $diff = ((int) date('w', $ts) - $week_start + 7) % 7;
+        $start = mktime(0, 0, 0, (int) date('n', $ts), (int) date('j', $ts) - $diff, (int) date('Y', $ts));
+        $end = mktime(0, 0, 0, (int) date('n', $start), (int) date('j', $start) + 6, (int) date('Y', $start));
+        return array(date('Y-m-d', $start), date('Y-m-d', $end));
     }
     
     static public function getComingWhere($period, $week_start)

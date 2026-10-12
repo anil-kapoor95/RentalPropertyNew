@@ -886,9 +886,12 @@ class pjAppController extends pjBaseAppController
 		
 		if($promo_code != '')
 		{
+			// Coupon of the property's company only (codes are unique per company).
+			$voucher_company_id = pjCompanyContext::companyOfCalendar($calendar_id);
 			$voucher_arr = pjVoucherModel::factory()
-				->where('code', $promo_code)
-				->where("t1.id IN (SELECT TCV.voucher_id FROM `".pjCalendarVoucherModel::factory()->getTable()."` AS `TCV` WHERE `TCV`.calendar_id='".$calendar_id."') ")
+				->where('t1.code', $promo_code)
+				->where('t1.company_id', $voucher_company_id)
+				->where("t1.id IN (SELECT TCV.voucher_id FROM `".pjCalendarVoucherModel::factory()->getTable()."` AS `TCV` WHERE `TCV`.calendar_id='".(int) $calendar_id."') ")
 				->findAll()
 				->getData();
 			if(!empty($voucher_arr))
@@ -926,7 +929,10 @@ class pjAppController extends pjBaseAppController
 				}
 				if($promo_valid == 1)
 				{
-					$cnt_reservations = pjReservationModel::factory()->where('status', 'confirmed')->where('promo_code', $promo_code)->findCount()->getData();
+					// Usage limit counts only this company's bookings: another company may use the same code.
+					$cnt_reservations = pjReservationModel::factory()->where('t1.status', 'confirmed')->where('t1.promo_code', $promo_code)
+						->where(sprintf("t1.calendar_id IN (SELECT `id` FROM `%s` WHERE `company_id` = %u)", pjCalendarModel::factory()->getTable(), $voucher_company_id))
+						->findCount()->getData();
 					if($cnt_reservations >= (int) $voucher_arr['used_count'])
 					{
 						$promo_valid = 0;
@@ -954,7 +960,8 @@ class pjAppController extends pjBaseAppController
 		$discount_arr = pjDiscountModel::factory()
 			->select('t1.*, t2.content as name')
 			->join('pjMultiLang', "t2.foreign_id = t1.id AND t2.model = 'pjDiscount' AND t2.locale = '".$locale_id."' AND t2.field = 'name'", 'left')
-			->where("(t1.id IN (SELECT TCV.discount_id FROM `".pjCalendarDiscountModel::factory()->getTable()."` AS `TCV` WHERE `TCV`.calendar_id='".$calendar_id."'))")
+			->where("(t1.id IN (SELECT TCV.discount_id FROM `".pjCalendarDiscountModel::factory()->getTable()."` AS `TCV` WHERE `TCV`.calendar_id='".(int) $calendar_id."'))")
+			->where('t1.company_id', pjCompanyContext::companyOfCalendar($calendar_id))
 			->findAll()
 			->getData();
 		

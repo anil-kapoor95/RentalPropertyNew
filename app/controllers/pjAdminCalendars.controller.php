@@ -39,6 +39,72 @@ class pjAdminCalendars extends pjAdmin
 		return (int) $fallback;
 	}
 
+	/**
+	 * Every property sub-page (Reservations, Prices, Limits, Notifications,
+	 * Payments, iCal feeds, Export ...) receives the property as calendar_id /
+	 * cid / id, or a record that belongs to a property. Stop any request whose
+	 * property is not one of the active company (or, for Owners, not their own).
+	 */
+	public function beforeFilter()
+	{
+		$result = parent::beforeFilter();
+		if ($result === false || !$this->isLoged())
+		{
+			return $result;
+		}
+		$action = $this->_get->toString('action');
+
+		foreach (array('calendar_id', 'cid') as $key)
+		{
+			foreach (array($this->_get, $this->_post) as $src)
+			{
+				if ($src->check($key) && $src->toInt($key) > 0 && !$this->isCompanyCalendar($src->toInt($key)))
+				{
+					$this->denyCompanyAccess($_SERVER['PHP_SELF'] . '?controller=pjAdminCalendars&action=pjActionIndex&err=ACR08');
+				}
+			}
+		}
+
+		// Property id in the URL of the property page and its sub-actions.
+		if (in_array($action, array('pjActionUpdate', 'pjActionSaveCalendar', 'pjActionDeleteCalendar'), true)
+			&& $this->_get->toInt('id') > 0 && !$this->isCompanyCalendar($this->_get->toInt('id')))
+		{
+			// The administrator may work in every company: opening a property link of
+			// another company switches the workspace to that company first.
+			if ($action === 'pjActionUpdate' && !$this->isXHR() && !self::isPost())
+			{
+				$cal_company = pjCompanyContext::companyOfCalendar($this->_get->toInt('id'));
+				if ($cal_company > 0 && pjCompanyContext::setActive($cal_company, $this->getRoleId(), $this->getUserId()))
+				{
+					pjCompanyContext::clearCache();
+					$this->setCalendarId($this->_get->toInt('id'));
+					pjUtil::redirect($_SERVER['PHP_SELF'] . '?controller=pjAdminCalendars&action=pjActionUpdate&id=' . $this->_get->toInt('id')
+						. ($this->_get->toString('tab') !== '' ? '&tab=' . preg_replace('/[^a-z_]/', '', $this->_get->toString('tab')) : ''));
+				}
+			}
+			$this->denyCompanyAccess($_SERVER['PHP_SELF'] . '?controller=pjAdminCalendars&action=pjActionIndex&err=ACR08');
+		}
+
+		// Records addressed by their own id.
+		if ($action === 'pjActionDeletePeriod' && $this->_post->toInt('id') > 0)
+		{
+			$period = pjPeriodModel::factory()->find($this->_post->toInt('id'))->getData();
+			if (empty($period) || !$this->isCompanyCalendar($period['foreign_id']))
+			{
+				$this->denyCompanyAccess();
+			}
+		}
+		if ($action === 'pjActionNotificationsSetContent' && $this->_post->toInt('notify_id') > 0)
+		{
+			$notify = pjNotificationModel::factory()->find($this->_post->toInt('notify_id'))->getData();
+			if (empty($notify) || (int) $notify['is_general'] === 1 || !$this->isCompanyCalendar($notify['foreign_id']))
+			{
+				$this->denyCompanyAccess();
+			}
+		}
+		return $result;
+	}
+
 	public $sessionPrice = 'pjPrice_session';
 	
 	public function pjActionCheckRefId()
@@ -181,7 +247,7 @@ class pjAdminCalendars extends pjAdmin
 				}				
 				$notification_ids = pjNotificationModel::factory()->where('foreign_id', $id)->findAll()->getDataPair(NULL, 'id');
 	        	if ($notification_ids) {
-					pjNotificationModel::factory()->reset()->whereIn('foreign_id', $notification_ids)->eraseAll();
+					pjNotificationModel::factory()->reset()->whereIn('id', $notification_ids)->eraseAll(); // by id: whereIn('foreign_id', <notification ids>) deleted other properties' notifications
 					pjMultiLangModel::factory()->reset()->where('model', 'pjNotification')->whereIn('foreign_id', $notification_ids)->eraseAll();
 				}
 				$this->pjActionDeleteImages($id);
@@ -271,7 +337,7 @@ class pjAdminCalendars extends pjAdmin
 			}				
 			$notification_ids = pjNotificationModel::factory()->where('foreign_id !=', 1)->whereIn('foreign_id', $record)->where('foreign_id !=', $this->getCalendarId())->findAll()->getDataPair(NULL, 'id');
         	if ($notification_ids) {
-				pjNotificationModel::factory()->reset()->whereIn('foreign_id', $notification_ids)->eraseAll();
+				pjNotificationModel::factory()->reset()->whereIn('id', $notification_ids)->eraseAll(); // by id: whereIn('foreign_id', <notification ids>) deleted other properties' notifications
 				pjMultiLangModel::factory()->reset()->where('model', 'pjNotification')->whereIn('foreign_id', $notification_ids)->eraseAll();
 			}		    
 			$this->pjActionDeleteImages($record);
@@ -456,10 +522,28 @@ class pjAdminCalendars extends pjAdmin
             $this->sendForbidden();
             return;
         }
+        // The property in the URL (?id=) is the one being edited/exported. The
+        // "current property" kept in the session can be changed meanwhile by
+        // another tab (or a front-end page), which made e.g. the export tab
+        // export a different property than the one on screen.
+        $url_id = $this->_get->toInt('id');
+        if ($url_id > 0 && $url_id != (int) $this->getCalendarId() && $this->isCompanyCalendar($url_id))
+        {
+            $url_arr = pjCalendarModel::factory()->find($url_id)->getData();
+            if (!empty($url_arr) && (!$this->isOwner() || (int) $url_arr['user_id'] === (int) $this->getUserId()))
+            {
+                $this->setCalendarId($url_id);
+                // Calendar-specific options must follow the property.
+                $this->option_arr = array_merge($this->option_arr, pjOptionModel::factory()->getPairs($url_id));
+                $this->set('option_arr', $this->option_arr);
+                pjRegistry::getInstance()->set('options', $this->option_arr);
+            }
+        }
+
         $pjOptionModel = new pjOptionModel();
         $pjLimitModel = pjLimitModel::factory();
-        
-        $calendar_id = $this->getCalendarId(); 
+
+        $calendar_id = $this->getCalendarId();
         if ($this->_post->check('property_update'))
         {
 	        $pjOptionModel
@@ -668,7 +752,7 @@ class pjAdminCalendars extends pjAdmin
 					$pjReservationModel = pjReservationModel::factory();
 					$pjCalendarModel = pjCalendarModel::factory();
 					
-					$week_start = $this->option_arr['o_week_start'];
+					$week_start = isset($this->option_arr['o_week_start']) ? $this->option_arr['o_week_start'] : 1;
 					$pjReservationModel->reset();
 					$pjReservationModel->where('t1.calendar_id', $this->getCalendarId());
 					if($this->_post->toString('period') == 'next')
@@ -713,6 +797,7 @@ class pjAdminCalendars extends pjAdmin
 						->findAll()
 						->getData();
 					
+					$arr = array();
 					foreach($_arr as $v)
 					{
 						if($this->option_arr['o_price_based_on'] == 'nights')
@@ -946,17 +1031,17 @@ class pjAdminCalendars extends pjAdmin
 				SELECT p1.id AS `pid1`, p2.id AS `pid2`
 				FROM `%1\$s` `p1`, `%1\$s` `p2`
 				WHERE p2.date_from BETWEEN p1.date_from AND p1.date_to
-                AND p2.id != p1.id
+                AND p2.id != p1.id AND p1.foreign_id = %2\$u AND p2.foreign_id = %2\$u
 					UNION
 				SELECT p1.id, p2.id
 				FROM `%1\$s` `p1`, `%1\$s` `p2`
 				WHERE p2.date_to BETWEEN p1.date_from AND p1.date_to
-				AND p2.id != p1.id
+				AND p2.id != p1.id AND p1.foreign_id = %2\$u AND p2.foreign_id = %2\$u
 			) `p`, `%1\$s` `p1`, `%1\$s` `p2`
 			WHERE p1.id = `pid1` AND p2.id = `pid2`
 			AND p2.id > p1.id
 			AND p1.tab_id != p2.tab_id
-			GROUP BY p1.id, p1.foreign_id, p1.tab_id, p1.season, p1.date_from, p1.date_to, p2.id, p2.foreign_id, p2.tab_id, p2.season, p2.date_from, p2.date_to", $pjPriceModel->getTable());
+			GROUP BY p1.id, p1.foreign_id, p1.tab_id, p1.season, p1.date_from, p1.date_to, p2.id, p2.foreign_id, p2.tab_id, p2.season, p2.date_from, p2.date_to", $pjPriceModel->getTable(), (int) $this->getCalendarId());
 		$price_overlap_arr = $pjPriceModel->reset()->prepare($query)->exec()->getData();
 		
 		$this

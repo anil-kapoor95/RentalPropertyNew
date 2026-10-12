@@ -6,6 +6,13 @@ if (!defined("ROOT_PATH"))
 }
 class pjFront extends pjAppController
 {
+	/**
+	 * Public pages keep their property in their own session key, so opening a
+	 * booking form / preview no longer changes the property the admin is
+	 * working on in the back-office (same browser session).
+	 */
+	public $defaultCalendarId = 'front_calendar_id';
+
 	/** Company the current public page belongs to (0 = not known). */
 	public $frontCompanyId = 0;
 
@@ -1532,7 +1539,7 @@ class pjFront extends pjAppController
 			foreach($calendar_arr as $k => $v)
 			{
 				$option_arr = pjOptionModel::factory()->reset()->getPairs($v['id']);
-				$week_start = $this->option_arr['o_week_start'];
+				$week_start = isset($this->option_arr['o_week_start']) ? $this->option_arr['o_week_start'] : 1;
 				$column = 'created';
 				$direction = 'DESC';
 				$pjReservationModel->reset();

@@ -90,7 +90,7 @@ class pjCSV
  * @access private
  * @example php://output, php://memory, php://temp
  */
-	private $io_stream = 'php://temp/maxmemory:0';
+	private $io_stream = 'php://temp/maxmemory:33554432'; // keep up to 32 MB in memory: the system temp folder is often not writable for the web server (e.g. XAMPP on macOS), which produced empty export files
 /**
  * Constructor - automatically called when you create a new instance of a class with new
  *
