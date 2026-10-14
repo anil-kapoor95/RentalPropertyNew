@@ -768,8 +768,47 @@ class pjAppController extends pjBaseAppController
 		return $result;
 	}
 	
+	/**
+	 * Keep only the extras of the property (active ones) and clamp each quantity to the
+	 * range the booking forms offer: 1..max_count for multi / count extras, otherwise 1.
+	 * Returns array($extras, $qty) in the form the forms post (extra[id]=on, qty[id]=n).
+	 */
+	public static function sanitizeExtras($calendar_id, $extras, $qty)
+	{
+		$extras = is_array($extras) ? $extras : array();
+		$qty = is_array($qty) ? $qty : array();
+		$ids = array_values(array_filter(array_map('intval', array_keys($extras))));
+		if (empty($ids) || (int) $calendar_id <= 0)
+		{
+			return array(array(), array());
+		}
+		$rows = pjExtraModel::factory()
+			->whereIn('t1.id', $ids)
+			->where('t1.status', 'T')
+			->where(sprintf("t1.id IN (SELECT `extra_id` FROM `%s` WHERE `calendar_id` = %u)", pjCalendarExtraModel::factory()->getTable(), (int) $calendar_id))
+			->findAll()->getDataPair('id');
+		$out_extras = array();
+		$out_qty = array();
+		foreach ($rows as $id => $row)
+		{
+			$max = 1;
+			if ($row['multi'] == 'T' || in_array($row['price_type'], array('count', 'count_night'), true))
+			{
+				$max = max(1, (int) $row['max_count']);
+			}
+			$q = isset($qty[$id]) ? (int) $qty[$id] : 1;
+			$out_extras[(int) $id] = 'on';
+			$out_qty[(int) $id] = min($max, max(1, $q));
+		}
+		return array($out_extras, $out_qty);
+	}
+
 	protected function pjActionCalcPrices($calendar_id, $start_dt, $end_dt, $adults, $children, $extras, $extras_qty, $promo_code, $option_arr, $locale_id)
 	{
+		// never trust posted extras: only the property's own, with a valid quantity
+		list($extras, $extras_qty) = self::sanitizeExtras($calendar_id, $extras, $extras_qty);
+		$adults = max(0, (int) $adults);
+		$children = max(0, (int) $children);
 		$tourist_tax = 0;
 		$amount = 0;
 		$extra_price = 0;
@@ -1126,6 +1165,49 @@ class pjAppController extends pjBaseAppController
 	 * @param int $feed_id
 	 * @return array
 	 */
+	/**
+	 * Every import URL of a property: the "iCal feeds" tab (feeds table) and the
+	 * iCal URL list (ical_urls table). They are always synced together because the
+	 * importer removes imported bookings that no longer appear in any of the feeds.
+	 */
+	public static function calendarFeedList($calendar_id)
+	{
+		$feeds = array();
+		$rows = pjIcalUrlsModel::factory()->reset()->where('calendar_id', (int) $calendar_id)->findAll()->getData();
+		foreach ($rows as $row)
+		{
+			$url = isset($row['ical_urls']) ? trim($row['ical_urls']) : '';
+			if ($url !== '')
+			{
+				$feeds[] = array('url' => $url, 'provider_id' => (int) $row['provider_id']);
+			}
+		}
+		$rows = pjFeedModel::factory()->reset()->where('calendar_id', (int) $calendar_id)->findAll()->getData();
+		foreach ($rows as $row)
+		{
+			$url = isset($row['url']) ? trim($row['url']) : '';
+			if ($url !== '')
+			{
+				$feeds[] = array('url' => $url, 'provider_id' => max(1, (int) $row['provider_id']));
+			}
+		}
+		return $feeds;
+	}
+
+	/**
+	 * Sync the property a row of the "iCal feeds" tab (feeds table) belongs to.
+	 * (Called by the iCal feeds tab when a feed is added, changed or refreshed.)
+	 */
+	public static function syncFeeds($feed_id)
+	{
+		$feed = pjFeedModel::factory()->reset()->find((int) $feed_id)->getData();
+		if (empty($feed) || empty($feed['calendar_id']))
+		{
+			return array('status' => 'ERR', 'code' => 404, 'text' => 'Feed not found.');
+		}
+		return self::syncCalendarIcalUrls((int) $feed['calendar_id']);
+	}
+
 	public static function syncIcalUrls($feed_id)
 	{
 		$feed = pjIcalUrlsModel::factory()->find((int) $feed_id)->getData();
@@ -1153,21 +1235,7 @@ class pjAppController extends pjBaseAppController
 			return array('status' => 'ERR', 'code' => 400, 'text' => 'Invalid calendar.');
 		}
 
-		$rows = pjIcalUrlsModel::factory()
-			->reset()
-			->where('calendar_id', $calendar_id)
-			->findAll()
-			->getData();
-
-		$feeds = array();
-		foreach ($rows as $row)
-		{
-			$url = isset($row['ical_urls']) ? trim($row['ical_urls']) : '';
-			if ($url !== '')
-			{
-				$feeds[] = array('url' => $url, 'provider_id' => (int) $row['provider_id']);
-			}
-		}
+		$feeds = self::calendarFeedList($calendar_id);
 
 		if (empty($feeds))
 		{
@@ -1589,6 +1657,69 @@ class pjAppController extends pjBaseAppController
 	 * @param string $url
 	 * @return string|false
 	 */
+	/**
+	 * Is $url a feed address the server may fetch? Only http(s) on the default ports
+	 * (or the script's own address) and never a private, loopback, link-local or
+	 * reserved address - an attacker must not be able to make the server read its
+	 * own network (SSRF). On success $pin holds "host:port:ip" for CURLOPT_RESOLVE so
+	 * the checked address is the one actually used.
+	 */
+	public static function isSafeFeedUrl($url, &$pin = null)
+	{
+		$pin = null;
+		$parts = @parse_url($url);
+		if (empty($parts['scheme']) || empty($parts['host']) || !in_array(strtolower($parts['scheme']), array('http', 'https'), true) || isset($parts['user']) || isset($parts['pass']))
+		{
+			return false;
+		}
+		$host = strtolower(trim($parts['host'], '[]'));
+		$port = isset($parts['port']) ? (int) $parts['port'] : (strtolower($parts['scheme']) === 'https' ? 443 : 80);
+
+		// the script's own address (a feed exported by this installation) is allowed
+		$own = defined('PJ_INSTALL_URL') ? @parse_url(PJ_INSTALL_URL) : array();
+		if (!empty($own['host']) && strtolower($own['host']) === $host)
+		{
+			$own_port = isset($own['port']) ? (int) $own['port'] : (isset($own['scheme']) && strtolower($own['scheme']) === 'https' ? 443 : 80);
+			return $own_port === $port;
+		}
+		if (!in_array($port, array(80, 443, 8080, 8443), true))
+		{
+			return false;
+		}
+		$ips = array();
+		if (filter_var($host, FILTER_VALIDATE_IP))
+		{
+			$ips[] = $host;
+		} else {
+			$records = @dns_get_record($host, DNS_A + DNS_AAAA);
+			foreach ((array) $records as $r)
+			{
+				if (!empty($r['ip'])) { $ips[] = $r['ip']; }
+				if (!empty($r['ipv6'])) { $ips[] = $r['ipv6']; }
+			}
+			if (empty($ips))
+			{
+				$v4 = @gethostbynamel($host);
+				$ips = is_array($v4) ? $v4 : array();
+			}
+		}
+		if (empty($ips))
+		{
+			return false;
+		}
+		foreach ($ips as $ip)
+		{
+			if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE))
+			{
+				return false;
+			}
+		}
+		// connect over IPv4 when the host has one (not every server has IPv6 connectivity)
+		usort($ips, function ($a, $b) { return (strpos($a, ':') !== false) - (strpos($b, ':') !== false); });
+		$pin = $host . ':' . $port . ':' . (strpos($ips[0], ':') !== false ? '[' . $ips[0] . ']' : $ips[0]);
+		return true;
+	}
+
 	public static function fetchIcalContents($url)
 	{
 		$url = trim((string) $url);
@@ -1597,13 +1728,15 @@ class pjAppController extends pjBaseAppController
 			return false;
 		}
 
-		// A local .ics file path is accepted as a feed source (handy for testing
-		// and for feeds hosted on this same server). Remote feeds must be http(s).
+		// A local .ics file is accepted only from the script's upload folder (handy for
+		// testing); any other path on the server is refused.
 		if (!preg_match('#^https?://#i', $url))
 		{
-			if (is_file($url))
+			$file = realpath($url);
+			$base = realpath(PJ_INSTALL_PATH . PJ_UPLOAD_PATH);
+			if ($file !== false && $base !== false && strpos($file, $base . DIRECTORY_SEPARATOR) === 0 && is_file($file))
 			{
-				$body = @file_get_contents($url);
+				$body = @file_get_contents($file);
 				return ($body === false || $body === '') ? false : $body;
 			}
 			return false;
@@ -1613,31 +1746,57 @@ class pjAppController extends pjBaseAppController
 
 		if (function_exists('curl_init'))
 		{
-			$ch = curl_init();
-			curl_setopt($ch, CURLOPT_URL, $url);
-			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-			curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-			curl_setopt($ch, CURLOPT_MAXREDIRS, 5);
-			curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 15);
-			curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-			curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-			curl_setopt($ch, CURLOPT_USERAGENT, $agent);
-			$body = curl_exec($ch);
-			$code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-			curl_close($ch);
-			if ($body !== false && $body !== '' && ($code === 0 || ($code >= 200 && $code < 400)))
+			// Redirects are followed by hand so that every hop is checked.
+			for ($hop = 0; $hop <= 5; $hop++)
 			{
-				return $body;
+				$pin = null;
+				if (!self::isSafeFeedUrl($url, $pin))
+				{
+					return false;
+				}
+				$ch = curl_init();
+				curl_setopt($ch, CURLOPT_URL, $url);
+				curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+				curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+				if (defined('CURLOPT_PROTOCOLS'))
+				{
+					curl_setopt($ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+				}
+				if ($pin !== null && defined('CURLOPT_RESOLVE'))
+				{
+					curl_setopt($ch, CURLOPT_RESOLVE, array($pin));
+				}
+				curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 15);
+				curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+				curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+				curl_setopt($ch, CURLOPT_USERAGENT, $agent);
+				$body = curl_exec($ch);
+				$code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+				$next = (string) curl_getinfo($ch, CURLINFO_REDIRECT_URL);
+				curl_close($ch);
+				if ($code >= 300 && $code < 400 && $next !== '')
+				{
+					$url = $next;
+					continue;
+				}
+				if ($body !== false && $body !== '' && $code >= 200 && $code < 300)
+				{
+					return $body;
+				}
+				return false;
 			}
 			return false;
 		}
 
+		if (!self::isSafeFeedUrl($url))
+		{
+			return false;
+		}
 		$context = stream_context_create(array(
 			'http' => array(
 				'method'          => 'GET',
 				'timeout'         => 30,
-				'follow_location' => 1,
-				'max_redirects'   => 5,
+				'follow_location' => 0,
 				'header'          => 'User-Agent: ' . $agent . "\r\n",
 			),
 			'ssl' => array(

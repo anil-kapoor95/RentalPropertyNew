@@ -11,13 +11,46 @@ class pjCron extends pjAppController
 		$this->setLayout('pjActionEmpty');
 	}
 
+	public function beforeFilter()
+	{
+		parent::beforeFilter();
+		// These jobs are started by the cron runner (pjBaseCron). Opened directly as a
+		// URL they run only for a logged-in administrator (the report lists properties).
+		if ($this->_get->toString('controller') === 'pjCron' && !$this->isAdmin())
+		{
+			header('HTTP/1.1 403 Forbidden');
+			exit;
+		}
+		return true;
+	}
+
+	/**
+	 * Property filter for the company the cron job runs for: > 0 that company,
+	 * -1 the system run (properties without a company or of an inactive company,
+	 * which no company run covers), 0 every property.
+	 */
+	private function cronCalendarSql()
+	{
+		$cid = class_exists('pjCompanyContext') ? (int) pjCompanyContext::$cronCompanyId : 0;
+		$cal = pjCalendarModel::factory()->getTable();
+		if ($cid > 0)
+		{
+			return sprintf("t1.calendar_id IN (SELECT `id` FROM `%s` WHERE `company_id` = %u)", $cal, $cid);
+		}
+		if ($cid === -1)
+		{
+			return sprintf("t1.calendar_id IN (SELECT `id` FROM `%s` WHERE `company_id` IS NULL OR `company_id` NOT IN (SELECT `id` FROM `%s` WHERE `status` = 'T'))", $cal, pjCompanyModel::factory()->getTable());
+		}
+		return null;
+	}
+
 	public function pjActionSyncIcalUrls()
 	{
 		$pjIcalUrlsModel = pjIcalUrlsModel::factory()->reset();
 		// Cron job running for one company: only that company's properties.
-		if (class_exists('pjCompanyContext') && (int) pjCompanyContext::$cronCompanyId > 0)
+		if (($filter = $this->cronCalendarSql()) !== null)
 		{
-			$pjIcalUrlsModel->where(sprintf("t1.calendar_id IN (SELECT `id` FROM `%s` WHERE `company_id` = %u)", pjCalendarModel::factory()->getTable(), (int) pjCompanyContext::$cronCompanyId));
+			$pjIcalUrlsModel->where($filter);
 		}
 		$rows = $pjIcalUrlsModel->findAll()->getData();
 
@@ -25,6 +58,19 @@ class pjCron extends pjAppController
 		foreach ($rows as $row)
 		{
 			if (!empty($row['ical_urls']) && (int) $row['calendar_id'] > 0)
+			{
+				$calendar_ids[(int) $row['calendar_id']] = true;
+			}
+		}
+		// properties with feeds added in the "iCal feeds" tab
+		$pjFeedModel = pjFeedModel::factory()->reset();
+		if (($filter = $this->cronCalendarSql()) !== null)
+		{
+			$pjFeedModel->where($filter);
+		}
+		foreach ($pjFeedModel->findAll()->getData() as $row)
+		{
+			if (!empty($row['url']) && (int) $row['calendar_id'] > 0)
 			{
 				$calendar_ids[(int) $row['calendar_id']] = true;
 			}

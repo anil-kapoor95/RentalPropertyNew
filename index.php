@@ -1,32 +1,31 @@
 <?php
 if (!headers_sent())
 {
-    if (isset($_GET['session_id']) && !empty($_GET['session_id']))
+    // A session id in the URL is only accepted for the public booking pages (embedded
+    // widgets on other sites that cannot keep a cookie) - never for the back-office,
+    // where it would allow session fixation.
+    $pj_public = isset($_GET['controller']) && in_array($_GET['controller'], array('pjFront', 'pjListings'), true);
+    if ($pj_public && isset($_GET['session_id']) && is_string($_GET['session_id']) && preg_match('/^[a-zA-Z0-9,-]{20,128}$/', trim($_GET['session_id'])))
     {
-        $session_id = trim($_GET['session_id']);
-        $pattern = '/[a-zA-Z0-9]+/';
-        if (version_compare(PHP_VERSION, '5.0.0', '>='))
-        {
-            $pattern = '/[a-zA-Z0-9,-]+/';
-        }
-        if (preg_match($pattern, $session_id))
-        {
-            session_id($session_id);
-        }
+        session_id(trim($_GET['session_id']));
     }
+    @ini_set('session.cookie_httponly', '1');
+    @ini_set('session.use_strict_mode', '1');
     session_name('RPBCalendarV2');
     @session_start();
 }
-if (isset($_GET["reporting"]) && $_GET["reporting"] == '0')
+// Error output can be switched on only by a logged-in administrator.
+$pj_is_admin = isset($_SESSION['admin_user']) && is_array($_SESSION['admin_user']) && isset($_SESSION['admin_user']['role_id']) && (int) $_SESSION['admin_user']['role_id'] === 1;
+if ($pj_is_admin && isset($_GET["reporting"]) && $_GET["reporting"] == '0')
 {
     $_SESSION["error_reporting"] = '0';
-} else if (isset($_GET["reporting"]) && $_GET["reporting"]== '1') {
+} else if ($pj_is_admin && isset($_GET["reporting"]) && $_GET["reporting"]== '1') {
     $_SESSION["error_reporting"] = '1';
 }
-if (isset($_SESSION["error_reporting"]) && $_SESSION["error_reporting"]=='1')
+if ($pj_is_admin && isset($_SESSION["error_reporting"]) && $_SESSION["error_reporting"]=='1')
 {
     ini_set("display_errors", "On");
-    error_reporting(E_ALL|E_STRICT);
+    error_reporting(E_ALL);
 } else {
     error_reporting(0);
 }

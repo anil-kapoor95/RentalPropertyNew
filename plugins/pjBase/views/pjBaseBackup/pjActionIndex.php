@@ -65,7 +65,17 @@
     								<div class="col-lg-4 col-md-4 col-sm-6 col-xs-6">
 		                            	<div class="switch onoffswitch-data">
 			                                <div class="onoffswitch">
-			                                    <input type="checkbox" class="onoffswitch-checkbox" id="o_auto_backup"<?php echo $tpl['option_arr']['o_auto_backup'] == 'Yes'? ' checked' : NULL;?>>
+			                                    <?php
+			                                    // in a company: the company's own automatic-backup switch
+			                                    $autoOn = $tpl['option_arr']['o_auto_backup'] == 'Yes';
+			                                    if (class_exists('pjCompanyContext') && ($bkCid = (int) pjCompanyContext::activeId($controller->getRoleId(), $controller->getUserId())) > 0)
+			                                    {
+			                                        $bkJob = pjBaseCronJobModel::factory()->where('t1.controller', 'pjBaseBackup')->where('t1.action', 'pjActionAutoBackup')->limit(1)->findAll()->getDataIndex(0);
+			                                        $bkRows = !empty($bkJob) ? pjCompanyContext::companyCronRows($bkCid) : array();
+			                                        $autoOn = !empty($bkJob) && !empty($bkRows[$bkJob['id']]['is_active']);
+			                                    }
+			                                    ?>
+			                                    <input type="checkbox" class="onoffswitch-checkbox" id="o_auto_backup"<?php echo $autoOn ? ' checked' : NULL;?>>
 			                                    <label class="onoffswitch-label" for="o_auto_backup">
 			                                        <span class="onoffswitch-inner" data-on="<?php __('plugin_base_yesno_ARRAY_T', false, true); ?>" data-off="<?php __('plugin_base_yesno_ARRAY_F', false, true); ?>"></span>
 			                                        <span class="onoffswitch-switch"></span>

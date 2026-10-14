@@ -579,6 +579,11 @@ class pjAuth extends pjAuthAppController
                     return array('status' => 'ERR', 'code' => $this->checkAccountLocked($params['login_email']) ? '5' : '3');
                 }
                 $current_login = date("Y-m-d H:i:s");
+                // new session id at login (an id planted before login is worthless)
+                if (session_status() === PHP_SESSION_ACTIVE && !headers_sent())
+                {
+                    @session_regenerate_id(true);
+                }
                 $this->session->setData($this->defaultUser, $user);
 
                 $login_token = sha1(time());

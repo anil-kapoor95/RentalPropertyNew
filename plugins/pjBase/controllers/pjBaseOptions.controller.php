@@ -6,20 +6,54 @@ if (!defined("ROOT_PATH"))
 }
 class pjBaseOptions extends pjBase
 {
+	/** Option tabs saved by each System Options page (the form posts its page as next_action). */
+	private static $pageTabs = array(
+		'pjActionIndex' => array(1),
+		'pjActionVisual' => array(2),
+		'pjActionEmailSettings' => array(3),
+		'pjActionLoginProtection' => array(4, 5, 6, 7),
+		'pjActionCaptchaSpam' => array(8),
+		'pjActionApiKeys' => array(10),
+	);
+
+	/** Stop an Ajax request unless the user may open the given System Options page. */
+	private function requirePageAccess($page)
+	{
+		if (!$this->isLoged() || !pjAuth::factory('pjBaseOptions', $page)->hasAccess())
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Access denied.'));
+		}
+	}
+
 	public function pjActionOptionsUpdate()
 	{
 		if (self::isPost())
 		{
+			$this->checkLogin();
+			// Saves only the options of the page that was submitted, and only with access to that page.
+			$next_action = $this->_post->toString('next_action');
+			if (!isset(self::$pageTabs[$next_action]) || !pjAuth::factory('pjBaseOptions', $next_action)->hasAccess())
+			{
+				$this->sendForbidden();
+				return;
+			}
 			$pjBaseOptionModel = new pjBaseOptionModel();
 			// Options belong to the active company; only the admin login-screen keys stay shared.
 			$company_fid = $this->getOptionsForeignId();
+			$allowed_keys = pjBaseOptionModel::factory()
+				->whereIn('t1.foreign_id', array_unique(array((int) $company_fid, 1)))
+				->whereIn('t1.tab_id', self::$pageTabs[$next_action])
+				->findAll()->getDataPair('key', 'key');
+			// The shared (all companies) login-screen keys are changed by administrators only.
+			$may_edit_shared = (int) $this->getRoleId() === 1;
 			
 			foreach ($this->_post->raw() as $key => $value)
 			{
 				if (preg_match('/value-(string|text|int|float|enum|bool|color)-(.*)/', $key) === 1)
 				{
 					list(, $type, $k) = explode("-", $key);
-					if (!empty($k))
+					if (!empty($k) && isset($allowed_keys[$k])
+						&& ($may_edit_shared || !class_exists('pjCompanyContext') || !in_array($k, pjCompanyContext::$globalOptionKeys, true)))
 					{
 						$_value = ':NULL';
 						if ($value)
@@ -212,7 +246,8 @@ class pjBaseOptions extends pjBase
 			self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'HTTP method not allowed.'));
 		}
 		
-		if (!$this->_post->has('theme'))
+		$this->requirePageAccess('pjActionVisual');
+		if (!$this->_post->has('theme') || !preg_match('/^theme[0-9]+$/', $this->_post->toString('theme')))
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Missing, empty or invalid parameters.'));
 		}
@@ -277,6 +312,7 @@ class pjBaseOptions extends pjBase
 		{
 		    self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => __('plugin_base_email_text_ARRAY_2', true)));
 		}
+		$this->requirePageAccess('pjActionEmailSettings');
 		
 		$post = array();
 		foreach ($this->_post->raw() as $key => $value)
@@ -375,6 +411,7 @@ class pjBaseOptions extends pjBase
 		{
 		    self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => __('plugin_base_email_text_ARRAY_2', true)));
 		}
+		$this->requirePageAccess('pjActionEmailSettings');
 		
 		if (!$this->_post->check('email'))
 		{

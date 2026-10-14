@@ -25,10 +25,10 @@
 					pjUtil::printNotice(@$titles[$controller->_get->toString('err')], @$bodies[$controller->_get->toString('err')]);
 				}
 				?>
-				<form action="<?php echo PJ_INSTALL_URL; ?>index.php?controller=pjFront&amp;action=pjActionCancel&amp;cid=<?php echo $controller->_get->toInt('cid'); ?>&amp;id=<?php echo $controller->_get->toString('id'); ?>&hash=<?php echo $controller->_get->toString('hash'); ?>" method="post" class="pj-form form">
+				<form action="<?php echo PJ_INSTALL_URL; ?>index.php?controller=pjFront&amp;action=pjActionCancel&amp;cid=<?php echo $controller->_get->toInt('cid'); ?>&amp;id=<?php echo $controller->_get->toInt('id'); ?>&amp;hash=<?php echo pjSanitize::html($controller->_get->toString('hash')); ?>" method="post" class="pj-form form">
 					<input type="hidden" name="cancel_booking" value="1" />
-					<input type="hidden" name="id" value="<?php echo $controller->_get->toString('id'); ?>" />
-					<input type="hidden" name="hash" value="<?php echo $controller->_get->toString('hash'); ?>" />
+					<input type="hidden" name="id" value="<?php echo $controller->_get->toInt('id'); ?>" />
+					<input type="hidden" name="hash" value="<?php echo pjSanitize::html($controller->_get->toString('hash')); ?>" />
 					
 					<fieldset class="fieldset white float_left w350">
 						<legend><?php __('lblReservationInfo'); ?></legend>

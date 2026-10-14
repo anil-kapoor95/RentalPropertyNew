@@ -142,16 +142,21 @@ class pjBaseSms extends pjBase
         }
         
         $pjBaseSmsModel = pjBaseSmsModel::factory();
+        // a company sees the SMS it sent; administrators also the ones of no company
+        if (class_exists('pjCompanyContext') && ($sms_cid = (int) pjCompanyContext::activeId($this->getRoleId(), $this->getUserId())) > 0)
+        {
+            $pjBaseSmsModel->where(pjCompanyContext::smsScopeSql($sms_cid, (int) $this->getRoleId() === 1));
+        }
         
         if ($q = $this->_get->toString('q'))
         {
-            $q = str_replace(array('%', '_'), array('\%', '\_'), $q);
+            $q = str_replace(array('%', '_'), array('\%', '\_'), $pjBaseSmsModel->escapeStr($q));
             $pjBaseSmsModel->where("(t1.number LIKE '%$q%' OR t1.text LIKE '%$q%')");
         }
         
         $column = 'created';
         $direction = 'DESC';
-        if ($this->_get->toString('direction') && $this->_get->toString('column') && in_array(strtoupper($this->_get->toString('direction')), array('ASC', 'DESC')))
+        if ($this->_get->toString('direction') && in_array($this->_get->toString('column'), array('created', 'number', 'text', 'status'), true) && in_array(strtoupper($this->_get->toString('direction')), array('ASC', 'DESC')))
         {
             $column = $this->_get->toString('column');
             $direction = strtoupper($this->_get->toString('direction'));
@@ -371,21 +376,25 @@ class pjBaseSms extends pjBase
 	        ->send();
         $statuses = __('plugin_base_sms_statuses', true);
         $status = isset($statuses[$response]) ? $statuses[$response] : $response;
+        // the SMS log belongs to the company that sent the message
+        $sms_company = class_exists('pjCompanyContext') ? pjCompanyContext::currentSmsCompany() : 0;
         if (is_array($params['number'])) {
         	$numbers = $pjSmsApi->getNumbers();
         	foreach ($numbers as $number) {
-        		pjBaseSmsModel::factory()->reset()->setAttributes(array(
+        		$sms_id = pjBaseSmsModel::factory()->reset()->setAttributes(array(
 		            'number' => $number,
 		            'text' => $pjSmsApi->getText(),
 		            'status' => $status
-		        ))->insert();
+		        ))->insert()->getInsertId();
+		        if ($sms_company > 0) { pjCompanyContext::tagSms($sms_id, $sms_company); }
         	}
         } else {
-	        pjBaseSmsModel::factory()->setAttributes(array(
+	        $sms_id = pjBaseSmsModel::factory()->setAttributes(array(
 	            'number' => $pjSmsApi->getNumber(),
 	            'text' => $pjSmsApi->getText(),
 	            'status' => $status
-	        ))->insert();
+	        ))->insert()->getInsertId();
+	        if ($sms_company > 0) { pjCompanyContext::tagSms($sms_id, $sms_company); }
         }
         return $response;
     }

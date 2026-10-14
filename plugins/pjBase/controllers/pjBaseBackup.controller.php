@@ -516,13 +516,28 @@ class pjBaseBackup extends pjBase
                 self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'Missing, empty or invalid parameters.'));
             }
             $set = $this->_post->toInt('set') == 1 ? 'Yes' : 'No';
-            pjBaseOptionModel::factory()
-                ->where('foreign_id', $this->getForeignId())
-                ->where('`key`', 'o_auto_backup')
-                ->limit(1)
-                ->modifyAll(array('value' => "Yes|No::{$set}"));
-
-            pjBaseCronJobModel::factory()->setIsActive($this->_post->toInt('set'), 'pjBaseBackup', 'pjActionAutoBackup');
+            // In a company the switch turns that company's automatic backup on or off
+            // (its own cron row); the system-wide switch belongs to administrators.
+            $cid = $this->backupCompanyId();
+            if ($cid > 0 && $this->_post->toString('scope') !== 'system')
+            {
+                $job = pjBaseCronJobModel::factory()->where('t1.controller', 'pjBaseBackup')->where('t1.action', 'pjActionAutoBackup')->limit(1)->findAll()->getDataIndex(0);
+                if (!empty($job))
+                {
+                    pjCompanyContext::saveCronRow($cid, $job['id'], array('is_active' => $this->_post->toInt('set') == 1 ? 1 : 0));
+                }
+            }
+            // The system-wide automatic backup (all companies) is switched only without a
+            // company, or explicitly (scope=system) by an administrator.
+            if ($cid <= 0 || ($this->_post->toString('scope') === 'system' && $this->canSystemBackup()))
+            {
+                pjBaseOptionModel::factory()
+                    ->where('foreign_id', $this->getForeignId())
+                    ->where('`key`', 'o_auto_backup')
+                    ->limit(1)
+                    ->modifyAll(array('value' => "Yes|No::{$set}"));
+                pjBaseCronJobModel::factory()->setIsActive($this->_post->toInt('set'), 'pjBaseBackup', 'pjActionAutoBackup');
+            }
             
             self::jsonResponse(array('status' => 'OK', 'code' => 200, 'text' => ''));
             exit;
@@ -644,7 +659,10 @@ class pjBaseBackup extends pjBase
 	{
 		$this->setLayout('pjActionEmpty');
 
-		if ($this->option_arr['o_auto_backup'] == 'Yes')
+		// A company run is governed by the company's own switch (its cron row, checked
+		// by the cron runner); the system run by the system-wide option.
+		$cron_company_run = $this->hasCompanies() && (int) pjCompanyContext::$cronCompanyId > 0;
+		if ($cron_company_run || $this->option_arr['o_auto_backup'] == 'Yes')
 		{
 		    $titles = __('plugin_base_error_titles', true);
     	    $bodies = __('plugin_base_error_bodies', true);

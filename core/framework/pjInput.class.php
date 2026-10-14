@@ -35,8 +35,30 @@ class pjInput
      */
     protected $_method;
     
+    /**
+     * pjModel treats any value that starts with ":" followed by a letter as raw SQL
+     * (':NOW()', ':NULL' ... set by the code). Request data must never reach the
+     * database that way, so such values get a leading space and are stored as text.
+     */
+    public static function neutralizeSql(&$value)
+    {
+        if (is_array($value))
+        {
+            foreach ($value as $k => &$v)
+            {
+                self::neutralizeSql($v);
+            }
+            unset($v);
+        } elseif (is_string($value) && preg_match('/^:[a-zA-Z]/', $value)) {
+            $value = ' ' . $value;
+        }
+    }
+
     public function __construct()
     {
+        self::neutralizeSql($_POST);
+        self::neutralizeSql($_GET);
+        self::neutralizeSql($_REQUEST);
         if(isset($_POST))
         {
             $this->_pj_post = $_POST;

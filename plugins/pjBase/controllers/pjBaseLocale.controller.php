@@ -156,17 +156,41 @@ class pjBaseLocale extends pjBase
 	 * Fill texts missing in language $to with the texts of language $from
 	 * (only empty places are filled, nothing is overwritten).
 	 */
-	private static function cCopyTexts($from, $to)
+	private static function cCopyTexts($from, $to, $cid = 0)
 	{
 		if ((int) $from <= 0 || (int) $to <= 0 || (int) $from === (int) $to)
 		{
 			return;
 		}
 		$pjMultiLangModel = pjMultiLangModel::factory();
+		$scope = '';
+		if ((int) $cid > 0)
+		{
+			// Only the texts of this company's records (plus the shared system texts):
+			// the language may be used by other companies whose texts must not change.
+			$cid = (int) $cid;
+			$cal = sprintf("(SELECT `id` FROM `%s` WHERE `company_id` = %u)", pjCalendarModel::factory()->getTable(), $cid);
+			$own = function ($model) use ($cid) { return sprintf("(SELECT `id` FROM `%s` WHERE `company_id` = %u)", $model->getTable(), $cid); };
+			$scope = sprintf(" AND (
+				(t1.model = 'pjBaseField' AND t1.field IN ('title', '%1\$s'))
+				OR (t1.model IN ('pjCalendar', 'pjOption', 'pjPayment') AND t1.foreign_id IN %2\$s)
+				OR (t1.model = 'pjReservation' AND t1.foreign_id IN (SELECT `id` FROM `%3\$s` WHERE `calendar_id` IN %2\$s))
+				OR (t1.model = 'pjExtra' AND t1.foreign_id IN %4\$s)
+				OR (t1.model = 'pjFeature' AND t1.foreign_id IN %5\$s)
+				OR (t1.model = 'pjDiscount' AND t1.foreign_id IN %6\$s)
+				OR (t1.model = 'pjVoucher' AND t1.foreign_id IN %7\$s)
+				OR (t1.model = 'pjNotification' AND t1.foreign_id IN (SELECT `id` FROM `%8\$s` WHERE `company_id` = %9\$u OR `foreign_id` IN %2\$s))
+				OR (t1.model = 'pjBaseOption' AND t1.foreign_id = %10\$u)
+				OR (t1.model = 'pjBaseCountry' AND t1.foreign_id IN (SELECT `id` FROM `%11\$s` WHERE `company_id` IS NULL OR `company_id` = %9\$u))
+			)",
+				pjCompanyContext::labelField($cid), $cal, pjReservationModel::factory()->getTable(),
+				$own(pjExtraModel::factory()), $own(pjFeatureModel::factory()), $own(pjDiscountModel::factory()), $own(pjVoucherModel::factory()),
+				pjNotificationModel::factory()->getTable(), $cid, pjCompanyContext::optionsForeignId($cid), pjBaseCountryModel::factory()->getTable());
+		}
 		$sql = sprintf("INSERT IGNORE INTO `%1\$s` (`foreign_id`, `model`, `locale`, `field`, `content`)
 			SELECT t1.foreign_id, t1.model, :to_locale, t1.field, t1.content
 			FROM `%1\$s` AS t1
-			WHERE t1.locale = :from_locale", $pjMultiLangModel->getTable());
+			WHERE t1.locale = :from_locale%2\$s", $pjMultiLangModel->getTable(), $scope);
 		$pjMultiLangModel->prepare($sql)->exec(array('to_locale' => (int) $to, 'from_locale' => (int) $from));
 	}
 
@@ -198,10 +222,7 @@ class pjBaseLocale extends pjBase
 			return;
 		}
 		pjLocaleModel::factory()->set('id', $locale_id)->erase();
-		if (!empty($arr['flag']) && is_file($arr['flag']))
-		{
-			@unlink($arr['flag']);
-		}
+		self::removeFlagFile($arr);
 		pjMultiLangModel::factory()->where('locale', $locale_id)->eraseAll();
 		self::checkDefault();
 	}
@@ -228,7 +249,7 @@ class pjBaseLocale extends pjBase
 			return array('status' => 'ERR', 'code' => 100, 'text' => 'Locale has not been added.');
 		}
 		// texts of this company's records that do not exist yet in that language
-		self::cCopyTexts($default, $locale_id);
+		self::cCopyTexts($default, $locale_id, $cid);
 		$m = pjCompanyLocaleModel::factory();
 		$sorts = $m->where('t1.company_id', $cid)->findAll()->getDataPair(null, 'sort');
 		$max = empty($sorts) ? 0 : max(array_map('intval', $sorts));
@@ -261,7 +282,7 @@ class pjBaseLocale extends pjBase
 		{
 			return;
 		}
-		self::cCopyTexts($old_id, $new_id);
+		self::cCopyTexts($old_id, $new_id, $cid);
 		pjCompanyLocaleModel::factory()->where('company_id', $cid)->where('locale_id', $old_id)->limit(1)->modifyAll(array('locale_id' => $new_id));
 		if ((int) $this->getLocaleId() === (int) $old_id)
 		{
@@ -275,8 +296,31 @@ class pjBaseLocale extends pjBase
 	 * ("title") is not changed. A text equal to the system text with no own
 	 * text yet is not stored.
 	 */
+	/**
+	 * Label text saved by a company user: keep simple formatting tags only and drop
+	 * scripts, event handlers and javascript: links (labels are printed unescaped on
+	 * the admin and public pages, also to administrators working in that company).
+	 */
+	public static function cleanLabelHtml($content)
+	{
+		if (!is_string($content) || strpos($content, '<') === false)
+		{
+			return $content;
+		}
+		$content = preg_replace('#<(script|style|iframe|object|embed|svg|math)\b[^>]*>.*?</\1\s*>#is', '', $content);
+		$content = strip_tags($content, '<br><b><strong><i><em><u><p><a><span><ul><ol><li><small><sup><sub>');
+		$content = preg_replace('#\s+on[a-z]+\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)#i', '', $content);
+		$content = preg_replace('#\s+(style|srcdoc|formaction)\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)#i', '', $content);
+		$content = preg_replace('#(href|src)\s*=\s*(["\']?)\s*(javascript|vbscript|data)\s*:#i', '$1=$2#', $content);
+		return $content;
+	}
+
 	private function cSaveLabelOverride($field_id, $locale_id, $label_field, $content, $base)
 	{
+		if ((int) $this->getRoleId() !== 1)
+		{
+			$content = self::cleanLabelHtml($content);
+		}
 		$m = pjMultiLangModel::factory();
 		$own = $m->where('t1.model', 'pjBaseField')->where('t1.foreign_id', (int) $field_id)->where('t1.locale', (int) $locale_id)->where('t1.field', $label_field)->limit(1)->findAll()->getDataIndex(0);
 		if (!empty($own))
@@ -408,7 +452,7 @@ class pjBaseLocale extends pjBase
 		{
 			foreach ((array) $fields as $field => $content)
 			{
-				$out[$locale_id][$field === 'title' ? $name : $field] = $content;
+				$out[$locale_id][$field === 'title' ? $name : $field] = (int) $this->getRoleId() !== 1 ? self::cleanLabelHtml($content) : $content;
 			}
 		}
 		return $out;
@@ -509,10 +553,7 @@ class pjBaseLocale extends pjBase
 				self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Locale has not been deleted.'));
 			}
 			
-			if (!empty($arr['flag']) && is_file($arr['flag']))
-			{
-				@unlink($arr['flag']);
-			}
+			self::removeFlagFile($arr);
 			
 			# Re-order
 			$tmp = $pjLocaleModel
@@ -559,15 +600,17 @@ class pjBaseLocale extends pjBase
 			if ($this->_get->toString('q'))
 			{
 			    $q = $this->_get->toString('q');
-				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($q));
+				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($pjLocaleModel->escapeStr($q)));
 				$pjLocaleModel->where(sprintf("(t1.name LIKE '%1\$s' OR t1.language_iso LIKE '%1\$s')", "%$q%"));
 			}
 			
 			$column = 't1.sort';
 			$direction = 'ASC';
-			if ($this->_get->toString('direction') && $this->_get->toString('column') && in_array(strtoupper($this->_get->toString('direction')), array('ASC', 'DESC')))
+			// sort only by the grid's own columns
+			$sortable = array('language_iso' => 't1.language_iso', 'name' => 't1.name', 'file' => '`file`', 'dir' => 't1.dir', 'is_default' => 't1.is_default', 'sort' => 't1.sort', 't1.sort' => 't1.sort');
+			if ($this->_get->toString('direction') && $this->_get->toString('column') && isset($sortable[$this->_get->toString('column')]) && in_array(strtoupper($this->_get->toString('direction')), array('ASC', 'DESC')))
 			{
-			    $column = $this->_get->toString('column');
+			    $column = $sortable[$this->_get->toString('column')];
 				$direction = strtoupper($this->_get->toString('direction'));
 			}
 
@@ -632,9 +675,11 @@ class pjBaseLocale extends pjBase
 			
 			$column = 't1.id';
 			$direction = 'ASC';
-			if ($this->_get->toString('direction') && $this->_get->toString('column') && in_array(strtoupper($this->_get->toString('direction')), array('ASC', 'DESC')))
+			// sort only by the grid's own columns
+			$sortable = array('t1.id' => 't1.id', 'id' => 't1.id', 'did' => 't1.id', 'default_language' => '`default_language`', 'content' => '`content`');
+			if ($this->_get->toString('direction') && $this->_get->toString('column') && isset($sortable[$this->_get->toString('column')]) && in_array(strtoupper($this->_get->toString('direction')), array('ASC', 'DESC')))
 			{
-			    $column = $this->_get->toString('column');
+			    $column = $sortable[$this->_get->toString('column')];
 				$direction = strtoupper($this->_get->toString('direction'));
 			}
 		
@@ -705,6 +750,21 @@ class pjBaseLocale extends pjBase
 		exit;
 	}
 	
+	/** Delete an uploaded flag image - only from the upload folder, never any other file. */
+	private static function removeFlagFile($arr)
+	{
+		if (empty($arr['flag']) || !is_file($arr['flag']))
+		{
+			return;
+		}
+		$file = realpath($arr['flag']);
+		$base = realpath(PJ_INSTALL_PATH . (defined('PJ_UPLOAD_PATH') ? PJ_UPLOAD_PATH : 'app/web/upload/'));
+		if ($file !== false && $base !== false && strpos($file, $base . DIRECTORY_SEPARATOR) === 0)
+		{
+			@unlink($file);
+		}
+	}
+
 	public function pjActionSaveLocale()
 	{
 		$this->setAjax(true);
@@ -724,7 +784,19 @@ class pjBaseLocale extends pjBase
 			    && $this->_post->toString('column')
 				&& $this->_get->toInt('id') > 0)
 			{
+			    // the grid edits only these columns (default / order have their own actions)
+			    if (!in_array($this->_post->toString('column'), array('language_iso', 'name', 'dir'), true)
+			        || ($this->_post->toString('column') === 'dir' && !in_array($this->_post->toString('value'), array('ltr', 'rtl'), true)))
+			    {
+			        self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Invalid column.'));
+			    }
 			    $cid = $this->cLocaleCompany();
+			    // a language row shared with other companies is renamed only by an administrator
+			    if ($cid > 0 && $this->_post->toString('column') !== 'language_iso' && (int) $this->getRoleId() !== 1
+			        && pjCompanyContext::localeUsage($this->_get->toInt('id')) > 1)
+			    {
+			        self::jsonResponse(array('status' => 'ERR', 'code' => 105, 'text' => 'This language is shared with other companies.'));
+			    }
 			    if ($cid > 0 && !in_array($this->_get->toInt('id'), pjCompanyContext::companyLocaleIds($cid), true))
 			    {
 			        self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Locale not found.'));
@@ -739,6 +811,10 @@ class pjBaseLocale extends pjBase
 			    if ($this->_post->toString('column') == 'language_iso')
 				{
 				    $tmp = pjLocaleLanguageModel::factory()->where('t1.iso', $this->_post->toString('value'))->limit(1)->findAll()->getDataIndex(0);
+				    if (empty($tmp))
+				    {
+				        self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Unknown language.'));
+				    }
 					
 					$data['dir'] = $tmp['dir'];
 					$data['name'] = $tmp['native'];

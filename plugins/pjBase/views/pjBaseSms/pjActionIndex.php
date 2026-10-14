@@ -1,4 +1,7 @@
-<div class="row wrapper border-bottom white-bg page-heading">
+<?php
+// SMS settings of this company only (never the platform's account shown to a company)
+$smsOwn = pjBaseOptionModel::factory()->getPairs($controller->getOptionsForeignId());
+?><div class="row wrapper border-bottom white-bg page-heading">
     <div class="col-sm-12">
         <div class="row">
             <div class="col-sm-10">
@@ -64,14 +67,14 @@
 							<div class="form-group">
 								<label class="col-sm-3 control-label"><?php __('plugin_base_sms_api_username', false, true);?></label>
 								<div class="col-sm-6">
-									<input type="text" id="plugin_sms_api_username" name="plugin_sms_api_username" value="<?php echo !empty($tpl['option_arr']['plugin_sms_api_username']) ? $tpl['option_arr']['plugin_sms_api_username'] : NULL;?>" class="form-control">
+									<input type="text" id="plugin_sms_api_username" name="plugin_sms_api_username" value="<?php echo !empty($smsOwn['plugin_sms_api_username']) ? pjSanitize::html($smsOwn['plugin_sms_api_username']) : NULL;?>" class="form-control">
 								</div><!-- /.col-sm-6 -->
 							</div><!-- /.form-group -->
 							
 							<div class="form-group">
 								<label class="col-sm-3 control-label"><?php __('plugin_base_sms_api_key', false, true);?></label>
 								<div class="col-sm-6">
-									<input type="text" id="plugin_sms_api_key" name="plugin_sms_api_key" value="<?php echo !empty($tpl['option_arr']['plugin_sms_api_key']) ? $tpl['option_arr']['plugin_sms_api_key'] : NULL;?>" class="form-control">
+									<input type="text" id="plugin_sms_api_key" name="plugin_sms_api_key" value="<?php echo !empty($smsOwn['plugin_sms_api_key']) ? pjSanitize::html($smsOwn['plugin_sms_api_key']) : NULL;?>" class="form-control">
 								</div><!-- /.col-sm-6 -->
 							</div><!-- /.form-group -->
 							
@@ -86,14 +89,14 @@
 							<div class="form-group">
 								<label class="col-sm-3 control-label"><?php __('plugin_base_sms_country_code', false, true);?></label>
 								<div class="col-sm-6">
-									<input type="text" id="plugin_sms_country_code" name="plugin_sms_country_code" value="<?php echo !empty($tpl['option_arr']['plugin_sms_country_code']) ? $tpl['option_arr']['plugin_sms_country_code'] : NULL;?>" class="form-control">
+									<input type="text" id="plugin_sms_country_code" name="plugin_sms_country_code" value="<?php echo !empty($smsOwn['plugin_sms_country_code']) ? pjSanitize::html($smsOwn['plugin_sms_country_code']) : NULL;?>" class="form-control">
 								</div><!-- /.col-sm-6 -->
 							</div><!-- /.form-group -->
 							
 							<div class="form-group">
 								<label class="col-sm-3 control-label"><?php __('plugin_base_sms_phone_number_length', false, true);?></label>
 								<div class="col-sm-6">
-									<input type="text" id="plugin_sms_phone_number_length" name="plugin_sms_phone_number_length" value="<?php echo !empty($tpl['option_arr']['plugin_sms_phone_number_length']) ? $tpl['option_arr']['plugin_sms_phone_number_length'] : NULL;?>" class="form-control digits" data-msg-digits="<?php __('plugin_base_digits_validation');?>">
+									<input type="text" id="plugin_sms_phone_number_length" name="plugin_sms_phone_number_length" value="<?php echo !empty($smsOwn['plugin_sms_phone_number_length']) ? pjSanitize::html($smsOwn['plugin_sms_phone_number_length']) : NULL;?>" class="form-control digits" data-msg-digits="<?php __('plugin_base_digits_validation');?>">
 									<small><?php __('plugin_base_sms_phone_number_length_note', false, true);?></small>
 								</div><!-- /.col-sm-6 -->
 							</div><!-- /.form-group -->

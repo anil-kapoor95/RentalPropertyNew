@@ -34,17 +34,31 @@ class pjAdmin extends pjAppController
 		    }
 		}
 		
-		$ref_inherits_arr = array();
+		// The page an Ajax call was made from (Referer). It is only trusted inside the
+		// same controller: an action without a permission row of its own inherits the
+		// permission of a page of the SAME section, never of an unrelated page
+		// (a forged Referer to e.g. the dashboard must not unlock other sections).
+		$ref_controller = $ref_action = null;
 		if ($this->isXHR() && isset($_SERVER['HTTP_REFERER'])) {
-		    $http_refer_arr = parse_url($_SERVER['HTTP_REFERER']);
-		    parse_str($http_refer_arr['query'], $arr);
-		    if (isset($arr['controller']) && isset($arr['action'])) {
-		        parse_str($_SERVER['QUERY_STRING'], $query_string_arr);
-		        $key = $query_string_arr['controller'].'_'.$query_string_arr['action'];
-		        $cnt = pjAuthPermissionModel::factory()->where('`key`', $key)->findCount()->getData();
-		        if ($cnt <= 0) {
-		            $ref_inherits_arr[$query_string_arr['controller'].'::'.$query_string_arr['action']] = $arr['controller'].'::'.$arr['action'];
+		    $http_refer_arr = @parse_url($_SERVER['HTTP_REFERER']);
+		    if (is_array($http_refer_arr) && isset($http_refer_arr['query'])) {
+		        parse_str($http_refer_arr['query'], $arr);
+		        if (isset($arr['controller'], $arr['action']) && is_string($arr['controller']) && is_string($arr['action'])) {
+		            $ref_controller = $arr['controller'];
+		            $ref_action = $arr['action'];
 		        }
+		    }
+		}
+		$ref_inherits_arr = array();
+		// ($_GET values are already cleared by pjInput here, so read the query string)
+		$query_string_arr = array();
+		parse_str(isset($_SERVER['QUERY_STRING']) ? $_SERVER['QUERY_STRING'] : '', $query_string_arr);
+		$req_controller = isset($query_string_arr['controller']) && is_string($query_string_arr['controller']) ? $query_string_arr['controller'] : '';
+		$req_action = isset($query_string_arr['action']) && is_string($query_string_arr['action']) ? $query_string_arr['action'] : '';
+		if ($ref_controller !== null && $req_controller !== '' && $req_action !== '' && $ref_controller === $req_controller) {
+		    $cnt = pjAuthPermissionModel::factory()->where('`key`', $req_controller . '_' . $req_action)->findCount()->getData();
+		    if ($cnt <= 0) {
+		        $ref_inherits_arr[$req_controller . '::' . $req_action] = $ref_controller . '::' . $ref_action;
 		    }
 		}
 		
@@ -72,29 +86,36 @@ class pjAdmin extends pjAppController
 			'pjAdminCalendars::pjActionGetReservation' => 'pjAdminCalendars::pjActionUpdate',
 		    
 		    'pjAdminReservations::pjActionGetBooking' => 'pjAdminReservations::pjActionIndex',
-		    'pjAdminReservations::pjActionCalcPrice' => 'pjAdminReservations::pjActionCreate',
-		    'pjAdminReservations::pjActionCalcPrice' => 'pjAdminReservations::pjActionUpdate',		    
-			'pjAdminReservations::pjActionGetAdults' => 'pjAdminReservations::pjActionCreate',
-		    'pjAdminReservations::pjActionGetAdults' => 'pjAdminReservations::pjActionUpdate',
-			'pjAdminReservations::pjActionGetChildren' => 'pjAdminReservations::pjActionCreate',
-		    'pjAdminReservations::pjActionGetChildren' => 'pjAdminReservations::pjActionUpdate',
-			'pjAdminReservations::pjActionGetExtras' => 'pjAdminReservations::pjActionCreate',
-		    'pjAdminReservations::pjActionGetExtras' => 'pjAdminReservations::pjActionUpdate',		
-		    'pjAdminReservations::pjActionGetPMs' => 'pjAdminReservations::pjActionCreate',
-		    'pjAdminReservations::pjActionGetPMs' => 'pjAdminReservations::pjActionUpdate',
-		    'pjAdminReservations::pjActionGetBookingFields' => 'pjAdminReservations::pjActionCreate',
-		    'pjAdminReservations::pjActionGetBookingFields' => 'pjAdminReservations::pjActionUpdate',
-			'pjAdminReservations::pjActionCheckUnique' => 'pjAdminReservations::pjActionCreate',
-		    'pjAdminReservations::pjActionCheckUnique' => 'pjAdminReservations::pjActionUpdate',
-			'pjAdminReservations::pjActionCheckDates' => 'pjAdminReservations::pjActionCreate',
-		    'pjAdminReservations::pjActionCheckDates' => 'pjAdminReservations::pjActionUpdate',		
+		    'pjAdminReservations::pjActionGetReservation' => 'pjAdminReservations::pjActionIndex',
+		    'pjAdminReservations::pjActionSaveReservation' => 'pjAdminReservations::pjActionUpdate',
 			'pjAdminReservations::pjActionGetSchedule' => 'pjAdminReservations::pjActionSchedule',
 			'pjAdminReservations::pjActionEmailConfirmation' => 'pjAdminReservations::pjActionUpdate',
 			'pjAdminReservations::pjActionEmailCancellation' => 'pjAdminReservations::pjActionUpdate',		    
 		    		    
-		    'pjAdmin::pjActionRedirect' => 'pjAdminCalendars::pjActionIndex',
-		    'pjAdmin::pjActionRedirect' => 'pjAdminReservations::pjActionIndex',
 		    'pjAdmin::pjActionRedirect' => 'pjAdminReservations::pjActionUpdate',
+		    'pjAdmin::pjActionSetLocale' => 'pjAdmin::pjActionIndex',
+		    'pjAdmin::pjActionVerifyAPIKey' => 'pjBaseOptions::pjActionApiKeys',
+
+			'pjAdminCalendars::pjActionGetCalendar' => 'pjAdminCalendars::pjActionIndex',
+			'pjAdminCalendars::pjActionGetCal' => 'pjAdminCalendars::pjActionIndex',
+			'pjAdminCalendars::pjActionCheckRefId' => 'pjAdminCalendars::pjActionIndex',
+			'pjAdminCalendars::pjActionSaveCalendar' => 'pjAdminCalendars::pjActionUpdate',
+			'pjAdminCalendars::pjActionSaveFeed' => 'pjAdminCalendars::pjActionUpdate',
+			'pjAdminCalendars::pjActionSaveIcalUrls' => 'pjAdminCalendars::pjActionUpdate',
+			'pjAdminCalendars::pjActionGetPassword' => 'pjAdminCalendars::pjActionUpdate',
+			'pjAdminCalendars::pjActionDeletePassword' => 'pjAdminCalendars::pjActionUpdate',
+			'pjAdminCalendars::pjActionDeletePasswordBulk' => 'pjAdminCalendars::pjActionUpdate',
+			'pjAdminCalendars::pjActionDeletePeriod' => 'pjAdminCalendars::pjActionUpdate',
+			'pjAdminCalendars::pjActionDeletePropertyImage' => 'pjAdminCalendars::pjActionUpdate',
+			'pjAdminCalendars::pjActionPaymentOptions' => 'pjAdminCalendars::pjActionUpdate',
+			'pjAdminCalendars::pjActionNotificationsGetMetaData' => 'pjAdminCalendars::pjActionUpdate',
+			'pjAdminCalendars::pjActionNotificationsGetContent' => 'pjAdminCalendars::pjActionUpdate',
+			'pjAdminCalendars::pjActionNotificationsSetContent' => 'pjAdminCalendars::pjActionUpdate',
+
+			'pjAdminFeatures::pjActionGetFeature' => 'pjAdminFeatures::pjActionIndex',
+			'pjAdminFeatures::pjActionSaveFeature' => 'pjAdminFeatures::pjActionUpdate',
+			'pjAdminOptions::pjActionSaveThemeColors' => 'pjAdminOptions::pjActionColors',
+			'pjAdminVouchers::pjActionCheckCode' => 'pjAdminVouchers::pjActionIndex',
 		
 			'pjAdminExtras::pjActionGetExtra' => 'pjAdminExtras::pjActionIndex',
 			'pjAdminExtras::pjActionSaveExtra' => 'pjAdminExtras::pjActionUpdate',
@@ -109,7 +130,14 @@ class pjAdmin extends pjAppController
 			'pjAdminVouchers::pjActionGetVoucher' => 'pjAdminVouchers::pjActionIndex',
 			'pjAdminVouchers::pjActionSaveVoucher' => 'pjAdminVouchers::pjActionUpdate',
 		);
-		if ($_REQUEST['controller'] == 'pjAdminOptions' && isset($_REQUEST['next_action'])) {
+		// Helpers of the add AND the edit form: the permission of the form they were called from.
+		$form_helpers = array('pjActionCalcPrice', 'pjActionGetAdults', 'pjActionGetChildren', 'pjActionGetExtras', 'pjActionGetPMs', 'pjActionGetBookingFields', 'pjActionCheckUnique', 'pjActionCheckDates');
+		foreach ($form_helpers as $helper) {
+		    $form = $ref_controller === 'pjAdminReservations' && $ref_action === 'pjActionCreate' ? 'pjActionCreate' : 'pjActionUpdate';
+		    $inherits_arr['pjAdminReservations::' . $helper] = 'pjAdminReservations::' . $form;
+		}
+		if (isset($_REQUEST['controller']) && $_REQUEST['controller'] == 'pjAdminOptions' && isset($_REQUEST['next_action'])
+		    && is_string($_REQUEST['next_action']) && preg_match('/^pjAction[A-Za-z]+$/', $_REQUEST['next_action'])) {
 		    $inherits_arr['pjAdminOptions::pjActionUpdate'] = 'pjAdminOptions::'.$_REQUEST['next_action'];
 		}
 		$inherits_arr = array_merge($ref_inherits_arr, $inherits_arr);

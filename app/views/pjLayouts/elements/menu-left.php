@@ -60,7 +60,7 @@ $hasAccessScriptVouchers          = pjAuth::factory('pjAdminVouchers', 'pjAction
 // Permissions - Discounts
 $hasAccessScriptDiscounts          = pjAuth::factory('pjAdminDiscounts', 'pjActionIndex')->hasAccess();
 
-$hasDemoData = pjCalendarModel::factory()->reset()->where('t1.uuid LIKE', 'rpbcdemo%')->where('t1.company_id', pjCompanyContext::activeId($controller->getRoleId(), $controller->getUserId()))->findCount()->getData() > 0;
+$hasDemoData = pjCalendarModel::factory()->reset()->where('t1.uuid LIKE', 'rpbcd%')->where('t1.company_id', pjCompanyContext::activeId($controller->getRoleId(), $controller->getUserId()))->findCount()->getData() > 0;
 
 ?>
 

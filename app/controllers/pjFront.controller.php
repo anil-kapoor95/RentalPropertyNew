@@ -80,15 +80,25 @@ class pjFront extends pjAppController
 		$this->set('locale_arr', $locale_arr);
 	}
 	
-	/** Company of a public page: ?company=<hash>, else the owner of ?cid, else the first company. */
+	/**
+	 * Company of a public page: the company that owns ?cid (a property always belongs to
+	 * exactly one company, so a ?company hash can never mix in another company's settings),
+	 * else ?company=<hash>, else the first company.
+	 */
 	private function resolveFrontCompany()
 	{
+		if ($this->_get->toInt('cid') > 0)
+		{
+			$cid_company = (int) pjCompanyContext::companyOfCalendar($this->_get->toInt('cid'));
+			if ($cid_company > 0)
+			{
+				return $cid_company;
+			}
+		}
 		$hash_company = $this->_get->check('company') ? pjCompanyContext::idFromHash($this->_get->toString('company')) : 0;
 		if ($hash_company > 0 && (int) pjCompanyModel::factory()->where('t1.id', $hash_company)->where('t1.status', 'T')->findCount()->getData() === 1)
 		{
 			return $hash_company;
-		} elseif ($this->_get->toInt('cid') > 0) {
-			return pjCompanyContext::companyOfCalendar($this->_get->toInt('cid'));
 		}
 		// Embed codes created before companies existed carry no company: use the first company.
 		$first = pjCompanyModel::factory()->orderBy('t1.id ASC')->limit(1)->findAll()->getDataIndex(0);
@@ -107,7 +117,9 @@ class pjFront extends pjAppController
 		{
 		    $this->setCalendarId($this->_get->toInt('cid'));
 		}else{
-			$this->setCalendarId(1);
+			// no property given: a property of the page's company (not simply #1, which may belong to another company)
+			$first_cal = pjCalendarModel::factory()->where('t1.company_id', (int) $this->frontCompanyId)->orderBy('t1.id ASC')->limit(1)->findAll()->getDataIndex(0);
+			$this->setCalendarId(!empty($first_cal) ? (int) $first_cal['id'] : 1);
 		}
 		
 		$script_option_arr = pjOptionModel::factory()->getPairs($this->getCalendarId());
@@ -267,13 +279,18 @@ class pjFront extends pjAppController
 				{
 					$arr = $arr[0];
 				}
-				if ($this->_post->check('cancel_booking') && $this->_post->check('id') && $this->_post->toInt('id') > 0)
+				// Only the booking named in the signed link (id + hash, checked above) can be
+				// cancelled; the id posted by the form is not trusted.
+				if ($this->_post->check('cancel_booking') && !empty($arr) && $arr['status'] != 'Cancelled')
 				{
 					$err = NULL;
-					if (pjReservationModel::factory()->set('id', $this->_post->toInt('id'))->modify(array('status' => 'Cancelled'))->getAffectedRows() == 1)
+					$cancel_id = (int) $arr['id'];
+					if (pjReservationModel::factory()->where('id', $cancel_id)->where('calendar_id', (int) $arr['calendar_id'])->limit(1)->modifyAll(array('status' => 'Cancelled'))->getAffectedRows() == 1)
 					{
 						$err = '&err=AR13';
-						pjFront::pjActionConfirmSend($this->_post->toInt('id'), $this->option_arr, $arr['locale_id'], 'cancel');
+						// the cancelled booking no longer blocks the property in its iCal feed
+						pjAppController::saveReservationIcal(pjReservationModel::factory()->reset()->find($cancel_id)->getData());
+						pjFront::pjActionConfirmSend($cancel_id, $this->option_arr, $arr['locale_id'], 'cancel');
 						if (!empty($this->option_arr['o_cancel_url']) && preg_match('/http(s)?:\/\//', $this->option_arr['o_cancel_url']))
 						{
 							pjUtil::redirect($this->option_arr['o_cancel_url']);
@@ -1229,7 +1246,19 @@ class pjFront extends pjAppController
 					pjAppController::jsonResponse($resp);
 				}
 				
-				$data = array_merge($_SESSION[$this->defaultCalendar], $data);
+				// Booking form values come from the visitor: never let them set the record id,
+				// payment-gateway fields, timestamps or the money fields (recalculated below).
+				$visitor = $_SESSION[$this->defaultCalendar];
+				foreach (array('id', 'txn_id', 'processed_on', 'provider_id', 'created', 'modified', 'amount', 'extra_price', 'deposit', 'tax', 'tourist_tax', 'security', 'promo_amount', 'promo_type', 'discount_amount') as $key)
+				{
+					unset($visitor[$key]);
+				}
+				$data = array_merge($visitor, $data);
+				list($data['extra'], $data['qty']) = pjAppController::sanitizeExtras(
+					$data['calendar_id'],
+					isset($data['extra']) ? $data['extra'] : array(),
+					isset($data['qty']) ? $data['qty'] : array()
+				);
 	
 				$price = $this->pjActionCalcPrices(
 						$data['calendar_id'], 
@@ -1312,8 +1341,8 @@ class pjFront extends pjAppController
 						$pjReservationExtraModel
 							->reset()
 							->set('reservation_id', $reservation_id)
-							->set('extra_id', $extra_id)
-							->set('qty', $data['qty'][$extra_id])
+							->set('extra_id', (int) $extra_id)
+							->set('qty', (int) $data['qty'][$extra_id])
 							->insert();
 					}
 					$pjReservationExtraModel->commit();

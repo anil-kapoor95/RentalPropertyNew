@@ -1555,6 +1555,8 @@ class pjInstaller extends pjInstallerAppController
 			$pages = 1;
 			$page = 1;
 			$offset = 0;
+			$column = 'name'; // PHP 8: were undefined (compact() warning broke the JSON when errors are shown)
+			$direction = 'ASC';
 
 			pjAppController::jsonResponse(compact('data', 'total', 'pages', 'page', 'rowCount', 'column', 'direction'));
 		}
@@ -2023,6 +2025,8 @@ class pjInstaller extends pjInstallerAppController
 			$pages = 1;
 			$page = 1;
 			$offset = 0;
+			$column = 'name'; // PHP 8: were undefined (compact() warning broke the JSON when errors are shown)
+			$direction = 'ASC';
 
 			pjAppController::jsonResponse(compact('data', 'total', 'pages', 'page', 'rowCount', 'column', 'direction'));
 		}

@@ -163,6 +163,24 @@ class pjBasePermissions extends pjBase
                 {
                     self::jsonResponse(array('status' => 'ERR', 'code' => '100'));
                 }
+                if (!$this->isAdmin())
+                {
+                    // a non-administrator never changes his own rights and can only pass on
+                    // permissions he holds himself
+                    if ($this->_post->toInt('user_id') === (int) $this->getUserId())
+                    {
+                        self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'Access denied.'));
+                    }
+                    if ($data['type'] === 'insert')
+                    {
+                        $perm = pjAuthPermissionModel::factory()->find($data['permission_id'])->getData();
+                        $mine = $this->session->has($this->defaultPermissions) ? (array) $this->session->getData($this->defaultPermissions) : array();
+                        if (empty($perm) || !in_array($perm['key'], $mine, true))
+                        {
+                            self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'Access denied.'));
+                        }
+                    }
+                }
                 
                 $data['user_id'] = $this->_post->toInt('user_id');
 

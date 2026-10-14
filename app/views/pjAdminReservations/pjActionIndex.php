@@ -251,19 +251,19 @@ if ($controller->_get->check('calendar_id') && $controller->_get->toInt('calenda
 }
 if ($controller->_get->check('date') && !$controller->_get->isEmpty('date'))
 {
-    ?>pjGrid.queryString += "&date=<?php echo $controller->_get->toString('date'); ?>";<?php
+    ?>pjGrid.queryString += "&date=" + encodeURIComponent(<?php echo json_encode((string) $controller->_get->toString('date'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>);<?php
 }
 if ($controller->_get->check('status') && !$controller->_get->isEmpty('status'))
 {
-    ?>pjGrid.queryString += "&status=<?php echo $controller->_get->toString('status'); ?>";<?php
+    ?>pjGrid.queryString += "&status=" + encodeURIComponent(<?php echo json_encode((string) $controller->_get->toString('status'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>);<?php
 }
 if ($controller->_get->check('last_7days') && !$controller->_get->isEmpty('last_7days'))
 {
-    ?>pjGrid.queryString += "&last_7days=<?php echo $controller->_get->toString('last_7days'); ?>";<?php
+    ?>pjGrid.queryString += "&last_7days=" + encodeURIComponent(<?php echo json_encode((string) $controller->_get->toString('last_7days'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>);<?php
 }
 if ($controller->_get->check('current_week') && !$controller->_get->isEmpty('current_week'))
 {
-    ?>pjGrid.queryString += "&current_week=<?php echo $controller->_get->toString('current_week'); ?>";<?php
+    ?>pjGrid.queryString += "&current_week=" + encodeURIComponent(<?php echo json_encode((string) $controller->_get->toString('current_week'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>);<?php
 }
 ?>
 var myLabel = myLabel || {};

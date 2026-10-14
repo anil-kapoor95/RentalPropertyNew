@@ -46,7 +46,9 @@ class pjCompanyContext
 				$arr = $model->orderBy('t1.name ASC')->findAll()->getDataPair('id');
 			} else {
 				if ($role_id === self::ROLE_COMPANY) {
-					$model->where('t1.user_id', $user_id);
+					// the company whose login this is, or the company the user is assigned to
+					$model->where(sprintf("(t1.user_id = %2\$u OR t1.id IN (SELECT `company_id` FROM `%1\$s` WHERE `id` = %2\$u AND `company_id` IS NOT NULL))",
+						pjAuthUserModel::factory()->getTable(), $user_id));
 				} elseif (in_array($role_id, array(self::ROLE_OWNER, self::ROLE_EDITOR), true)) {
 					// The company assigned to the user; otherwise the company that holds their properties.
 					$model->where(sprintf("(t1.id IN (SELECT `company_id` FROM `%1\$s` WHERE `id` = %3\$u AND `company_id` IS NOT NULL) OR (t1.id IN (SELECT `company_id` FROM `%2\$s` WHERE `user_id` = %3\$u AND `company_id` IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM `%1\$s` WHERE `id` = %3\$u AND `company_id` IS NOT NULL)))",
@@ -236,6 +238,18 @@ class pjCompanyContext
 	 * Keys that drive the admin LOGIN SCREEN itself (shown before anybody is identified),
 	 * so they always use the shared value.
 	 */
+	/**
+	 * Secret system options that are NOT copied into a new company's settings (the
+	 * company would see the platform's password / key). While the company keeps the
+	 * platform's server / site key (the value of the paired option), the platform's
+	 * secret is used for it at run time; with its own server it must enter its own.
+	 */
+	public static $secretOptionKeys = array(
+		'o_smtp_user' => 'o_smtp_host',
+		'o_smtp_pass' => 'o_smtp_host',
+		'o_captcha_secret_key_front' => 'o_captcha_site_key_front',
+	);
+
 	public static $globalOptionKeys = array(
 		'o_captcha_type', 'o_captcha_mode', 'o_captcha_length', 'o_captcha_background',
 		'o_captcha_site_key', 'o_captcha_secret_key', 'o_captcha_location', 'o_secure_login_use_captcha'
@@ -383,6 +397,10 @@ class pjCompanyContext
 				continue;
 			}
 			$row['foreign_id'] = $fid;
+			if (isset(self::$secretOptionKeys[$row['key']]))
+			{
+				$row['value'] = '';
+			}
 			$m->reset()->setAttributes($row)->insert();
 		}
 		// Translatable option texts (login / captcha messages)
@@ -404,7 +422,16 @@ class pjCompanyContext
 		$pairs = $m->getPairs(1);
 		if ((int) $company_id > 0)
 		{
+			$global = $pairs;
 			$pairs = array_merge($pairs, $m->reset()->getPairs(self::optionsForeignId($company_id)));
+			foreach (self::$secretOptionKeys as $secret => $pair)
+			{
+				if (isset($pairs[$secret], $global[$secret], $pairs[$pair], $global[$pair]) && $pairs[$secret] === ''
+					&& (string) $pairs[$pair] === (string) $global[$pair])
+				{
+					$pairs[$secret] = $global[$secret];
+				}
+			}
 		}
 		return $pairs;
 	}
@@ -738,6 +765,69 @@ class pjCompanyContext
 			}
 		}
 		return $rows;
+	}
+
+	/* ------------------------------------------------------------------
+	 * SMS log per company (companies_sms: which company sent an SMS log row)
+	 * ------------------------------------------------------------------ */
+
+	public static function smsTable()
+	{
+		return str_replace('companies_cron_jobs', 'companies_sms', pjCompanyCronModel::factory()->getTable());
+	}
+
+	/** Creates the table if the update SQL has not been run yet (once per request). */
+	public static function ensureSmsTable()
+	{
+		static $done = false;
+		if ($done)
+		{
+			return;
+		}
+		$done = true;
+		pjCompanyCronModel::factory()->prepare(sprintf("CREATE TABLE IF NOT EXISTS `%s` (`sms_id` int(10) unsigned NOT NULL, `company_id` int(10) unsigned NOT NULL, PRIMARY KEY (`sms_id`), KEY `company_id` (`company_id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8", self::smsTable()))->exec();
+	}
+
+	/** Company an SMS is sent for right now (options in use, cron run or the user's company). */
+	public static function currentSmsCompany()
+	{
+		if ((int) self::$cronCompanyId > 0)
+		{
+			return (int) self::$cronCompanyId;
+		}
+		$reg = pjRegistry::getInstance();
+		$fid = $reg->is('options_foreign_id') ? (int) $reg->get('options_foreign_id') : 0;
+		if ($fid > self::OPTIONS_OFFSET)
+		{
+			return $fid - self::OPTIONS_OFFSET;
+		}
+		if (isset($_SESSION['admin_user']['id'], $_SESSION['admin_user']['role_id']))
+		{
+			return (int) self::activeId($_SESSION['admin_user']['role_id'], $_SESSION['admin_user']['id']);
+		}
+		return 0;
+	}
+
+	public static function tagSms($sms_id, $company_id)
+	{
+		if ((int) $sms_id <= 0 || (int) $company_id <= 0)
+		{
+			return;
+		}
+		self::ensureSmsTable();
+		pjCompanyCronModel::factory()->prepare(sprintf("INSERT IGNORE INTO `%s` (`sms_id`, `company_id`) VALUES (%u, %u)", self::smsTable(), (int) $sms_id, (int) $company_id))->exec();
+	}
+
+	/** SQL: SMS log rows a user of $company_id may see ($with_untagged: also rows of no company). */
+	public static function smsScopeSql($company_id, $with_untagged = false)
+	{
+		self::ensureSmsTable();
+		$sql = sprintf("t1.id IN (SELECT `sms_id` FROM `%s` WHERE `company_id` = %u)", self::smsTable(), (int) $company_id);
+		if ($with_untagged)
+		{
+			$sql = sprintf("(%s OR t1.id NOT IN (SELECT `sms_id` FROM `%s`))", $sql, self::smsTable());
+		}
+		return $sql;
 	}
 
 	public static function saveCronRow($company_id, $cron_id, $data)

@@ -55,7 +55,7 @@ INSERT IGNORE INTO `plugin_auth_roles_permissions` (`role_id`, `permission_id`) 
 INSERT IGNORE INTO `plugin_auth_users_permissions` (`user_id`, `permission_id`) SELECT x.`uid`, p.`id` FROM `plugin_auth_permissions` p, (SELECT DISTINCT `user_id` AS `uid` FROM `plugin_auth_users_permissions` WHERE `user_id` IN (SELECT `id` FROM `plugin_auth_users` WHERE `role_id` = 1)) x WHERE p.`key` LIKE 'pjAdminCompanies%' AND p.`key` <> 'pjAdminCompanies_pjActionProfile';
 
 -- Company role (4): dashboard, own user profile, own company profile
-DELETE FROM `plugin_auth_roles_permissions` WHERE `role_id` = 4;
+-- (re-run safe: role 4 permissions set by the administrator are kept; it starts empty, so INSERT IGNORE is enough)
 INSERT IGNORE INTO `plugin_auth_roles_permissions` (`role_id`, `permission_id`) SELECT 4, `id` FROM `plugin_auth_permissions` WHERE `key` IN ('pjAdmin_pjActionIndex', 'pjBaseUsers_pjActionProfile', 'pjAdminCompanies_pjActionProfile');
 
 -- Labels

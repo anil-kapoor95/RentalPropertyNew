@@ -58,6 +58,12 @@ class pjBaseCron extends pjBase
 	                    $this->executeCronJob($job['id'], (int) $cid);
 	                }
 	            }
+	            // The system run on the job's own schedule: work no company covers
+	            // (full system backup, properties without an active company).
+	            if (empty($job['next_run']) || time() >= strtotime($job['next_run']))
+	            {
+	                $this->executeCronJob($job['id'], -1);
+	            }
 	            continue;
 	        }
 	        if(empty($job['next_run']) || time() >= strtotime($job['next_run']))

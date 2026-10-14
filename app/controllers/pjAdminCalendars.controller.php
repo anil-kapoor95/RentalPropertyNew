@@ -85,6 +85,30 @@ class pjAdminCalendars extends pjAdmin
 			$this->denyCompanyAccess($_SERVER['PHP_SELF'] . '?controller=pjAdminCalendars&action=pjActionIndex&err=ACR08');
 		}
 
+		// Saves made from a property page (tab forms and their Ajax calls) belong to the
+		// property shown on that page (?id= of the page), not to whichever property the
+		// session last pointed to - another browser tab may have changed it meanwhile.
+		if ((self::isPost() || $this->isXHR()) && isset($_SERVER['HTTP_REFERER']) && $this->_get->toInt('id') <= 0)
+		{
+			$ref = @parse_url($_SERVER['HTTP_REFERER']);
+			$ref_q = array();
+			if (is_array($ref) && isset($ref['query']))
+			{
+				parse_str($ref['query'], $ref_q);
+			}
+			if (isset($ref_q['controller'], $ref_q['action'], $ref_q['id']) && $ref_q['controller'] === 'pjAdminCalendars' && $ref_q['action'] === 'pjActionUpdate')
+			{
+				$page_id = (int) $ref_q['id'];
+				if ($page_id > 0 && $page_id !== (int) $this->getCalendarId() && $this->isCompanyCalendar($page_id))
+				{
+					$this->setCalendarId($page_id);
+					$this->option_arr = array_merge($this->option_arr, pjOptionModel::factory()->getPairs($page_id));
+					$this->set('option_arr', $this->option_arr);
+					pjRegistry::getInstance()->set('options', $this->option_arr);
+				}
+			}
+		}
+
 		// Records addressed by their own id.
 		if ($action === 'pjActionDeletePeriod' && $this->_post->toInt('id') > 0)
 		{
@@ -223,34 +247,8 @@ class pjAdminCalendars extends pjAdmin
 	        } elseif ($id == $this->getCalendarId()) {
 	            pjAppController::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'Current calendar can not be deleted.'));
 	        }
-	        if (pjCalendarModel::factory()->set('id', $id)->erase()->getAffectedRows() == 1)
+	        if ($this->purgeCalendar($id))
 	        {
-	            pjFeedModel::factory()->where('calendar_id', $id)->eraseAll();
-	        	pjCalendarExtraModel::factory()->where('calendar_id', $id)->eraseAll();
-	        	pjCalendarDiscountModel::factory()->where('calendar_id', $id)->eraseAll();
-	        	pjCalendarVoucherModel::factory()->where('calendar_id', $id)->eraseAll();
-	        	pjOptionModel::factory()->where('foreign_id', $id)->eraseAll();
-	            pjMultiLangModel::factory()->where('model', 'pjCalendar')->where('foreign_id', $id)->eraseAll();
-	            pjMultiLangModel::factory()->reset()->where('model', 'pjOption')->where('foreign_id', $id)->eraseAll();				
-				$reservation_ids = pjReservationModel::factory()->where('calendar_id', $id)->findAll()->getDataPair(NULL, 'id');
-				if ($reservation_ids) {
-					pjReservationModel::factory()->reset()->whereIn('id', $reservation_ids)->eraseAll();
-					pjReservationExtraModel::factory()->whereIn('reservation_id', $reservation_ids)->eraseAll();
-				}				
-				pjPaymentOptionModel::factory()->where('foreign_id', $id)->eraseAll();
-				pjMultiLangModel::factory()->reset()->where('model', 'pjPayment')->where('foreign_id', $id)->eraseAll();				
-				pjPriceModel::factory()->where('foreign_id', $id)->eraseAll();
-				$period_ids = pjPeriodModel::factory()->where('foreign_id', $id)->findAll()->getDataPair(NULL, 'id');
-				if ($period_ids) {
-					pjPeriodModel::factory()->reset()->whereIn('id', $period_ids)->eraseAll();
-					pjPeriodPriceModel::factory()->whereIn('period_id', $period_ids)->eraseAll();
-				}				
-				$notification_ids = pjNotificationModel::factory()->where('foreign_id', $id)->findAll()->getDataPair(NULL, 'id');
-	        	if ($notification_ids) {
-					pjNotificationModel::factory()->reset()->whereIn('id', $notification_ids)->eraseAll(); // by id: whereIn('foreign_id', <notification ids>) deleted other properties' notifications
-					pjMultiLangModel::factory()->reset()->where('model', 'pjNotification')->whereIn('foreign_id', $notification_ids)->eraseAll();
-				}
-				$this->pjActionDeleteImages($id);
 	            self::jsonResponse(array('status' => 'OK', 'code' => 200, 'text' => 'Calendar has been deleted.'));
 	        }
 	        self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Calendar has not been deleted.'));
@@ -259,6 +257,71 @@ class pjAdminCalendars extends pjAdmin
 	    self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Missing, empty or invalid parameters.'));
 	}
 	
+	/**
+	 * Delete a property and everything that belongs to it (no orphan rows or files):
+	 * links to extras / discounts / coupons / features, options, translations, photos,
+	 * prices, seasons, limits, feeds, export passwords, payment settings, notifications,
+	 * reservations (with their extras and translations) and its generated images / .ics.
+	 */
+	private function purgeCalendar($id)
+	{
+		$id = (int) $id;
+		if ($id <= 0 || pjCalendarModel::factory()->set('id', $id)->erase()->getAffectedRows() != 1)
+		{
+			return false;
+		}
+		pjFeedModel::factory()->where('calendar_id', $id)->eraseAll();
+		pjIcalUrlsModel::factory()->where('calendar_id', $id)->eraseAll();
+		pjCalendarExtraModel::factory()->where('calendar_id', $id)->eraseAll();
+		pjCalendarDiscountModel::factory()->where('calendar_id', $id)->eraseAll();
+		pjCalendarVoucherModel::factory()->where('calendar_id', $id)->eraseAll();
+		pjCalendarFeatureModel::factory()->where('calendar_id', $id)->eraseAll();
+		pjLimitModel::factory()->where('calendar_id', $id)->eraseAll();
+		pjPasswordModel::factory()->where('calendar_id', $id)->eraseAll();
+		pjOptionModel::factory()->where('foreign_id', $id)->eraseAll();
+		pjMultiLangModel::factory()->where('model', 'pjCalendar')->where('foreign_id', $id)->eraseAll();
+		pjMultiLangModel::factory()->reset()->where('model', 'pjOption')->where('foreign_id', $id)->eraseAll();
+		$reservation_ids = pjReservationModel::factory()->where('calendar_id', $id)->findAll()->getDataPair(NULL, 'id');
+		if ($reservation_ids) {
+			pjReservationModel::factory()->reset()->whereIn('id', $reservation_ids)->eraseAll();
+			pjReservationExtraModel::factory()->whereIn('reservation_id', $reservation_ids)->eraseAll();
+			pjMultiLangModel::factory()->reset()->where('model', 'pjReservation')->whereIn('foreign_id', $reservation_ids)->eraseAll();
+		}
+		if (pjObject::getPlugin('pjPayments') !== NULL)
+		{
+			pjPaymentOptionModel::factory()->where('foreign_id', $id)->eraseAll();
+		}
+		pjMultiLangModel::factory()->reset()->where('model', 'pjPayment')->where('foreign_id', $id)->eraseAll();
+		pjPriceModel::factory()->where('foreign_id', $id)->eraseAll();
+		$period_ids = pjPeriodModel::factory()->where('foreign_id', $id)->findAll()->getDataPair(NULL, 'id');
+		if ($period_ids) {
+			pjPeriodModel::factory()->reset()->whereIn('id', $period_ids)->eraseAll();
+			pjPeriodPriceModel::factory()->whereIn('period_id', $period_ids)->eraseAll();
+		}
+		$notification_ids = pjNotificationModel::factory()->where('foreign_id', $id)->findAll()->getDataPair(NULL, 'id');
+		if ($notification_ids) {
+			pjNotificationModel::factory()->reset()->whereIn('id', $notification_ids)->eraseAll();
+			pjMultiLangModel::factory()->reset()->where('model', 'pjNotification')->whereIn('foreign_id', $notification_ids)->eraseAll();
+		}
+		// photo files (only inside the upload folder) and their rows
+		$upload = realpath(PJ_INSTALL_PATH . PJ_UPLOAD_PATH);
+		foreach (pjCalendarPhotoModel::factory()->where('calendar_id', $id)->findAll()->getData() as $photo)
+		{
+			foreach (array('small_path', 'large_path') as $k)
+			{
+				$file = !empty($photo[$k]) ? realpath(PJ_INSTALL_PATH . $photo[$k]) : false;
+				if ($file !== false && $upload !== false && strpos($file, $upload . DIRECTORY_SEPARATOR) === 0)
+				{
+					@unlink($file);
+				}
+			}
+		}
+		pjCalendarPhotoModel::factory()->reset()->where('calendar_id', $id)->eraseAll();
+		@unlink(PJ_UPLOAD_PATH . 'calendar_icals/listing_' . $id . '.ics');
+		$this->pjActionDeleteImages($id);
+		return true;
+	}
+
 	private function pjActionDeleteImages($cid)
 	{
 		$arr = array(
@@ -314,33 +377,14 @@ class pjAdminCalendars extends pjAdmin
 		$record = $this->filterCompanyCalendarIds($this->_post->toArray('record'));
 		if (count($record) > 0)
 		{
-		    pjCalendarModel::factory()->where('id !=', 1)->whereIn('id', $record)->where('id !=', $this->getCalendarId())->eraseAll();
-		    pjFeedModel::factory()->where('calendar_id !=', 1)->whereIn('calendar_id', $record)->where('calendar_id !=', $this->getCalendarId())->eraseAll();
-			pjCalendarExtraModel::factory()->where('calendar_id !=', 1)->whereIn('calendar_id', $record)->where('calendar_id !=', $this->getCalendarId())->eraseAll();
-        	pjCalendarDiscountModel::factory()->where('calendar_id !=', 1)->whereIn('calendar_id', $record)->where('calendar_id !=', $this->getCalendarId())->eraseAll();
-        	pjCalendarVoucherModel::factory()->where('calendar_id !=', 1)->whereIn('calendar_id', $record)->where('calendar_id !=', $this->getCalendarId())->eraseAll();
-			pjOptionModel::factory()->where('foreign_id !=', 1)->whereIn('foreign_id', $record)->where('foreign_id !=', $this->getCalendarId())->eraseAll();
-            pjMultiLangModel::factory()->where('foreign_id !=', 1)->where('model', 'pjCalendar')->whereIn('foreign_id', $record)->where('foreign_id !=', $this->getCalendarId())->eraseAll();
-            pjMultiLangModel::factory()->where('foreign_id !=', 1)->reset()->where('model', 'pjOption')->whereIn('foreign_id', $record)->where('foreign_id !=', $this->getCalendarId())->eraseAll();				
-			$reservation_ids = pjReservationModel::factory()->where('calendar_id !=', 1)->whereIn('calendar_id', $record)->where('calendar_id !=', $this->getCalendarId())->findAll()->getDataPair(NULL, 'id');
-			if ($reservation_ids) {
-				pjReservationModel::factory()->reset()->whereIn('id', $reservation_ids)->eraseAll();
-				pjReservationExtraModel::factory()->whereIn('reservation_id', $reservation_ids)->eraseAll();
-			}				
-			pjPaymentOptionModel::factory()->where('foreign_id !=', 1)->whereIn('foreign_id', $record)->where('foreign_id !=', $this->getCalendarId())->eraseAll();
-			pjMultiLangModel::factory()->reset()->where('foreign_id !=', 1)->where('model', 'pjPayment')->whereIn('foreign_id', $record)->where('foreign_id !=', $this->getCalendarId())->eraseAll();				
-			pjPriceModel::factory()->where('foreign_id !=', 1)->whereIn('foreign_id', $record)->where('foreign_id !=', $this->getCalendarId())->eraseAll();
-			$period_ids = pjPeriodModel::factory()->where('foreign_id !=', 1)->whereIn('foreign_id', $record)->where('foreign_id !=', $this->getCalendarId())->findAll()->getDataPair(NULL, 'id');
-			if ($period_ids) {
-				pjPeriodModel::factory()->reset()->whereIn('id', $period_ids)->eraseAll();
-				pjPeriodPriceModel::factory()->whereIn('period_id', $period_ids)->eraseAll();
-			}				
-			$notification_ids = pjNotificationModel::factory()->where('foreign_id !=', 1)->whereIn('foreign_id', $record)->where('foreign_id !=', $this->getCalendarId())->findAll()->getDataPair(NULL, 'id');
-        	if ($notification_ids) {
-				pjNotificationModel::factory()->reset()->whereIn('id', $notification_ids)->eraseAll(); // by id: whereIn('foreign_id', <notification ids>) deleted other properties' notifications
-				pjMultiLangModel::factory()->reset()->where('model', 'pjNotification')->whereIn('foreign_id', $notification_ids)->eraseAll();
-			}		    
-			$this->pjActionDeleteImages($record);
+		    foreach ($record as $rid)
+		    {
+		        // the default property (#1) and the property open in the session are kept
+		        if ((int) $rid !== 1 && (int) $rid !== (int) $this->getCalendarId())
+		        {
+		            $this->purgeCalendar((int) $rid);
+		        }
+		    }
 		    pjAppController::jsonResponse(array('status' => 'OK', 'code' => 200, 'text' => 'Calendar(s) has been deleted.'));
 		}
 		pjAppController::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Missing or empty params.'));
@@ -1090,6 +1134,12 @@ class pjAdminCalendars extends pjAdmin
         {
             $foreign_id = $this->_get->toInt('calendar_id');
         }
+        // Without a property these are the payment settings of the whole system:
+        // only an administrator may change them.
+        if ($this->_post->check('options_update') && $foreign_id === NULL && !$this->isAdmin())
+        {
+            self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'Access denied.'));
+        }
         if($this->_post->check('options_update'))
         {
             if (pjObject::getPlugin('pjPayments') !== NULL && $this->_post->check('plugin_payment_options'))
@@ -1633,6 +1683,10 @@ class pjAdminCalendars extends pjAdmin
 			    $data[$k]['provider'] = $providers[$v['provider_id']];
 			}
         }
+        // PHP 8: these were never set here (compact() warned and broke the JSON)
+        $is_support = false;
+        $has_update = pjAuth::factory('pjAdminCalendars', 'pjActionUpdate')->hasAccess();
+        $has_delete = $has_update;
         self::jsonResponse(compact('data', 'total', 'pages', 'page', 'rowCount', 'column', 'direction', 'is_support', 'has_update', 'has_delete'));
     }
     
@@ -1647,7 +1701,12 @@ class pjAdminCalendars extends pjAdmin
                 self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => __('rpbc_feed_url_empty', true)));
             }
             include ( PJ_COMPONENTS_PATH . 'iCalEasyReader.php' );
-            $feed_url = $this->_post->toString('url');
+            $feed_url = trim($this->_post->toString('url'));
+            // only public http(s) addresses (no server files, no internal network)
+            if (!pjAppController::isSafeFeedUrl($feed_url))
+            {
+                self::jsonResponse(array('status' => 'ERR', 'code' => 105, 'text' => __('pj_feed_error_msg', true)));
+            }
             // Fetch with a real browser User-Agent + timeout. Providers such as
             // Airbnb and Booking.com reject PHP's default agent and return nothing.
             $fead_contents = pjAppController::fetchIcalContents($feed_url);
@@ -1681,8 +1740,7 @@ class pjAdminCalendars extends pjAdmin
                 }
                 
                 $data = array();
-                $data['id'] = $this->_post->toInt('feed_id');
-                $data['provider_id'] = $this->_post->toInt('provider_id');
+                $data['provider_id'] = $provider_id;
                 $data['url'] = $feed_url;
                 pjFeedModel::factory()->set('id', $this->_post->toInt('feed_id'))->modify($data);
                 pjAppController::syncFeeds($this->_post->toInt('feed_id'));
@@ -1692,7 +1750,11 @@ class pjAdminCalendars extends pjAdmin
                 {
                     $this->denyCompanyAccess();
                 }
-                $id = pjFeedModel::factory(array_merge($this->_post->raw(), array('provider_id' => $provider_id)))->insert()->getInsertId();
+                $id = pjFeedModel::factory(array(
+                    'calendar_id' => $this->_post->toInt('calendar_id'),
+                    'url' => $feed_url,
+                    'provider_id' => $provider_id,
+                ))->insert()->getInsertId();
                 if (!$id)
                 {
                     self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Feed has not been added.'));
@@ -1700,7 +1762,7 @@ class pjAdminCalendars extends pjAdmin
                 $resp = pjAppController::syncFeeds($id);
             }
             
-            self::jsonResponse(array('status' => 'OK', 'code' => 200, 'text' => 'Feed has been added', 'provider_id' => $this->_post->toInt('provider_id')));
+            self::jsonResponse(array('status' => 'OK', 'code' => 200, 'text' => 'Feed has been added', 'provider_id' => $provider_id));
         }
         exit;
     }
@@ -1962,13 +2024,13 @@ class pjAdminCalendars extends pjAdmin
 			
 			if ($this->_get->check('c_name') && $this->_get->toString('c_name') != '')
 			{
-				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($this->_get->toString('c_name')));
+				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($pjReservationModel->escapeStr($this->_get->toString('c_name'))));
 				$pjReservationModel->where("t1.c_name LIKE '%$q%'");
 			}
 			
-			if ($this->_get->check('c_name') && $this->_get->toString('c_email') != '')
+			if ($this->_get->check('c_email') && $this->_get->toString('c_email') != '')
 			{
-				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($this->_get->toString('c_email')));
+				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($pjReservationModel->escapeStr($this->_get->toString('c_email'))));
 				$pjReservationModel->where("t1.c_email LIKE '%$q%'");
 			}
 			
@@ -1999,9 +2061,9 @@ class pjAdminCalendars extends pjAdmin
 			
 			if ($this->_get->check('date_from') && $this->_get->toString('date_from') != '' && $this->_get->check('date_to') && $this->_get->toString('date_to') != '')
 			{
-				$pjReservationModel->where(sprintf("(`date_from` <= '%2\$s' AND `date_to` >= '%1\$s')",
-					pjDateTime::formatDate($this->_get->toString('date_from'), $this->option_arr['o_date_format']),
-					pjDateTime::formatDate($this->_get->toString('date_to'), $this->option_arr['o_date_format'])
+				$pjReservationModel->where(sprintf("(t1.`date_from` <= '%2\$s' AND t1.`date_to` >= '%1\$s')",
+					$pjReservationModel->escapeStr((string) pjDateTime::formatDate($this->_get->toString('date_from'), $this->option_arr['o_date_format'])),
+					$pjReservationModel->escapeStr((string) pjDateTime::formatDate($this->_get->toString('date_to'), $this->option_arr['o_date_format']))
 				));
 			} else {
 				if ($this->_get->check('date_from') && $this->_get->toString('date_from') != '')
@@ -2289,7 +2351,20 @@ class pjAdminCalendars extends pjAdmin
 				        $pjImage->loadImage(PJ_INSTALL_PATH . $calendar_arr['y_logo'])->saveImage($thumb);
 				        $calendar_arr['y_logo'] = $thumb;
 				    }
-				    pjCalendarModel::factory()->set('id', $this->getCalendarId())->modify($calendar_arr);
+				    // copy only the invoice (company details) columns - never the id, uuid,
+				    // owner, company, status or the iCal file of the source property
+				    $invoice_data = array();
+				    foreach ((array) $calendar_arr as $col => $val)
+				    {
+				        if (strpos($col, 'y_') === 0)
+				        {
+				            $invoice_data[$col] = $val;
+				        }
+				    }
+				    if (!empty($invoice_data))
+				    {
+				        pjCalendarModel::factory()->set('id', $this->getCalendarId())->modify($invoice_data);
+				    }
 				}elseif ($this->_post->toInt('tab_id') === 2) {
 					set_time_limit(300);
 					pjUtil::pjActionGenerateImages($this->getCalendarId(), $src_pair);

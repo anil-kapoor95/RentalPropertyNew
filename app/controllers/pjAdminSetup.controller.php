@@ -28,8 +28,49 @@ class pjAdminSetup extends pjAdmin
 
     public function beforeFilter()
     {
+        // pjAdmin::beforeFilter() is skipped on purpose (it redirects every page to this
+        // wizard until it is done), so its login / CSRF checks are repeated here.
         pjAppController::beforeFilter();
+        if (!$this->isLoged())
+        {
+            if ($this->isXHR())
+            {
+                self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Unauthorized.'));
+            }
+            pjUtil::redirect(PJ_INSTALL_URL . 'index.php?controller=pjBase&action=pjActionLogin');
+        }
+        if (self::isPost())
+        {
+            pjAppController::validateCsrfToken();
+        }
         return true;
+    }
+
+    /** Importing / removing demo properties needs the right to add / delete properties. */
+    private function requirePropertyRight($action)
+    {
+        if (!pjAuth::factory('pjAdminCalendars', $action)->hasAccess() || $this->getCompanyId() <= 0)
+        {
+            self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'Access denied.'));
+        }
+    }
+
+    /** uuid of demo property $n of the active company (uuid is unique system-wide, max 12 chars). */
+    private function demoUuid($n)
+    {
+        $legacy = sprintf('%s%02d', self::DEMO_UUID_PREFIX, $n);
+        $owner = pjCalendarModel::factory()->reset()->select('t1.company_id')->where('t1.uuid', $legacy)->limit(1)->findAll()->getDataIndex(0);
+        if (empty($owner) || (int) $owner['company_id'] === (int) $this->getCompanyId())
+        {
+            return $legacy; // first company keeps the original demo ids
+        }
+        return sprintf('rpbcd%s%02d', substr(md5($this->getCompanyId() . PJ_SALT), 0, 5), $n);
+    }
+
+    /** Demo properties of the active company. */
+    private function demoSql()
+    {
+        return sprintf("(t1.uuid LIKE 'rpbcd%%' AND t1.company_id = %u)", (int) $this->getCompanyId());
     }
 
     // ---- Welcome / wizard page ----------------------------------------
@@ -39,7 +80,7 @@ class pjAdminSetup extends pjAdmin
         if (!pjAuth::factory('pjAdminCalendars')->hasAccess()) {
             pjUtil::redirect(PJ_INSTALL_URL . 'index.php?controller=pjAdmin&action=pjActionIndex');
         }
-        $this->set('hasDemoData', self::hasDemoData());
+        $this->set('hasDemoData', $this->companyHasDemoData());
         $this->set('wizardCompleted', $this->isWizardCompleted());
         $this->appendJs('pjAdminSetup.js');
     }
@@ -51,6 +92,7 @@ class pjAdminSetup extends pjAdmin
         if (!$this->isXHR() || !$this->isLoged()) {
             self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Unauthorized.'));
         }
+        $this->requirePropertyRight('pjActionCreate');
         try {
             @set_time_limit(300);
             $count = $this->createDemoProperties();
@@ -81,6 +123,7 @@ class pjAdminSetup extends pjAdmin
         if (!$this->isXHR() || !$this->isLoged()) {
             self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Unauthorized.'));
         }
+        $this->requirePropertyRight('pjActionDeleteCalendar');
         try {
             $removed = $this->removeDemoProperties();
             self::jsonResponse(array('status' => 'OK', 'code' => 200, 'text' => 'Demo data removed.', 'data' => array('properties' => $removed)));
@@ -97,7 +140,7 @@ class pjAdminSetup extends pjAdmin
         if (!$this->isXHR() || !$this->isLoged()) {
             self::jsonResponse(array('status' => 'ERR', 'code' => 100));
         }
-        self::jsonResponse(array('status' => 'OK', 'code' => 200, 'has_demo' => self::hasDemoData()));
+        self::jsonResponse(array('status' => 'OK', 'code' => 200, 'has_demo' => $this->companyHasDemoData()));
         exit;
     }
 
@@ -106,6 +149,16 @@ class pjAdminSetup extends pjAdmin
     {
         try {
             return pjCalendarModel::factory()->reset()->where('t1.uuid LIKE', self::DEMO_UUID_PREFIX . '%')->findCount()->getData() > 0;
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+
+    /** Demo properties in the active company. */
+    private function companyHasDemoData()
+    {
+        try {
+            return pjCalendarModel::factory()->reset()->where($this->demoSql())->findCount()->getData() > 0;
         } catch (Exception $e) {
             return false;
         }
@@ -137,8 +190,13 @@ class pjAdminSetup extends pjAdmin
         $company_id = $this->getCompanyId();
         // Demo features refer to the default amenity list (ids 1..n); map them to this company's copy.
         $company_features = array_values(array_map('intval', pjFeatureModel::factory()->where('t1.company_id', $company_id)->orderBy('t1.id ASC')->findAll()->getDataPair(null, 'id')));
-        foreach (self::demoProperties() as $p) {
+        if ($company_id <= 0) {
+            return 0;
+        }
+        foreach (self::demoProperties() as $n => $p) {
             list($uuid, $name, $desc, $city, $state, $zip, $lat, $lng, $beds, $baths, $features, $image) = $p;
+            // demo ids per company (the uuid is unique for the whole system)
+            $uuid = $this->demoUuid($n + 1);
 
             // skip if this demo property already exists
             if (pjCalendarModel::factory()->reset()->where('t1.uuid', $uuid)->findCount()->getData() > 0) {
@@ -146,7 +204,7 @@ class pjAdminSetup extends pjAdmin
             }
 
             $id = pjCalendarModel::factory()->reset()->setAttributes(array(
-                'user_id'        => 1,
+                'user_id'        => (int) $this->getUserId(),
                 'company_id'     => $company_id > 0 ? $company_id : ':NULL',
                 'uuid'           => $uuid,
                 'status'         => 'T',
@@ -237,7 +295,7 @@ class pjAdminSetup extends pjAdmin
 
     private function removeDemoProperties()
     {
-        $ids = pjCalendarModel::factory()->reset()->where('t1.uuid LIKE', self::DEMO_UUID_PREFIX . '%')->where('t1.company_id', $this->getCompanyId())->findAll()->getDataPair(NULL, 'id');
+        $ids = pjCalendarModel::factory()->reset()->where($this->demoSql())->findAll()->getDataPair(NULL, 'id');
         $removed = 0;
         if (is_array($ids)) {
             foreach ($ids as $id) {

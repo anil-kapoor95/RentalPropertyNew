@@ -308,8 +308,10 @@ class pjCompanyBackup
 			$this->dump($mods['multi_lang'], sprintf("(`model` = '%s' AND `foreign_id` IN %s)", $ml, $own($tb)));
 		}
 		$this->dump($mods['multi_lang'], sprintf("(`model` = 'pjNotification' AND `foreign_id` IN %s)", $NOTIF));
-		// The company's login account and the owners of its properties (never the super admin)
-		$this->dump($mods['users'], sprintf("`id` <> 1 AND (`company_id` = %u OR `id` IN (SELECT `user_id` FROM `%s` WHERE `id` = %u) OR `id` IN (SELECT `user_id` FROM `%s` WHERE `company_id` = %u))", $X, $t['companies'], $X, $t['calendars'], $X));
+		// The company's own users: its login account and the owners of its properties.
+		// Administrators (global accounts) and users of other companies are never part of a
+		// company backup, so restoring it cannot roll back their role, status or password.
+		$this->dump($mods['users'], sprintf("`id` <> 1 AND `role_id` <> 1 AND (`company_id` = %1\$u OR (`company_id` IS NULL AND (`id` IN (SELECT `user_id` FROM `%2\$s` WHERE `id` = %1\$u) OR `id` IN (SELECT `user_id` FROM `%3\$s` WHERE `company_id` = %1\$u))))", $X, $t['companies'], $t['calendars']));
 
 		$this->write("\nCOMMIT;\nSET FOREIGN_KEY_CHECKS = 1;\n");
 		fclose($this->handle);

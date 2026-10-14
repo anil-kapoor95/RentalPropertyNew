@@ -57,7 +57,7 @@
 						<div class="form-group">
 							<label class="control-label"><?php __('lblEnterPassword');?></label>
 		
-							<input type="text" id="feed_password" name="password" class="form-control" value="<?php echo $controller->_post->check('password') ? $controller->_post->toString('password') : null; ?>"/>
+							<input type="text" id="feed_password" name="password" class="form-control" value="<?php echo $controller->_post->check('password') ? pjSanitize::html($controller->_post->toString('password')) : null; ?>"/>
 						</div>
 					</div>
 				</div>
@@ -135,7 +135,7 @@
 						<div class="hr-line-dashed"></div>
 						<p class="alert alert-success alert-with-icon m-t-xs"><i class="fa fa-info-circle"></i> <?php  __('infoReservationFeedDesc');?></p>
 						<div class="form-group">
-							<textarea id="reservations_feed" name="reservations_feed" class="form-control" rows="3"><?php echo PJ_INSTALL_URL; ?>index.php?controller=pjFront&amp;action=pjActionExportFeed&amp;format=<?php echo $controller->_post->toString('format'); ?>&amp;calendar_id=<?php echo $controller->getCalendarId();?>&amp;type=<?php echo $controller->_post->toString('period'); ?>&amp;period=<?php echo $controller->_post->toString('period') == 'next' ? $controller->_post->toString('coming_period') : $controller->_post->toString('made_period'); ?>&amp;p=<?php echo isset($tpl['password']) ? $tpl['password'] : null;?></textarea>
+							<textarea id="reservations_feed" name="reservations_feed" class="form-control" rows="3"><?php echo PJ_INSTALL_URL; ?>index.php?controller=pjFront&amp;action=pjActionExportFeed&amp;format=<?php echo urlencode((string) $controller->_post->toString('format')); ?>&amp;calendar_id=<?php echo $controller->getCalendarId();?>&amp;type=<?php echo urlencode((string) $controller->_post->toString('period')); ?>&amp;period=<?php echo urlencode((string) ($controller->_post->toString('period') == 'next' ? $controller->_post->toString('coming_period') : $controller->_post->toString('made_period'))); ?>&amp;p=<?php echo isset($tpl['password']) ? $tpl['password'] : null;?></textarea>
 						</div>
 					</div>
 					<?php

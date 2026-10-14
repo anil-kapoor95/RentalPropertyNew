@@ -327,7 +327,12 @@ class pjAdminDiscounts extends pjAdmin
 				}
 				
 				$pjCalendarDiscountModel = pjCalendarDiscountModel::factory();
-				$pjCalendarDiscountModel->where('discount_id', $this->_post->toInt('id'))->eraseAll();
+				// re-link only the properties this user manages; links to other owners' properties stay
+				$managed_ids = $this->getCompanyCalendarIds();
+				if (!empty($managed_ids))
+				{
+					$pjCalendarDiscountModel->where('discount_id', $this->_post->toInt('id'))->whereIn('calendar_id', $managed_ids)->eraseAll();
+				}
 				
 				$calendar_id_arr = $this->filterCompanyCalendarIds($this->_post->toArray('calendar_id'));
 				if(count($calendar_id_arr) > 0)

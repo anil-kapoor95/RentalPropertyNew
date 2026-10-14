@@ -33,6 +33,17 @@ class pjAdminVouchers extends pjAdmin
 		exit;
 	}
 	
+	/** Coupon codes are unique inside a company (checked on the server, not only in the form). */
+	private function isCodeFree($code, $except_id = 0)
+	{
+		$m = pjVoucherModel::factory()->where('t1.code', (string) $code)->where('t1.company_id', $this->getCompanyId());
+		if ((int) $except_id > 0)
+		{
+			$m->where('t1.id !=', (int) $except_id);
+		}
+		return trim((string) $code) !== '' && (int) $m->findCount()->getData() === 0;
+	}
+
 	public function pjActionCreate()
 	{
 		$this->setAjax(true);
@@ -49,6 +60,10 @@ class pjAdminVouchers extends pjAdmin
 				$data['date_from'] = pjDateTime::formatDate($this->_post->toString('date_from'), $this->option_arr['o_date_format']);
 				$data['date_to'] = pjDateTime::formatDate($this->_post->toString('date_to'), $this->option_arr['o_date_format']);
 				$data['company_id'] = $this->getCompanyId();
+				if (!$this->isCodeFree($data['code']))
+				{
+					pjAppController::jsonResponse(array('status' => 'ERR', 'code' => 105, 'text' => 'This coupon code is already used.'));
+				}
 				$id = pjVoucherModel::factory($data)->insert()->getInsertId();
 				if ($id !== false && (int) $id > 0)
 				{
@@ -268,6 +283,10 @@ class pjAdminVouchers extends pjAdmin
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Invalid column.'));
 		}
+		if ($params['value'] === '' || !$this->isCodeFree($params['value'], $params['id']))
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 105, 'text' => 'This coupon code is already used.'));
+		}
 		$pjVoucherModel = pjVoucherModel::factory();
 		if (!in_array($params['column'], $pjVoucherModel->getI18n()))
 		{
@@ -298,11 +317,20 @@ class pjAdminVouchers extends pjAdmin
 				{
 					$this->denyCompanyAccess();
 				}
+				if (!$this->isCodeFree($data['code'], $this->_post->toInt('id')))
+				{
+					pjAppController::jsonResponse(array('status' => 'ERR', 'code' => 105, 'text' => 'This coupon code is already used.'));
+				}
 				$data['company_id'] = $this->getCompanyId();
 				pjVoucherModel::factory()->where('id', $this->_post->toInt('id'))->limit(1)->modifyAll($data);
 				
 				$pjCalendarVoucherModel = pjCalendarVoucherModel::factory();
-				$pjCalendarVoucherModel->where('voucher_id', $this->_post->toInt('id'))->eraseAll();
+				// re-link only the properties this user manages; links to other owners' properties stay
+				$managed_ids = $this->getCompanyCalendarIds();
+				if (!empty($managed_ids))
+				{
+					$pjCalendarVoucherModel->where('voucher_id', $this->_post->toInt('id'))->whereIn('calendar_id', $managed_ids)->eraseAll();
+				}
 				$calendar_id_arr = $this->filterCompanyCalendarIds($this->_post->toArray('calendar_id'));
 				if (count($calendar_id_arr) > 0)
 				{

@@ -63,6 +63,18 @@ class pjBase extends pjBaseAppController
 	{
 	    parent::beforeFilter();
 	    
+	    // CSRF: the same token as the rest of the back-office. Every POST of a logged-in
+	    // user must carry it (forms get it as a hidden field and jQuery Ajax as a header
+	    // from pjAdminCore.js). Login, password reset and cron calls have no session.
+	    if ($this->isLoged() && !$this->isInstaller())
+	    {
+	        $this->appendJs('pjAdminCore.js', PJ_JS_PATH);
+	        if (self::isPost() && class_exists('pjAppController'))
+	        {
+	            pjAppController::validateCsrfToken();
+	        }
+	    }
+	    
 	    $pjAuth = pjAuth::init();
 	    $checkUser = $pjAuth->checkCurrentUser();
 	    if($checkUser == false)

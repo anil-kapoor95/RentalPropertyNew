@@ -282,6 +282,11 @@ class pjAdminCompanies extends pjAdmin
 			pjBaseCountryModel::factory()->whereIn('id', $own_countries)->eraseAll();
 		}
 		pjCompanyCountryModel::factory()->where('company_id', $company_id)->eraseAll();
+		// Its users stay (they are not deleted) but no longer point to a company that does
+		// not exist; until an administrator assigns them a company they see no data.
+		pjAuthUserModel::factory()->where('company_id', $company_id)->where('role_id !=', 1)->modifyAll(array('company_id' => ':NULL'));
+		pjCompanyContext::ensureCronTable();
+		pjCompanyCronModel::factory()->where('company_id', $company_id)->eraseAll();
 	}
 
 	/** The linked login account belongs to this company. */

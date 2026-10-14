@@ -29,6 +29,47 @@ class pjAdminReservations extends pjAdmin
 		exit;
 	}
 	
+	/**
+	 * Reservation fields posted by the add / edit form. The record id, the payment
+	 * gateway fields and the timestamps are never taken from the request.
+	 */
+	private function postedReservationData()
+	{
+		$post = $this->_post->raw();
+		$post = is_array($post) ? $post : array();
+		foreach (array('id', 'txn_id', 'processed_on', 'provider_id', 'created', 'modified', 'ip', 'extra', 'qty', 'csrf_token', 'reservation_create', 'reservation_update') as $key)
+		{
+			unset($post[$key]);
+		}
+		return $post;
+	}
+
+	/** Store the extras of a reservation (only the property's own extras, valid quantities). */
+	private function saveReservationExtras($reservation_id, $calendar_id)
+	{
+		list($ex_arr, $ex_qty_arr) = pjAppController::sanitizeExtras(
+			$calendar_id,
+			$this->_post->check('extra') ? $this->_post->toArray('extra') : array(),
+			$this->_post->check('qty') ? $this->_post->toArray('qty') : array()
+		);
+		$pjReservationExtraModel = pjReservationExtraModel::factory();
+		$pjReservationExtraModel->where('reservation_id', (int) $reservation_id)->eraseAll();
+		if (!empty($ex_arr))
+		{
+			$pjReservationExtraModel->reset()->begin();
+			foreach ($ex_arr as $extra_id => $on)
+			{
+				$pjReservationExtraModel
+					->reset()
+					->set('reservation_id', (int) $reservation_id)
+					->set('extra_id', (int) $extra_id)
+					->set('qty', (int) $ex_qty_arr[$extra_id])
+					->insert();
+			}
+			$pjReservationExtraModel->commit();
+		}
+	}
+
 	public function pjActionCreate()
 	{
 		$this->checkLogin();
@@ -62,30 +103,15 @@ class pjAdminReservations extends pjAdmin
 			$data['price_based_on'] = $option_arr['o_price_based_on'];
 			$data['ip'] = $_SERVER['REMOTE_ADDR'];
 			$data['locale_id'] = $this->getLocaleId();			
-			$insert_id = $pjReservationModel->reset()->setAttributes(array_merge($this->_post->raw(), $data))->insert()->getInsertId();
+			$data['calendar_id'] = $this->_post->toInt('calendar_id');
+			$insert_id = $pjReservationModel->reset()->setAttributes(array_merge($this->postedReservationData(), $data))->insert()->getInsertId();
 			if ($insert_id !== false && (int) $insert_id > 0)
 			{
 				// Reflect the new booking in the calendar's iCal feed.
 				pjAppController::saveReservationIcal(
 					pjReservationModel::factory()->reset()->find((int) $insert_id)->getData()
 				);
-				if($this->_post->check('extra') && count($this->_post->toArray('extra')) > 0)
-				{
-					$ex_arr = $this->_post->toArray('extra');
-					$ex_qty_arr = $this->_post->toArray('qty');
-					$pjReservationExtraModel = pjReservationExtraModel::factory();
-					$pjReservationExtraModel->begin();
-					foreach($ex_arr as $extra_id => $on)
-					{
-						$pjReservationExtraModel
-						->reset()
-						->set('reservation_id', $insert_id)
-						->set('extra_id', $extra_id)
-						->set('qty', $ex_qty_arr[$extra_id])
-						->insert();
-					}
-					$pjReservationExtraModel->commit();
-				}
+				$this->saveReservationExtras($insert_id, $data['calendar_id']);
 				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminReservations&action=pjActionIndex&err=AR03");
 			} else {
 				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminReservations&action=pjActionIndex&err=AR04");
@@ -461,7 +487,7 @@ class pjAdminReservations extends pjAdmin
 		if ($this->_get->check('id') && $this->_get->toInt('id') > 0)
 		{
 			$pjReservationModel->where('t1.id', $this->_get->toInt('id'));
-		} elseif ($this->_get->check('uuid') && $this->_get->isEmpty('uuid')) {
+		} elseif ($this->_get->check('uuid') && !$this->_get->isEmpty('uuid')) {
 			$pjReservationModel->where('t1.uuid', $this->_get->toString('uuid'));
 		} else {
 			$pjReservationModel->where('t1.id', '0');
@@ -495,7 +521,19 @@ class pjAdminReservations extends pjAdmin
 		
 		if (self::isPost() && $this->_post->check('reservation_update'))
 		{
-			if (0 != $pjReservationModel->reset()->where('t1.uuid', $this->_post->toString('uuid'))->where('t1.id !=', $this->_post->toInt('id'))->findCount()->getData())
+			// The booking being edited is the one opened above (checked against the
+			// active company) - never the id posted by the form.
+			$reservation_id = (int) $reservation['id'];
+			if ($this->_post->toInt('id') > 0 && $this->_post->toInt('id') !== $reservation_id)
+			{
+				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminReservations&action=pjActionIndex&err=AR10");
+			}
+			$calendar_id = $this->_post->check('calendar_id') ? $this->_post->toInt('calendar_id') : (int) $reservation['calendar_id'];
+			if (!$this->isCompanyCalendar($calendar_id))
+			{
+				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminReservations&action=pjActionIndex&err=AR10");
+			}
+			if (0 != $pjReservationModel->reset()->where('t1.uuid', $this->_post->toString('uuid'))->where('t1.id !=', $reservation_id)->findCount()->getData())
 			{
 				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminReservations&action=pjActionIndex&err=AR02");
 			}
@@ -504,41 +542,26 @@ class pjAdminReservations extends pjAdmin
 			$data['date_from'] = pjDateTime::formatDate($this->_post->toString('date_from'), $this->option_arr['o_date_format']);
 			$data['date_to'] = pjDateTime::formatDate($this->_post->toString('date_to'), $this->option_arr['o_date_format']);
 			$data['modified'] = date('Y-m-d H:i:s');			
-			$option_arr = $this->option_arr;
-			if ($this->_post->toInt('calendar_id') != $this->getCalendarId())
-			{
-				$option_arr = pjOptionModel::factory()->getPairs($this->_post->toInt('calendar_id'));
-			}
+			$data['calendar_id'] = $calendar_id;
 			if ($this->_post->toString('status') != 'Cancelled') {
-				$check = $this->pjActionCheckDt($data['date_from'], $data['date_to'], $this->_post->toInt('calendar_id'), $this->_post->toInt('id'), true);
+				$check = $this->pjActionCheckDt($data['date_from'], $data['date_to'], $calendar_id, $reservation_id, true);
 				if ($check['status'] == 'ERR')
 				{
-					pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminReservations&action=pjActionUpdate&id=".$this->_post->toInt('id')."&err=AR11");
+					pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminReservations&action=pjActionUpdate&id=".$reservation_id."&err=AR11");
 				}
 			}
-			$pjReservationModel->reset()->where('id', $this->_post->toInt('id'))->limit(1)->modifyAll(array_merge($this->_post->raw(), $data));
+			$old_calendar_id = (int) $reservation['calendar_id'];
+			$pjReservationModel->reset()->where('id', $reservation_id)->limit(1)->modifyAll(array_merge($this->postedReservationData(), $data));
 			// Update (or remove, if now cancelled) this booking's iCal event.
-			pjAppController::saveReservationIcal(
-				pjReservationModel::factory()->reset()->find($this->_post->toInt('id'))->getData()
-			);
-			$pjReservationExtraModel = pjReservationExtraModel::factory();
-			$pjReservationExtraModel->where('reservation_id', $this->_post->toInt('id'))->eraseAll();
-			if($this->_post->check('extra') && count($this->_post->toArray('extra')) > 0)
+			if ($old_calendar_id !== $calendar_id)
 			{
-				$ex_arr = $this->_post->toArray('extra');
-				$ex_qty_arr = $this->_post->toArray('qty');
-				$pjReservationExtraModel->reset()->begin();
-				foreach($ex_arr as $extra_id => $on)
-				{
-					$pjReservationExtraModel
-					->reset()
-					->set('reservation_id', $this->_post->toInt('id'))
-					->set('extra_id', $extra_id)
-					->set('qty', $ex_qty_arr[$extra_id])
-					->insert();
-				}
-				$pjReservationExtraModel->commit();
+				// moved to another property: take it out of the old property's feed
+				pjAppController::removeReservationIcal($old_calendar_id, $reservation['uuid']);
 			}
+			pjAppController::saveReservationIcal(
+				pjReservationModel::factory()->reset()->find($reservation_id)->getData()
+			);
+			$this->saveReservationExtras($reservation_id, $calendar_id);
 			
 			pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminReservations&action=pjActionIndex&err=AR01");
 		} else {
