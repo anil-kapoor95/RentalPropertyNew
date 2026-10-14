@@ -50,6 +50,8 @@
     								<?php
     								foreach (__('plugin_base_role_arr', true) as $k => $v)
     								{
+    								    // only administrators may give the Administrator role
+    								    if ((int) $k === 1 && !$controller->isAdmin()) { continue; }
     									?><option value="<?php echo $k; ?>"><?php echo pjSanitize::html($v); ?></option><?php
     								}
     								?>

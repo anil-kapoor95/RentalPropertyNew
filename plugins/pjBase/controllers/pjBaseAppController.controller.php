@@ -362,8 +362,69 @@ class pjBaseAppController extends pjController
         return $this->getForeignId();
     }
     
+    private static $userRefreshed = false;
+
+    /**
+     * Keep the logged-in user's role in step with the database, so a role change made
+     * in Users takes effect on the next page instead of at the next login. A user who
+     * was deleted or set to inactive is signed out.
+     */
+    protected function refreshLoggedUser()
+    {
+        if (self::$userRefreshed)
+        {
+            return;
+        }
+        self::$userRefreshed = true;
+
+        $_get = pjRegistry::getInstance()->get('_get');
+        if (is_object($_get) && in_array($_get->toString('controller'), array('pjFront', 'pjInstaller', 'pjListings', 'pjCron'), true))
+        {
+            return;
+        }
+        if (!isset($_SESSION[$this->defaultUser]) || !is_array($_SESSION[$this->defaultUser]) || empty($_SESSION[$this->defaultUser]['id']))
+        {
+            return;
+        }
+        $session_user = $_SESSION[$this->defaultUser];
+        $row = pjAuthUserModel::factory()->find((int) $session_user['id'])->getData();
+        if (empty($row) || !isset($row['status']) || $row['status'] != 'T')
+        {
+            unset($_SESSION[$this->defaultUser], $_SESSION[$this->defaultPermissions]);
+            if (class_exists('pjCompanyContext'))
+            {
+                unset($_SESSION[pjCompanyContext::SESSION_KEY]);
+            }
+            // stop this request right here
+            if (@$_SERVER['HTTP_X_REQUESTED_WITH'] === 'XMLHttpRequest')
+            {
+                header('Content-Type: application/json; charset=utf-8');
+                echo '{"status":"ERR","code":401,"text":"Your session has ended. Please log in again."}';
+                exit;
+            }
+            pjUtil::redirect(PJ_INSTALL_URL . 'index.php?controller=pjBase&action=pjActionLogin');
+        }
+        $old_company = array_key_exists('company_id', $session_user) ? $session_user['company_id'] : null;
+        $new_company = array_key_exists('company_id', $row) ? $row['company_id'] : null;
+        if ((int) $row['role_id'] !== (int) (isset($session_user['role_id']) ? $session_user['role_id'] : 0) || (int) $old_company !== (int) $new_company)
+        {
+            $_SESSION[$this->defaultUser]['role_id'] = $row['role_id'];
+            if (array_key_exists('company_id', $row))
+            {
+                $_SESSION[$this->defaultUser]['company_id'] = $row['company_id'];
+            }
+            if (class_exists('pjCompanyContext'))
+            {
+                // the company is picked again for the new role
+                unset($_SESSION[pjCompanyContext::SESSION_KEY]);
+            }
+            pjAuth::init()->reloadPermissions();
+        }
+    }
+
     public function beforeFilter()
     {
+        $this->refreshLoggedUser();
         $this->resetCss();
         $this->resetJs();
         

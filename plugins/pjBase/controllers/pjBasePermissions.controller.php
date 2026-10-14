@@ -6,6 +6,13 @@ if (!defined("ROOT_PATH"))
 }
 class pjBasePermissions extends pjBase
 {
+    /** Administrators have every permission, so they have no per-user permissions. */
+    private function isAdminUser($user_id)
+    {
+        $row = pjAuthUserModel::factory()->select('t1.role_id')->find((int) $user_id)->getData();
+        return !empty($row) && (int) $row['role_id'] === 1;
+    }
+
     public function pjActionIndex()
     {
         if (!$this->isAdmin())
@@ -22,7 +29,8 @@ class pjBasePermissions extends pjBase
     
     public function pjActionRolePermission()
     {
-        if ($this->getUserId() != 1)
+        // role permissions are edited by administrators only
+        if (!$this->isAdmin())
         {
             $this->sendForbidden();
             return;
@@ -66,7 +74,7 @@ class pjBasePermissions extends pjBase
                     $this->sendForbidden();
                     return;
                 }
-                if($this->_get->toInt('id') == 1 && $this->getUserId() != 1)
+                if(!$this->isAdmin() && $this->isAdminUser($this->_get->toInt('id')))
                 {
                     $this->sendForbidden();
                     return;
@@ -137,6 +145,10 @@ class pjBasePermissions extends pjBase
 
             if($this->_post->toInt('role_id'))
             {
+                if (!$this->isAdmin())
+                {
+                    self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'Access denied.'));
+                }
                 $data['role_id'] = $this->_post->toInt('role_id');
 
                 self::jsonResponse(pjAuth::init($data)->setRolePermission());
@@ -147,7 +159,7 @@ class pjBasePermissions extends pjBase
                 {
                     self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'Access denied.'));
                 }
-                if($this->_post->toInt('user_id') == 1)
+                if($this->isAdminUser($this->_post->toInt('user_id')))
                 {
                     self::jsonResponse(array('status' => 'ERR', 'code' => '100'));
                 }
@@ -174,7 +186,7 @@ class pjBasePermissions extends pjBase
             {
                 self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'Access denied!'));
             }
-            if($this->_post->toInt('user_id') == 1)
+            if($this->isAdminUser($this->_post->toInt('user_id')))
             {
                 self::jsonResponse(array('status' => 'ERR', 'code' => '100'));
             }

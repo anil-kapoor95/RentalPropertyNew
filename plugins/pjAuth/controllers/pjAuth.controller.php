@@ -245,6 +245,16 @@ class pjAuth extends pjAuthAppController
         }
     }
 
+    /** Rebuild the logged-in user's permissions (e.g. after their role was changed). */
+    public function reloadPermissions()
+    {
+        if ($this->isLoged())
+        {
+            $this->initializePermissions();
+        }
+        return $this;
+    }
+
     protected function initializePermissions()
     {
         $pair = array();
@@ -906,7 +916,9 @@ class pjAuth extends pjAuthAppController
         {
             return false;
         }else{
-            if($this->getUserId() == 1)
+            // The Administrator role has every permission. Decided by the role,
+            // not by user #1, so moving a user to another role really limits them.
+            if((int) $this->getRoleId() === 1)
             {
                 return true;
             }

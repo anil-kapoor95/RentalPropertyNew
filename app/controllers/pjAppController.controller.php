@@ -179,13 +179,9 @@ class pjAppController extends pjBaseAppController
 	        pjAuthRoleModel::factory()->setAttributes(array('id' => 4, 'role' => 'Company', 'is_backend' => 'T', 'is_admin' => 'T'))->insert();
 	    }
 	    
-	    // Grant full permissions to Admin
-	    $user_id = 1; // Admin ID
-	    $pjAuthUserPermissionModel->reset()->where('user_id', $user_id)->eraseAll();
-	    foreach($permissions as $key => $permission_id)
-	    {
-	        $pjAuthUserPermissionModel->setAttributes(compact('user_id', 'permission_id'))->insert();
-	    }
+	    // The Administrator role has every permission (pjAuth::hasAccess); user #1 gets no
+	    // personal copy, so moving that user to another role really limits them.
+	    $pjAuthUserPermissionModel->reset()->where('user_id', 1)->eraseAll();
 	    
 		$first_company = pjCompanyModel::factory()->orderBy('t1.id ASC')->limit(1)->findAll()->getDataIndex(0);
 		$company_id = !empty($first_company) ? (int) $first_company['id'] : 0;

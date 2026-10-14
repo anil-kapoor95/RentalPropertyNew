@@ -100,10 +100,13 @@ class pjCompanyContext
 		return $id > 0 && isset($allowed[$id]) ? $allowed[$id] : false;
 	}
 
-	/** Only administrators may work across companies. */
+	/**
+	 * Only administrators may work across companies. Decided by the role alone:
+	 * user #1 moved to another role is treated like any other user of that role.
+	 */
 	public static function isAdmin($role_id, $user_id)
 	{
-		return (int) $user_id === 1 || (int) $role_id === self::ROLE_ADMIN;
+		return (int) $role_id === self::ROLE_ADMIN;
 	}
 
 	public static function setActive($company_id, $role_id, $user_id)
@@ -180,11 +183,16 @@ class pjCompanyContext
 	 * ------------------------------------------------------------------ */
 
 	/**
-	 * SQL condition for the Users list of a company: the company's users plus the
-	 * administrators (who are global and have no company).
+	 * SQL condition for the users of a company. With $with_admins the administrators
+	 * (global, no company) are included - e.g. as possible property owners; the Users
+	 * menu of a non-administrator never lists them.
 	 */
-	public static function userScopeSql($company_id, $alias = 't1')
+	public static function userScopeSql($company_id, $alias = 't1', $with_admins = true)
 	{
+		if (!$with_admins)
+		{
+			return sprintf("(%1\$s.`company_id` = %2\$u AND %1\$s.`role_id` <> %3\$u)", $alias, (int) $company_id, self::ROLE_ADMIN);
+		}
 		return sprintf("(%1\$s.`company_id` = %2\$u OR %1\$s.`role_id` = %3\$u)", $alias, (int) $company_id, self::ROLE_ADMIN);
 	}
 
@@ -195,9 +203,10 @@ class pjCompanyContext
 		{
 			return array();
 		}
-		return array_map('intval', pjAuthUserModel::factory()->whereIn('t1.id', $ids)->where(self::userScopeSql($company_id))->findAll()->getDataPair(null, 'id'));
+		return array_map('intval', pjAuthUserModel::factory()->whereIn('t1.id', $ids)->where(self::userScopeSql($company_id, 't1', false))->findAll()->getDataPair(null, 'id'));
 	}
 
+	/** Users a non-administrator may manage: their company's users, never an administrator. */
 	public static function isCompanyUser($user_id, $company_id)
 	{
 		return count(self::filterUserIds(array($user_id), $company_id)) === 1;

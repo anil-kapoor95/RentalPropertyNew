@@ -58,6 +58,36 @@ class pjBaseUsers extends pjBase
 		}
 	}
 
+	/** Only administrators may give the Administrator role. */
+	private function isRoleAllowed($role_id)
+	{
+		return (int) $role_id !== 1 || $this->isUsersAdmin();
+	}
+
+	/** True when $user_id is the only active administrator left. */
+	private function isLastAdmin($user_id)
+	{
+		$row = pjAuthUserModel::factory()->select('t1.role_id')->find((int) $user_id)->getData();
+		if (empty($row) || (int) $row['role_id'] !== 1)
+		{
+			return false;
+		}
+		return (int) pjAuthUserModel::factory()
+			->where('t1.role_id', 1)
+			->where('t1.status', 'T')
+			->where('t1.id !=', (int) $user_id)
+			->findCount()->getData() === 0;
+	}
+
+	/** After a role change the user follows the permissions of the new role. */
+	private function afterRoleChange($user_id, $old_role_id, $new_role_id)
+	{
+		if ((int) $old_role_id !== (int) $new_role_id)
+		{
+			pjAuthUserPermissionModel::factory()->where('user_id', (int) $user_id)->eraseAll();
+		}
+	}
+
 	private function filterCompanyUsers($ids)
 	{
 		if ($this->isUsersAdmin())
@@ -230,6 +260,10 @@ class pjBaseUsers extends pjBase
 			$data = array();
 			$data['status'] = $this->_post->check('status') ? 'T': 'F';
 			$data['role_id'] = $this->_post->toInt('role_id');
+			if (!$this->isRoleAllowed($data['role_id']))
+			{
+				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjBaseUsers&action=pjActionIndex&err=PU04");
+			}
 			if (class_exists('pjCompanyContext'))
 			{
 				// New users belong to the active company (administrators are global).
@@ -259,11 +293,29 @@ class pjBaseUsers extends pjBase
 		if (self::isPost() && $this->_post->toInt('user_update') && $this->_post->toInt('id'))
 		{
 		    $this->assertCompanyUser($this->_post->toInt('id'));
-		    $post = $this->_post->raw();
+		    $user_id = $this->_post->toInt('id');
+		    $new_role_id = $this->_post->toInt('role_id');
+		    $current = pjAuthUserModel::factory()->select('t1.role_id, t1.status')->find($user_id)->getData();
+		    $goes_inactive = $has_revert && !$this->_post->check('status');
+		    if (empty($current)
+		        || !$this->isRoleAllowed($new_role_id)
+		        || ($this->isLastAdmin($user_id) && ($new_role_id !== 1 || $goes_inactive)))
+		    {
+		        // never give the Administrator role from a company account, never leave the system without an active administrator
+		        pjUtil::redirect(PJ_INSTALL_URL . "index.php?controller=pjBaseUsers&action=pjActionIndex&err=PU05");
+		    }
+		    // only the fields of the form; role, status and company are set below
+		    $post = array();
+		    foreach (array('name', 'email', 'phone', 'password') as $field)
+		    {
+		        if ($this->_post->has($field))
+		        {
+		            $post[$field] = $this->_post->toString($field);
+		        }
+		    }
 		    if (class_exists('pjCompanyContext'))
 		    {
-		        $post['company_id'] = $this->postedCompanyId($this->_post->toInt('role_id'));
-		        unset($post['company']);
+		        $post['company_id'] = $this->postedCompanyId($new_role_id);
 		    }
 			$data = array();
 			$data['id'] = $this->_post->toInt('id');
@@ -282,16 +334,16 @@ class pjBaseUsers extends pjBase
 			}
 
 			$response = pjAuth::init(array_merge($post,$data))->updateUser();
+			if (isset($response['status']) && $response['status'] == 'OK')
+			{
+				$this->afterRoleChange($user_id, $current['role_id'], $new_role_id);
+			}
 			pjUtil::redirect(PJ_INSTALL_URL . "index.php?controller=pjBaseUsers&action=pjActionIndex&err=" . $response['code']);
 		}
 		if (self::isGet() && $this->_get->toInt('id'))
 		{
+		    // non-administrators cannot open an administrator (see assertCompanyUser)
 		    $this->assertCompanyUser($this->_get->toInt('id'));
-		    if($this->_get->toInt('id') == 1 && $this->getUserId() != 1)
-		    {
-		        $this->sendForbidden();
-		        return;
-		    }
 			$params = array(
 				'controller' => $this->_get->toString('controller'),
 				'action' => $this->_get->toString('action'),
@@ -318,7 +370,7 @@ class pjBaseUsers extends pjBase
 	        return;
 	    }
 	    
-	    $has_revert = pjAuth::factory('pjBaseUsers', 'pjActionStatusUser')->hasAccess() && $this->getUserId() != 1;
+	    $has_revert = pjAuth::factory('pjBaseUsers', 'pjActionStatusUser')->hasAccess() && !$this->isLastAdmin($this->getUserId());
 	    
 	    if (self::isPost() && $this->_post->toInt('user_update') && $this->_post->toInt('id'))
 	    {
@@ -378,6 +430,7 @@ class pjBaseUsers extends pjBase
 			$datetime = array('created', 'last_login', 'pswd_modified');
 			foreach ($arr as &$item)
 			{
+				unset($item['password'], $item['login_token']);
 				foreach ($datetime as $index)
 				{
 					if (!empty($item[$index]))
@@ -421,8 +474,8 @@ class pjBaseUsers extends pjBase
 		}
 		
 		$this->assertCompanyUser($params['id']);
-		// role / company changes are done in the edit form, not inline
-		if ($params['column'] == 'company_id')
+		// only the columns the grid edits; role / company changes are done in the edit form
+		if (!in_array($params['column'], array('name', 'email', 'status', 'locked'), true))
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Access denied.'));
 		}
@@ -446,21 +499,14 @@ class pjBaseUsers extends pjBase
 		}
 		
 		$pass = true;
-		if ((int) $params['id'] === 1)
+		if (in_array($params['column'], array('name', 'email')) && $params['value'] == '')
 		{
-		    if($this->getUserId() == 1)
-		    {
-    			if (in_array($params['column'], array('role_id', 'status', 'is_active')))
-    			{
-    				$pass = false;
-    			} elseif (in_array($params['column'], array('name', 'email')) && $params['value'] == '') {
-    				$pass = false;
-    			} elseif ($params['column'] == 'email' && $params['value'] != '' && !filter_var($params['value'], FILTER_VALIDATE_EMAIL)) {
-    				$pass = false;
-    			}
-		    }else{
-		        $pass = false;
-		    }
+			$pass = false;
+		} elseif ($params['column'] == 'email' && !filter_var($params['value'], FILTER_VALIDATE_EMAIL)) {
+			$pass = false;
+		} elseif ($params['column'] == 'status' && $params['value'] != 'T' && ((int) $params['id'] === (int) $this->getUserId() || $this->isLastAdmin($params['id']))) {
+			// nobody switches off their own account or the last active administrator
+			$pass = false;
 		}
 		if (in_array($params['column'], array('locked')))
 		{
@@ -477,13 +523,6 @@ class pjBaseUsers extends pjBase
 			self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Access denied.'));
 		}
 		$resp = pjAuth::init($params)->updateUser();
-		if ($params['column'] == 'role_id' && class_exists('pjCompanyContext'))
-		{
-			// administrators are global, everyone else belongs to the active company
-			$cur = pjAuthUserModel::factory()->select('t1.company_id')->find((int) $params['id'])->getData();
-			$keep = !empty($cur['company_id']) ? (int) $cur['company_id'] : $this->usersCompanyId();
-			pjAuthUserModel::factory()->where('id', (int) $params['id'])->limit(1)->modifyAll(array('company_id' => pjCompanyContext::companyForRole($params['value'], $keep)));
-		}
 		self::jsonResponse($resp);
 	}
 	
