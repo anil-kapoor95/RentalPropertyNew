@@ -317,7 +317,7 @@ class pjAdminCompanies extends pjAdmin
 		{
 			return false;
 		}
-		if ((int) pjCompanyModel::factory()->findCount()->getData() <= 1)
+		if (pjCompanyContext::isAdminWorkspace($company_id) || (int) $this->companiesOnly(pjCompanyModel::factory())->findCount()->getData() <= 1)
 		{
 			return false;
 		}
@@ -386,7 +386,24 @@ class pjAdminCompanies extends pjAdmin
 	/** Company id from a public hash (ids are never shown in URLs). */
 	private function idParam($value)
 	{
-		return pjCompanyContext::idFromHash($value);
+		$id = pjCompanyContext::idFromHash($value);
+		// the Admin workspace is not a company: only "Set company" may use it
+		if ($id > 0 && pjCompanyContext::isAdminWorkspace($id) && $this->_get->toString('action') !== 'pjActionSwitch')
+		{
+			return 0;
+		}
+		return $id;
+	}
+
+	/** Companies only (without the Admin workspace). */
+	private function companiesOnly($model)
+	{
+		$aws = pjCompanyContext::adminWorkspaceId(false);
+		if ($aws > 0)
+		{
+			$model->where('t1.id !=', $aws);
+		}
+		return $model;
 	}
 
 	/* ------------------------------------------------------------------
@@ -464,8 +481,8 @@ class pjAdminCompanies extends pjAdmin
 			exit;
 		}
 
-		$pjCompanyModel = pjCompanyModel::factory()
-			->join('pjAuthUser', 't2.id=t1.user_id', 'left outer');
+		$pjCompanyModel = $this->companiesOnly(pjCompanyModel::factory()
+			->join('pjAuthUser', 't2.id=t1.user_id', 'left outer'));
 
 		if ($q = $this->_get->toString('q'))
 		{
@@ -821,7 +838,7 @@ class pjAdminCompanies extends pjAdmin
 		}
 		$record = array_values(array_filter($record, array($this, 'canDeleteCompany')));
 		// Never delete every company in one go: at least one must remain.
-		if (!empty($record) && count($record) >= (int) pjCompanyModel::factory()->findCount()->getData())
+		if (!empty($record) && count($record) >= (int) $this->companiesOnly(pjCompanyModel::factory())->findCount()->getData())
 		{
 			array_pop($record);
 		}

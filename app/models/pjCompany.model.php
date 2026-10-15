@@ -33,6 +33,7 @@ class pjCompanyModel extends pjAppModel
 		array('name' => 'commission', 'type' => 'decimal', 'default' => '0.00'),
 		array('name' => 'notes', 'type' => 'text', 'default' => ':NULL'),
 		array('name' => 'status', 'type' => 'enum', 'default' => 'T'),
+		array('name' => 'is_admin_ws', 'type' => 'tinyint', 'default' => '0'),
 		array('name' => 'created', 'type' => 'datetime', 'default' => ':NOW()'),
 		array('name' => 'modified', 'type' => 'datetime', 'default' => ':NULL')
 	);

@@ -26,8 +26,65 @@ class pjCompanyContext
 
 	private static $cache = array();
 
+	/* ------------------------------------------------------------------
+	 * Admin workspace: the administrator's own "company" (own properties,
+	 * reservations, options and settings). Hidden from Companies; only the
+	 * Administrator role can see or switch to it. Shown as "Admin".
+	 * ------------------------------------------------------------------ */
+
+	private static $adminWs = null;
+
+	/** Id of the admin workspace (created and provisioned on first use). 0 before the update ran. */
+	public static function adminWorkspaceId($create = true)
+	{
+		if (self::$adminWs !== null && (self::$adminWs > 0 || !$create))
+		{
+			return self::$adminWs;
+		}
+		self::$adminWs = 0;
+		$m = pjCompanyModel::factory();
+		$has = false;
+		foreach ($m->prepare(sprintf("SHOW COLUMNS FROM `%s`", $m->getTable()))->exec()->getData() as $col)
+		{
+			if (isset($col['Field']) && $col['Field'] === 'is_admin_ws') { $has = true; break; }
+		}
+		if (!$has)
+		{
+			return 0;
+		}
+		$row = $m->reset()->select('t1.id')->where('t1.is_admin_ws', 1)->orderBy('t1.id ASC')->limit(1)->findAll()->getDataIndex(0);
+		if (!empty($row))
+		{
+			return self::$adminWs = (int) $row['id'];
+		}
+		if (!$create)
+		{
+			return 0;
+		}
+		$id = $m->reset()->setAttributes(array(
+			'name' => 'Admin', 'status' => 'T', 'is_admin_ws' => 1,
+			'hash' => bin2hex(function_exists('random_bytes') ? random_bytes(16) : md5(uniqid(mt_rand(), true), true)),
+		))->insert()->getInsertId();
+		if ($id !== false && (int) $id > 0)
+		{
+			self::$adminWs = (int) $id;
+			self::seedFeatures($id);
+			self::ensureNotifications($id);
+			self::ensureLocales($id); // all system languages, same default
+			self::optionsForeignId($id);
+		}
+		return self::$adminWs;
+	}
+
+	public static function isAdminWorkspace($company_id)
+	{
+		$a = self::adminWorkspaceId(false);
+		return $a > 0 && (int) $company_id === $a;
+	}
+
 	/**
 	 * Companies the user may work with: array(id => row), ordered by name.
+	 * The Administrator also gets the Admin workspace (first); nobody else does.
 	 */
 	public static function allowedCompanies($role_id, $user_id)
 	{
@@ -42,11 +99,17 @@ class pjCompanyContext
 		if ($user_id > 0)
 		{
 			$model = pjCompanyModel::factory()->select('t1.id, t1.name, t1.logo, t1.status, t1.user_id');
-			if (self::isGlobalUser($role_id, $user_id))
+			$aws = self::isAdmin($role_id, $user_id) ? self::adminWorkspaceId() : self::adminWorkspaceId(false);
+			if (self::isAdmin($role_id, $user_id))
 			{
-				// administrators and admin-side users (no company): every company
+				// administrator: the Admin workspace first, then every company
+				$arr = $model->orderBy(sprintf('(t1.id = %u) DESC, t1.name ASC', $aws), false)->findAll()->getDataPair('id');
+			} elseif (self::isGlobalUser($role_id, $user_id)) {
+				// admin-side users (no company): every company, never the Admin workspace
+				if ($aws > 0) { $model->where('t1.id !=', $aws); }
 				$arr = $model->orderBy('t1.name ASC')->findAll()->getDataPair('id');
 			} else {
+				if ($aws > 0) { $model->where('t1.id !=', $aws); }
 				if ($role_id === self::ROLE_COMPANY) {
 					// the company whose login this is, or the company the user is assigned to
 					$model->where(sprintf("(t1.user_id = %2\$u OR t1.id IN (SELECT `company_id` FROM `%1\$s` WHERE `id` = %2\$u AND `company_id` IS NOT NULL))",
@@ -430,7 +493,7 @@ class pjCompanyContext
 				continue;
 			}
 			$row['foreign_id'] = $fid;
-			if (isset(self::$secretOptionKeys[$row['key']]))
+			if (isset(self::$secretOptionKeys[$row['key']]) && !self::isAdminWorkspace($company_id))
 			{
 				$row['value'] = '';
 			}

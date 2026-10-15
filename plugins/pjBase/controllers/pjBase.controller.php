@@ -216,6 +216,8 @@ class pjBase extends pjBaseAppController
     	        {
     	            // Open the back office in the default language of the user's company
     	            // (not the language left in the session by the login page or an earlier user).
+    	            // every login starts in the user's default workspace (the Admin workspace for the administrator)
+    	            if (class_exists('pjCompanyContext')) { unset($_SESSION[pjCompanyContext::SESSION_KEY]); }
     	            $this->setLoginLocale();
     	            
     	            if(!empty($this->option_arr['o_dashboard']))
