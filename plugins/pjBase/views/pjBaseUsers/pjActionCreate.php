@@ -52,13 +52,16 @@
     								{
     								    // only administrators may give the Administrator role
     								    if ((int) $k === 1 && !$controller->isAdmin()) { continue; }
-    									?><option value="<?php echo $k; ?>"><?php echo pjSanitize::html($v); ?></option><?php
+    								    // Company logins are created with the company (Companies > Add company).
+    								    // A company creates "Company user" users only; nobody else gives that role.
+    								    $is_company_login = (int) $controller->getRoleId() === 4;
+    								    if ((int) $k === 4 || ($is_company_login ? (int) $k !== 5 : (int) $k === 5)) { continue; }
+    									?><option value="<?php echo $k; ?>"<?php echo $is_company_login ? ' selected="selected"' : NULL; ?>><?php echo pjSanitize::html($v); ?></option><?php
     								}
     								?>
     							</select>
                             </div>
                         </div><!-- /.col-md-3 -->
-                        <?php $user_company_id = null; include PJ_VIEWS_PATH . 'pjLayouts/elements/user-company-field.php'; ?>
                     </div><!-- /.row -->
 
                     <div class="hr-line-dashed"></div>

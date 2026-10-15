@@ -30,12 +30,11 @@ var jQuery = jQuery || $.noConflict();
 					{text: myLabel.email, type: "text", sortable: true, editable: false},
 					{text: myLabel.phone, type: "text", sortable: true, editable: false},
 					{text: myLabel.city, type: "text", sortable: true, editable: false},
-					{text: myLabel.user, type: "text", sortable: false, editable: false},
 					{text: myLabel.status, type: "toggle", sortable: true, editable: myLabel.has_update, positiveLabel: myLabel.active, positiveValue: "T", negativeLabel: myLabel.inactive, negativeValue: "F"}
 				],
 				dataUrl: dataUrl + pjGrid.queryString,
 				dataType: "json",
-				fields: ['name', 'email', 'phone', 'city', 'user_name', 'status'],
+				fields: ['name', 'email', 'phone', 'city', 'status'],
 				paginator: {
 					actions: actionsOpts,
 					gotoPage: true,
@@ -80,6 +79,35 @@ var jQuery = jQuery || $.noConflict();
 		});
 
 		/* ---------- Form ---------- */
+		// Eye icon: show / hide the password
+		$(document).on("click", ".pj-toggle-password", function (e) {
+			if (e && e.preventDefault) { e.preventDefault(); }
+			var $input = $($(this).data("target")),
+				show = $input.attr("type") === "password";
+			$input.attr("type", show ? "text" : "password");
+			$(this).find("i").toggleClass("fa-eye", !show).toggleClass("fa-eye-slash", show);
+			return false;
+		});
+
+		// Trash icon on the logo: delete it at once (no Save needed)
+		$(document).on("click", ".pj-company-logo-delete", function (e) {
+			if (e && e.preventDefault) { e.preventDefault(); }
+			var $btn = $(this);
+			if ($btn.hasClass("disabled")) { return false; }
+			$btn.addClass("disabled");
+			$.post("index.php?controller=pjAdminCompanies&action=pjActionDeleteLogo", {id: $btn.data("id")}).done(function (data) {
+				if (data && data.status === "OK") {
+					$btn.closest(".pj-company-logo-box").remove();
+				} else {
+					$btn.removeClass("disabled");
+					if (data && data.text) { window.alert(data.text); }
+				}
+			}).fail(function () {
+				$btn.removeClass("disabled");
+			});
+			return false;
+		});
+
 		if ($frmCompany.length > 0) {
 			if (select2 && $frmCompany.find(".select-item").length) {
 				$frmCompany.find(".select-item").select2({
@@ -92,14 +120,46 @@ var jQuery = jQuery || $.noConflict();
 					onkeyup: false,
 					ignore: ":hidden:not(.select-item)",
 					rules: {
-						commission: {number: true, min: 0, max: 100}
+						login_password_confirm: {equalTo: "#login_password"},
+						login_password_current: {required: function () { return $("#login_password").val() !== "" || $("#login_password_confirm").val() !== ""; }}
+					},
+					errorPlacement: function (error, element) {
+						// keep the eye icon next to the field
+						if (element.parent(".input-group").length) {
+							error.insertAfter(element.parent());
+						} else {
+							error.insertAfter(element);
+						}
 					},
 					submitHandler: function (form) {
-						var $btn = $(form).find(".ladda-button");
-						if ($btn.length && window.Ladda) {
-							Ladda.create($btn.get(0)).start();
+						var $btn = $(form).find(".ladda-button"),
+							ladda = $btn.length && window.Ladda ? Ladda.create($btn.get(0)) : null,
+							$pw = $(form).find("#login_password"),
+							validator = this;
+						if (ladda) {
+							ladda.start();
 						}
-						form.submit();
+						if (!$pw.length || $pw.val() === "") {
+							form.submit();
+							return;
+						}
+						// new password: check the password rules first and show the exact rule that is not met
+						$.post("index.php?controller=pjAdminCompanies&action=pjActionCheckPassword", {
+							password: $pw.val(),
+							csrf_token: $(form).find("input[name='csrf_token']").val()
+						}).done(function (data) {
+							if (data && data.status === "OK") {
+								form.submit();
+								return;
+							}
+							if (ladda) {
+								ladda.stop();
+							}
+							validator.showErrors({login_password: data && data.text ? data.text : ""});
+							$pw.trigger("focus");
+						}).fail(function () {
+							form.submit();
+						});
 					}
 				});
 			}

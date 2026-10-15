@@ -57,11 +57,9 @@ $status_on = !isset($arr['status']) || $arr['status'] == 'T';
 			<div class="form-group">
 				<label class="control-label" for="logo"><?php __('lblCompanyLogo'); ?></label>
 				<?php if (!empty($arr['logo']) && is_file($arr['logo'])) { ?>
-				<div class="m-b-sm">
+				<div class="m-b-sm m-t-sm pj-company-logo-box" style="position: relative; display: inline-block; min-width: 60px; min-height: 40px;">
 					<img src="<?php echo PJ_INSTALL_URL . pjSanitize::html($arr['logo']); ?>" alt="" class="pj-company-logo" style="max-width: 160px; max-height: 90px; border: 1px solid #e7eaec; padding: 4px; background: #fff;">
-				</div>
-				<div class="checkbox m-t-none m-b-sm">
-					<label><input type="checkbox" name="remove_logo" value="1"> <?php __('lblCompanyRemoveLogo'); ?></label>
+					<a href="#" class="btn btn-danger btn-xs pj-company-logo-delete" data-id="<?php echo pjCompanyContext::hashOf($arr['id']); ?>" title="<?php __('lblCompanyDeleteLogo', false, true); ?>" style="position: absolute; top: -8px; right: -8px; border-radius: 50%; width: 26px; height: 26px; padding: 3px 0; text-align: center;"><i class="fa fa-trash"></i></a>
 				</div>
 				<?php } ?>
 				<input type="file" name="logo" id="logo" class="form-control" accept=".jpg,.jpeg,.png,.gif,.webp,image/*">
@@ -151,51 +149,49 @@ $status_on = !isset($arr['status']) || $arr['status'] == 'T';
 		</div>
 	</div>
 
-	<?php if ($is_admin_form) { ?>
+	<?php if (($is_admin_form && in_array($form_flag, array('company_create', 'company_update'), true)) || $form_flag === 'company_profile') {
+		// Add company: password required. Edit company / My company: optional, only to change it.
+		$pw_new = $form_flag === 'company_create';
+		$pw_req = $pw_new ? ' required' : '';
+		$pw_own = $form_flag === 'company_profile'; // the company changes its own password: current password needed
+		$pw_col = $pw_own ? 'col-lg-3 col-md-6 col-sm-6' : 'col-lg-4 col-md-6 col-sm-6';
+	?>
 	<div class="hr-line-dashed"></div>
 
-	<!-- Administration (admin only) -->
-	<h3 class="m-b-md"><?php __('lblCompanySectionAdmin'); ?></h3>
+	<!-- Login of the company (a user with the Company role is created with the company) -->
+	<h3 class="m-b-md"><?php __($pw_own ? 'lblCompanySectionPassword' : 'lblCompanySectionLogin'); ?></h3>
 	<div class="row">
-		<div class="col-lg-4 col-md-6 col-sm-6">
+		<?php if ($pw_own) { ?>
+		<div class="<?php echo $pw_col; ?>">
 			<div class="form-group">
-				<label class="control-label" for="user_id"><?php __('lblCompanyUser'); ?></label>
-				<select name="user_id" id="user_id" class="form-control select-item" data-placeholder="<?php __('lblCompanyNoUser', false, true); ?>">
-					<option value=""><?php __('lblCompanyNoUser'); ?></option>
-					<?php foreach ($tpl['user_arr'] as $u) { ?>
-					<option value="<?php echo (int) $u['id']; ?>"<?php echo isset($arr['user_id']) && (int) $arr['user_id'] === (int) $u['id'] ? ' selected="selected"' : ''; ?>><?php echo pjSanitize::html($u['name'] . ' (' . $u['email'] . ')'); ?></option>
-					<?php } ?>
-				</select>
-				<p class="help-block m-b-none"><small><?php __('lblCompanyUserNote'); ?></small></p>
-			</div>
-		</div>
-		<div class="col-lg-2 col-md-3 col-sm-3">
-			<div class="form-group">
-				<label class="control-label" for="commission"><?php __('lblCompanyCommission'); ?></label>
-				<input type="number" name="commission" id="commission" class="form-control" min="0" max="100" step="0.01" value="<?php echo isset($arr['commission']) ? (float) $arr['commission'] : '0'; ?>">
-			</div>
-		</div>
-		<div class="col-lg-2 col-md-3 col-sm-3">
-			<div class="form-group">
-				<label class="control-label"><?php __('lblCompanyStatus'); ?></label>
-				<div class="clearfix">
-					<div class="switch onoffswitch-data pull-left">
-						<div class="onoffswitch">
-							<input class="onoffswitch-checkbox" id="status" name="status" type="checkbox"<?php echo $status_on ? ' checked="checked"' : ''; ?>>
-							<label class="onoffswitch-label" for="status">
-								<span class="onoffswitch-inner" data-on="<?php __('filter_ARRAY_active'); ?>" data-off="<?php __('filter_ARRAY_inactive'); ?>"></span>
-								<span class="onoffswitch-switch"></span>
-							</label>
-						</div>
-					</div>
+				<label class="control-label" for="login_password_current"><?php __('lblCompanyLoginCurrentPassword'); ?></label>
+				<div class="input-group">
+					<input type="password" name="login_password_current" id="login_password_current" class="form-control" autocomplete="current-password" data-msg-required="<?php __('pj_field_required', false, true); ?>">
+					<span class="input-group-btn"><button type="button" class="btn btn-default pj-toggle-password" data-target="#login_password_current" tabindex="-1"><i class="fa fa-eye"></i></button></span>
 				</div>
 			</div>
 		</div>
-		<div class="col-lg-4 col-md-12">
+		<?php } ?>
+		<div class="<?php echo $pw_col; ?>">
 			<div class="form-group">
-				<label class="control-label" for="notes"><?php __('lblCompanyNotes'); ?></label>
-				<textarea name="notes" id="notes" rows="3" class="form-control"><?php echo $v('notes'); ?></textarea>
+				<label class="control-label" for="login_password"><?php __($pw_new ? 'lblCompanyLoginPassword' : 'lblCompanyLoginNewPassword'); echo $pw_new ? ' *' : ''; ?></label>
+				<div class="input-group">
+					<input type="password" name="login_password" id="login_password" class="form-control<?php echo $pw_req; ?>" autocomplete="new-password" data-msg-required="<?php __('pj_field_required', false, true); ?>">
+					<span class="input-group-btn"><button type="button" class="btn btn-default pj-toggle-password" data-target="#login_password" tabindex="-1"><i class="fa fa-eye"></i></button></span>
+				</div>
 			</div>
+		</div>
+		<div class="<?php echo $pw_col; ?>">
+			<div class="form-group">
+				<label class="control-label" for="login_password_confirm"><?php __($pw_new ? 'lblCompanyLoginPasswordConfirm' : 'lblCompanyLoginNewPasswordConfirm'); echo $pw_new ? ' *' : ''; ?></label>
+				<div class="input-group">
+					<input type="password" name="login_password_confirm" id="login_password_confirm" class="form-control<?php echo $pw_req; ?>" autocomplete="new-password" data-msg-required="<?php __('pj_field_required', false, true); ?>" data-msg-equal-to="<?php __('msgCompanyPasswordMismatch', false, true); ?>">
+					<span class="input-group-btn"><button type="button" class="btn btn-default pj-toggle-password" data-target="#login_password_confirm" tabindex="-1"><i class="fa fa-eye"></i></button></span>
+				</div>
+			</div>
+		</div>
+		<div class="<?php echo $pw_own ? 'col-lg-3' : 'col-lg-4'; ?> col-md-12">
+			<p class="help-block m-t-lg"><small><?php __($pw_new ? 'lblCompanyLoginNote' : ($pw_own ? 'lblCompanyLoginNoteOwn' : 'lblCompanyLoginNoteEdit')); ?></small></p>
 		</div>
 	</div>
 	<?php } ?>

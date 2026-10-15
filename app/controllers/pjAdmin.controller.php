@@ -69,7 +69,8 @@ class pjAdmin extends pjAppController
 		    'pjAdminOptions::pjActionNotificationsGetContent' => 'pjAdminOptions::pjActionNotifications',
 		    'pjAdminOptions::pjActionNotificationsSetContent' => 'pjAdminOptions::pjActionNotifications',
 		
-			'pjAdminCalendars::pjActionCheckAssignCalendar' => 'pjAdminCalendars::pjActionUpdate',
+			// pre-check of the Properties menu link: whoever may open the list may run it
+			'pjAdminCalendars::pjActionCheckAssignCalendar' => 'pjAdminCalendars::pjActionIndex',
 			'pjAdminCalendars::pjActionDeleteAllPrices' => 'pjAdminCalendars::pjActionUpdate',
 			'pjAdminCalendars::pjActionBeforeSavePrices' => 'pjAdminCalendars::pjActionUpdate',
 			'pjAdminCalendars::pjActionSavePrices' => 'pjAdminCalendars::pjActionUpdate',
@@ -126,6 +127,9 @@ class pjAdmin extends pjAppController
 			'pjAdminCompanies::pjActionSwitch' => 'pjAdmin::pjActionIndex',
 			'pjAdminCompanies::pjActionGetCompany' => 'pjAdminCompanies::pjActionIndex',
 			'pjAdminCompanies::pjActionSaveCompany' => 'pjAdminCompanies::pjActionUpdate',
+			// checked inside the action (admin: any company; company user: his own)
+			'pjAdminCompanies::pjActionDeleteLogo' => 'pjAdmin::pjActionIndex',
+			'pjAdminCompanies::pjActionCheckPassword' => 'pjAdmin::pjActionIndex',
 
 			'pjAdminVouchers::pjActionGetVoucher' => 'pjAdminVouchers::pjActionIndex',
 			'pjAdminVouchers::pjActionSaveVoucher' => 'pjAdminVouchers::pjActionUpdate',

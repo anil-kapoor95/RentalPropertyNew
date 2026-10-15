@@ -214,6 +214,9 @@ class pjBase extends pjBaseAppController
 	            $response = pjAuth::init($data)->doLogin();
     	        if($response['status'] == 'OK')
     	        {
+    	            // Open the back office in the default language of the user's company
+    	            // (not the language left in the session by the login page or an earlier user).
+    	            $this->setLoginLocale();
     	            
     	            if(!empty($this->option_arr['o_dashboard']))
     	            {
@@ -275,6 +278,29 @@ class pjBase extends pjBaseAppController
 	    }
 	}
 	
+	private function setLoginLocale()
+	{
+		$this->session->unsetData($this->defaultLocale);
+		$locale_id = 0;
+		if (class_exists('pjCompanyContext') && class_exists('pjCompanyLocaleModel'))
+		{
+			$cid = (int) pjCompanyContext::localeScopeId();
+			if ($cid > 0)
+			{
+				$locale_id = (int) pjCompanyContext::companyDefaultLocale($cid);
+			}
+		}
+		if ($locale_id <= 0)
+		{
+			$row = pjLocaleModel::factory()->where('t1.is_default', 1)->limit(1)->findAll()->getDataIndex(0);
+			$locale_id = !empty($row) ? (int) $row['id'] : 0;
+		}
+		if ($locale_id > 0)
+		{
+			$this->setLocale($locale_id);
+		}
+	}
+
 	public function pjActionLogout()
 	{
 	    $response = pjAuth::init()->doLogout();

@@ -109,3 +109,21 @@ var jQuery = jQuery || $.noConflict();
 		});
 	});
 })(jQuery);
+
+/* A required field filled with spaces only counts as empty (all admin forms). */
+(function ($) {
+	if (typeof $ === 'undefined') { return; }
+	function pjPatchRequired() {
+		if (!$.validator || $.validator.pjTrimRequired) { return; }
+		var orig = $.validator.methods.required;
+		$.validator.methods.required = function (value, element, param) {
+			if (element && /^(input|textarea)$/i.test(element.nodeName) && !this.checkable(element) && element.type !== 'file' && typeof value === 'string') {
+				value = $.trim(value);
+			}
+			return orig.call(this, value, element, param);
+		};
+		$.validator.pjTrimRequired = true;
+	}
+	pjPatchRequired();
+	$(pjPatchRequired);
+})(window.jQuery);

@@ -729,6 +729,17 @@
 				self.errorHandler.call(self, 'hide');
 				self.$abWrapper.parent().css("height", "auto");
 				
+				// a required field filled with spaces only counts as empty
+				if (pjQ.$.validator && !pjQ.$.validator.pjTrimRequired) {
+					var pjOrigRequired = pjQ.$.validator.methods.required;
+					pjQ.$.validator.methods.required = function (value, element, param) {
+						if (element && /^(input|textarea)$/i.test(element.nodeName) && !this.checkable(element) && element.type !== 'file' && typeof value === 'string') {
+							value = pjQ.$.trim(value);
+						}
+						return pjOrigRequired.call(this, value, element, param);
+					};
+					pjQ.$.validator.pjTrimRequired = true;
+				}
 				$frmCheckout.validate({
 					rules: {
 						"captcha" : {

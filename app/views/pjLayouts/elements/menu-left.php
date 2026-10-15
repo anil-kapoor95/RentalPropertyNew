@@ -36,7 +36,7 @@ $isScriptOptionsNotifications         = $isScriptOptions && in_array($action_nam
 $hasAccessScriptDashboard = pjAuth::factory('pjAdmin', 'pjActionIndex')->hasAccess();
 
 // Permissions - Calendars
-$hasAccessScriptCalendars          = pjAuth::factory('pjAdminCalendars')->hasAccess();
+$hasAccessScriptCalendars          = pjAuth::factory('pjAdminCalendars')->hasAccess() && pjAuth::factory('pjAdminCalendars', 'pjActionIndex')->hasAccess();
 
 // Permissions - Reservations
 $hasAccessScriptReservations          = pjAuth::factory('pjAdminReservations', 'pjActionIndex')->hasAccess();

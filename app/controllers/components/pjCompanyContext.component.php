@@ -22,6 +22,7 @@ class pjCompanyContext
 	const ROLE_EDITOR = 2;
 	const ROLE_OWNER = 3;
 	const ROLE_COMPANY = 4;
+	const ROLE_COMPANY_USER = 5; // users a company creates for itself (Users menu of the company login)
 
 	private static $cache = array();
 
@@ -41,13 +42,18 @@ class pjCompanyContext
 		if ($user_id > 0)
 		{
 			$model = pjCompanyModel::factory()->select('t1.id, t1.name, t1.logo, t1.status, t1.user_id');
-			if (self::isAdmin($role_id, $user_id))
+			if (self::isGlobalUser($role_id, $user_id))
 			{
+				// administrators and admin-side users (no company): every company
 				$arr = $model->orderBy('t1.name ASC')->findAll()->getDataPair('id');
 			} else {
 				if ($role_id === self::ROLE_COMPANY) {
 					// the company whose login this is, or the company the user is assigned to
 					$model->where(sprintf("(t1.user_id = %2\$u OR t1.id IN (SELECT `company_id` FROM `%1\$s` WHERE `id` = %2\$u AND `company_id` IS NOT NULL))",
+						pjAuthUserModel::factory()->getTable(), $user_id));
+				} elseif ($role_id === self::ROLE_COMPANY_USER) {
+					// a company user works only in the company that created him
+					$model->where(sprintf("t1.id IN (SELECT `company_id` FROM `%1\$s` WHERE `id` = %2\$u AND `company_id` IS NOT NULL)",
 						pjAuthUserModel::factory()->getTable(), $user_id));
 				} elseif (in_array($role_id, array(self::ROLE_OWNER, self::ROLE_EDITOR), true)) {
 					// The company assigned to the user; otherwise the company that holds their properties.
@@ -111,9 +117,34 @@ class pjCompanyContext
 		return (int) $role_id === self::ROLE_ADMIN;
 	}
 
+	/**
+	 * Users that belong to the admin side, not to a company: administrators, and users
+	 * of the other admin roles (not Company / Company user) that have no company.
+	 * They work across all companies (company switcher), each with its own role permissions.
+	 */
+	public static function isGlobalUser($role_id, $user_id)
+	{
+		$role_id = (int) $role_id;
+		if (self::isAdmin($role_id, $user_id))
+		{
+			return true;
+		}
+		if (in_array($role_id, array(self::ROLE_COMPANY, self::ROLE_COMPANY_USER), true) || (int) $user_id <= 0)
+		{
+			return false;
+		}
+		static $cache = array();
+		if (!isset($cache[(int) $user_id]))
+		{
+			$row = pjAuthUserModel::factory()->select('t1.company_id')->find((int) $user_id)->getData();
+			$cache[(int) $user_id] = !empty($row) && empty($row['company_id']);
+		}
+		return $cache[(int) $user_id];
+	}
+
 	public static function setActive($company_id, $role_id, $user_id)
 	{
-		if (!self::isAdmin($role_id, $user_id))
+		if (!self::isGlobalUser($role_id, $user_id))
 		{
 			return false;
 		}
@@ -128,7 +159,7 @@ class pjCompanyContext
 
 	public static function canSwitch($role_id, $user_id)
 	{
-		return self::isAdmin($role_id, $user_id) && count(self::allowedCompanies($role_id, $user_id)) > 1;
+		return self::isGlobalUser($role_id, $user_id) && count(self::allowedCompanies($role_id, $user_id)) > 1;
 	}
 
 	public static function clearCache()
@@ -195,7 +226,9 @@ class pjCompanyContext
 		{
 			return sprintf("(%1\$s.`company_id` = %2\$u AND %1\$s.`role_id` <> %3\$u)", $alias, (int) $company_id, self::ROLE_ADMIN);
 		}
-		return sprintf("(%1\$s.`company_id` = %2\$u OR %1\$s.`role_id` = %3\$u)", $alias, (int) $company_id, self::ROLE_ADMIN);
+		// company users + administrators + admin-side users (no company, not a company role)
+		return sprintf("(%1\$s.`company_id` = %2\$u OR %1\$s.`role_id` = %3\$u OR (%1\$s.`company_id` IS NULL AND %1\$s.`role_id` NOT IN (%4\$u, %5\$u)))",
+			$alias, (int) $company_id, self::ROLE_ADMIN, self::ROLE_COMPANY, self::ROLE_COMPANY_USER);
 	}
 
 	public static function filterUserIds($ids, $company_id)

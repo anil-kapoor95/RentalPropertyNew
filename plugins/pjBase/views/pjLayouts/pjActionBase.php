@@ -29,12 +29,7 @@
     			<?php
     			require dirname(__FILE__) . '/elements/menu-top.php'; 
     			
-    			// Which company do these System Options belong to?
-    			$scope_file = PJ_VIEWS_PATH . 'pjLayouts/elements/company-scope.php';
-    			if (is_file($scope_file))
-    			{
-    				include $scope_file;
-    			}
+    			// (no "These settings apply to company" banner: the active company is shown in the sidebar)
     			
     			require $content_tpl;
     			

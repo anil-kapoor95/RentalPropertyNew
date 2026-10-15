@@ -72,17 +72,6 @@
     							</form>
                             </div><!-- /.col-md-3 -->
         
-                            <?php if (class_exists('pjCompanyContext') && pjCompanyContext::isAdmin($controller->getRoleId(), $controller->getUserId())): ?>
-                            <div class="col-md-3 col-sm-4">
-                                <select class="form-control" id="pjUserCompanyFilter">
-                                    <option value=""><?php __('lblFilterAllCompanies'); ?></option>
-                                    <?php foreach (pjCompanyContext::allowedCompanies($controller->getRoleId(), $controller->getUserId()) as $fcId => $fcRow): ?>
-                                    <option value="<?php echo pjCompanyContext::hashOf($fcId); ?>"><?php echo pjSanitize::html($fcRow['name']); ?></option>
-                                    <?php endforeach; ?>
-                                    <option value="none"><?php __('lblUserAllCompanies'); ?></option>
-                                </select>
-                            </div>
-                            <?php endif; ?>
                             <div class="col-md-4 text-right">
                                 <div class="btn-group" role="group" aria-label="...">
                                     <button type="button" class="btn btn-primary btn-all active"><?php __('plugin_base_lbl_all');?></button>

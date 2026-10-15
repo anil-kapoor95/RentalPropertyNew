@@ -256,3 +256,10 @@ body.mini-navbar .pjcs-workspace,body.mini-navbar .pjcs-switch{display:none}
 .pjcs-scope{margin:16px 20px 0;padding:10px 14px;border-radius:10px;background:var(--pjOrangeSoft);border:1px solid #fde1cc;color:var(--pjText);font-size:13px;display:flex;align-items:center;gap:8px}
 .pjcs-scope i{color:var(--pjOrangeDark)}
 .pjcs-scope strong{color:var(--pjOrangeDark)}
+
+/* ---- collapsed sidebar (hamburger): "Request customization" shows only its icon ---- */
+@media (min-width: 769px){
+	body.mini-navbar .pj-request-quote{justify-content:center;gap:0;margin:16px 8px;padding:12px 0!important}
+	body.mini-navbar .pj-request-quote span{display:none}
+	body.mini-navbar .pj-request-quote i{font-size:1.25rem;margin:0}
+}

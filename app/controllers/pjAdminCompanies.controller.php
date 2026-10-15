@@ -38,15 +38,9 @@ class pjAdminCompanies extends pjAdmin
 			$data['website'] = 'https://' . $data['website'];
 		}
 
-		if ($adminFields)
-		{
-			$data['status'] = $this->_post->check('status') ? 'T' : 'F';
-			$data['user_id'] = $this->_post->toInt('user_id') > 0 ? $this->_post->toInt('user_id') : ':NULL';
-			$commission = (float) $this->_post->toFloat('commission');
-			$data['commission'] = max(0, min(100, round($commission, 2)));
-			$notes = trim((string) $this->_post->toString('notes'));
-			$data['notes'] = $notes !== '' ? $notes : ':NULL';
-		}
+		// The form has no Administration section any more (status, login, commission,
+		// notes): saving keeps those values. Status is changed in the list (toggle);
+		// a new company starts active.
 		return $data;
 	}
 
@@ -88,6 +82,95 @@ class pjAdminCompanies extends pjAdmin
 			}
 		}
 		return true;
+	}
+
+	/**
+	 * Password + confirmation of the company login, and its e-mail must not belong to
+	 * another back-office user. Returns an error label key or true.
+	 */
+	private function validateLogin($email, $except_user_id = 0)
+	{
+		$password = (string) $this->_post->toString('login_password');
+		if ($password === '' || $password !== (string) $this->_post->toString('login_password_confirm'))
+		{
+			return 'msgCompanyPasswordMismatch';
+		}
+		$check = pjAuth::init()->validatePassword($password);
+		if (isset($check['status']) && $check['status'] === 'ERR')
+		{
+			// pwerr = the rule that failed; the message shows that rule's exact text
+			return 'msgCompanyPasswordWeak&pwerr=' . (int) $check['code'];
+		}
+		$taken = pjAuthUserModel::factory()
+			->join('pjAuthRole', 't2.id=t1.role_id', 'left outer')
+			->where('t1.email', $email)
+			->where('t2.is_backend', 'T')
+			->where('t1.id !=', (int) $except_user_id)
+			->findCount()->getData();
+		return (int) $taken > 0 ? 'msgCompanyEmailTaken' : true;
+	}
+
+	/** True when $password is the current password of user $user_id. */
+	private function isCurrentPassword($user_id, $password)
+	{
+		if ($user_id <= 0 || $password === '')
+		{
+			return false;
+		}
+		$m = pjAuthUserModel::factory();
+		return (int) $m->where('t1.id', (int) $user_id)
+			->where(sprintf('t1.password = %s', $m->aesEncrypt($password)), null, false)
+			->findCount()->getData() > 0;
+	}
+
+	/**
+	 * Ajax: check a new password against the password rules before the form is sent.
+	 * Returns the exact rule text that is not met (same texts as Users).
+	 */
+	public function pjActionCheckPassword()
+	{
+		$this->setAjax(true);
+		if (!$this->isXHR() || !self::isPost() || !$this->isLoged())
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Invalid request.'));
+		}
+		$password = (string) $this->_post->toString('password');
+		if ($password === '')
+		{
+			self::jsonResponse(array('status' => 'OK', 'code' => 200));
+		}
+		self::jsonResponse(pjAuth::init()->validatePassword($password));
+	}
+
+	/**
+	 * Delete the company logo at once (trash icon on the logo; no Save needed).
+	 * Administrators: any company; a company user: his own company (My company page).
+	 */
+	public function pjActionDeleteLogo()
+	{
+		$this->setAjax(true);
+		if (!$this->isXHR() || !self::isPost())
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Missing headers.'));
+		}
+		$id = $this->idParam($this->_post->toString('id'));
+		$arr = $id > 0 ? pjCompanyModel::factory()->find($id)->getData() : array();
+		if (empty($arr))
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'Company not found.'));
+		}
+		$allowed = ($this->isAdmin() && pjAuth::factory('pjAdminCompanies', 'pjActionUpdate')->hasAccess())
+			|| ((int) $arr['user_id'] === (int) $this->getUserId() && pjAuth::factory('pjAdminCompanies', 'pjActionProfile')->hasAccess());
+		if (!$allowed)
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'Access denied.'));
+		}
+		if (!empty($arr['logo']))
+		{
+			$this->deleteLogoFile($arr['logo']);
+		}
+		pjCompanyModel::factory()->set('id', $id)->modify(array('logo' => ':NULL', 'modified' => date('Y-m-d H:i:s')));
+		self::jsonResponse(array('status' => 'OK', 'code' => 200));
 	}
 
 	/**
@@ -284,6 +367,8 @@ class pjAdminCompanies extends pjAdmin
 		pjCompanyCountryModel::factory()->where('company_id', $company_id)->eraseAll();
 		// Its users stay (they are not deleted) but no longer point to a company that does
 		// not exist; until an administrator assigns them a company they see no data.
+		// "Company user" users only exist for their company: they are switched off (not deleted)
+		pjAuthUserModel::factory()->where('company_id', $company_id)->where('role_id', 5)->modifyAll(array('status' => 'F'));
 		pjAuthUserModel::factory()->where('company_id', $company_id)->where('role_id !=', 1)->modifyAll(array('company_id' => ':NULL'));
 		pjCompanyContext::ensureCronTable();
 		pjCompanyCronModel::factory()->where('company_id', $company_id)->eraseAll();
@@ -443,7 +528,14 @@ class pjAdminCompanies extends pjAdmin
 		if (self::isPost() && $this->_post->check('company_create'))
 		{
 			$data = $this->collectPostData(true);
+			// The company's login is created together with the company (see below).
+			$data['user_id'] = ':NULL';
+			$data['status'] = 'T';
 			$valid = $this->validateData($data, 0);
+			if ($valid === true)
+			{
+				$valid = $this->validateLogin($data['email']);
+			}
 			if ($valid !== true)
 			{
 				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminCompanies&action=pjActionCreate&msg=" . $valid);
@@ -456,7 +548,24 @@ class pjAdminCompanies extends pjAdmin
 				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminCompanies&action=pjActionCreate&msg=msgCompanyError");
 			}
 
-			$this->syncLoginCompany($id, $data);
+			// Login of the company: a user with the Company role (company e-mail + the password entered)
+			$user_id = pjAuthUserModel::factory(array(
+				'role_id'    => self::ROLE_COMPANY,
+				'company_id' => (int) $id,
+				'email'      => $data['email'],
+				'password'   => $this->_post->toString('login_password'),
+				'name'       => $data['contact_person'] !== ':NULL' ? $data['contact_person'] : $data['name'],
+				'phone'      => $data['phone'],
+				'status'     => 'T',
+				'is_active'  => 'T',
+				'ip'         => pjUtil::getClientIp(),
+			))->insert()->getInsertId();
+			if ($user_id === false || (int) $user_id <= 0)
+			{
+				pjCompanyModel::factory()->set('id', $id)->erase();
+				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminCompanies&action=pjActionCreate&msg=msgCompanyError");
+			}
+			pjCompanyModel::factory()->set('id', $id)->modify(array('user_id' => (int) $user_id));
 			// Give the new company its own amenity list and notification texts.
 			pjCompanyContext::clearCache();
 			pjCompanyContext::seedFeatures($id);
@@ -498,9 +607,47 @@ class pjAdminCompanies extends pjAdmin
 
 			$data = $this->collectPostData(true);
 			$valid = $this->validateData($data, $id);
+			// New password for the company login (optional on edit)
+			$new_password = (string) $this->_post->toString('login_password') !== '' || (string) $this->_post->toString('login_password_confirm') !== '';
+			$login = !empty($arr['user_id']) ? pjAuthUserModel::factory()->find((int) $arr['user_id'])->getData() : array();
+			if (!empty($login) && (int) $login['role_id'] !== self::ROLE_COMPANY)
+			{
+				$login = array();
+			}
+			if ($valid === true && $new_password)
+			{
+				$valid = $this->validateLogin(!empty($login) ? $login['email'] : $data['email'], !empty($login) ? (int) $login['id'] : 0);
+			}
 			if ($valid !== true)
 			{
 				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminCompanies&action=pjActionUpdate&id=" . pjCompanyContext::hashOf($id) . "&msg=" . $valid);
+			}
+			if ($new_password)
+			{
+				if (!empty($login))
+				{
+					pjAuthUserModel::factory()->set('id', (int) $login['id'])->modify(array(
+						'password' => $this->_post->toString('login_password'),
+						'pswd_modified' => ':NOW()',
+					));
+				} else {
+					// the company had no login yet: create it now (company e-mail + this password)
+					$user_id = pjAuthUserModel::factory(array(
+						'role_id'    => self::ROLE_COMPANY,
+						'company_id' => (int) $id,
+						'email'      => $data['email'],
+						'password'   => $this->_post->toString('login_password'),
+						'name'       => $data['contact_person'] !== ':NULL' ? $data['contact_person'] : $data['name'],
+						'phone'      => $data['phone'],
+						'status'     => 'T',
+						'is_active'  => 'T',
+						'ip'         => pjUtil::getClientIp(),
+					))->insert()->getInsertId();
+					if ($user_id !== false && (int) $user_id > 0)
+					{
+						$data['user_id'] = (int) $user_id;
+					}
+				}
 			}
 
 			$msg = 'msgCompanySaved';
@@ -550,9 +697,25 @@ class pjAdminCompanies extends pjAdmin
 			$data = $this->collectPostData(false);
 			$data = array_intersect_key($data, array_flip(pjCompanyModel::$profileFields));
 			$valid = $this->validateData($data, $arr['id']);
+			// Optional password change of the company's own login: current password required.
+			$new_password = (string) $this->_post->toString('login_password') !== '' || (string) $this->_post->toString('login_password_confirm') !== '';
+			if ($valid === true && $new_password)
+			{
+				$me = pjAuthUserModel::factory()->find((int) $this->getUserId())->getData();
+				$valid = !empty($me) && $this->isCurrentPassword((int) $me['id'], (string) $this->_post->toString('login_password_current'))
+					? $this->validateLogin($me['email'], (int) $me['id'])
+					: 'msgCompanyCurrentPasswordWrong';
+			}
 			if ($valid !== true)
 			{
 				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminCompanies&action=pjActionProfile&msg=" . $valid);
+			}
+			if ($new_password)
+			{
+				pjAuthUserModel::factory()->set('id', (int) $this->getUserId())->modify(array(
+					'password' => $this->_post->toString('login_password'),
+					'pswd_modified' => ':NOW()',
+				));
 			}
 			$msg = 'msgCompanySaved';
 			$logo = $this->handleLogo($arr['id'], $arr['logo']);

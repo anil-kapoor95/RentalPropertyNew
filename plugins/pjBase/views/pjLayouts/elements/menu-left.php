@@ -155,7 +155,7 @@ $isSystemOptions = $isGeneralOptions || $isBackup || $isLocale || $isSms || $isV
 		    }
             ?>
                 </ul>
-        <a href="https://www.phpjabbers.com/contact.php" target="_blank" class="pj-request-quote">
+        <a href="https://www.phpjabbers.com/contact.php" target="_blank" class="pj-request-quote" title="Request customization">
             <i class="fa fa-life-ring"></i> <span>Request customization</span>
         </a>
     </div>

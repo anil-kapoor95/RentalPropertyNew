@@ -120,13 +120,16 @@ if (isset($tpl['query']['change']))
     								{
     								    // only administrators may give the Administrator role
     								    if ((int) $k === 1 && !$controller->isAdmin()) { continue; }
+    								    // Company logins are created with the company (Companies > Add company)
+    								    if ((int) $k === 4 && (int) $tpl['arr']['role_id'] !== 4) { continue; }
+    								    // "Company user": given by a company only (and kept for such a user)
+    								    if ((int) $controller->getRoleId() === 4 ? (int) $k !== 5 : ((int) $k === 5 && (int) $tpl['arr']['role_id'] !== 5)) { continue; }
     								    ?><option value="<?php echo $k; ?>"<?php echo $tpl['arr']['role_id'] == $k ? ' selected="selected"' : NULL;?>><?php echo pjSanitize::html($v); ?></option><?php
     								}
     								?>
     							</select>
                             </div>
                         </div><!-- /.col-md-3 -->
-                        <?php $user_company_id = isset($tpl['arr']['company_id']) ? $tpl['arr']['company_id'] : null; include PJ_VIEWS_PATH . 'pjLayouts/elements/user-company-field.php'; ?>
                     </div><!-- /.row -->
 
                     <div class="hr-line-dashed"></div>

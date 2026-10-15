@@ -54,8 +54,29 @@ class pjInput
         }
     }
 
+    /**
+     * Remove leading / trailing white space from every submitted value, so a field
+     * filled with spaces only counts as empty. Passwords (and tokens) stay as typed.
+     */
+    public static function trimInput(&$value, $key = '')
+    {
+        if (is_array($value))
+        {
+            foreach ($value as $k => &$v)
+            {
+                self::trimInput($v, (string) $k);
+            }
+            unset($v);
+        } elseif (is_string($value) && !preg_match('/pass|pswd|token|captcha/i', (string) $key)) {
+            $value = trim($value);
+        }
+    }
+
     public function __construct()
     {
+        self::trimInput($_POST);
+        self::trimInput($_GET);
+        self::trimInput($_REQUEST);
         self::neutralizeSql($_POST);
         self::neutralizeSql($_GET);
         self::neutralizeSql($_REQUEST);

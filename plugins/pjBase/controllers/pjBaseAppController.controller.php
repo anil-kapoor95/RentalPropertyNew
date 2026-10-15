@@ -424,6 +424,18 @@ class pjBaseAppController extends pjController
 
     public function beforeFilter()
     {
+        // Inline grid edits (pjActionSave...: column + value) never store an empty value
+        // (every inline-editable column is a required one: names, e-mail, code, dates, status).
+        if (self::isPost() && isset($_SERVER['QUERY_STRING']))
+        {
+            parse_str((string) $_SERVER['QUERY_STRING'], $qs);
+            if (isset($qs['action']) && preg_match('/^pjActionSave[A-Z]/', (string) $qs['action'])
+                && isset($this->_post) && $this->_post->check('column') && $this->_post->check('value')
+                && is_string($this->_post->raw('value')) && trim($this->_post->raw('value')) === '')
+            {
+                self::jsonResponse(array('status' => 'ERR', 'code' => 422, 'text' => 'This field is required.'));
+            }
+        }
         $this->refreshLoggedUser();
         $this->resetCss();
         $this->resetJs();

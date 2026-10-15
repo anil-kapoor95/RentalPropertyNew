@@ -13,6 +13,94 @@ class pjBasePermissions extends pjBase
         return !empty($row) && (int) $row['role_id'] === 1;
     }
 
+    /** "Company user" users belong to their company only; nobody else (not even an administrator) manages them. */
+    private function isCompanyCreatedUser($user_id)
+    {
+        $row = pjAuthUserModel::factory()->select('t1.role_id')->find((int) $user_id)->getData();
+        return !empty($row) && (int) $row['role_id'] === 5;
+    }
+
+    /** The logged-in user is a company login. */
+    private function isCompanyLogin()
+    {
+        return (int) $this->getRoleId() === 4;
+    }
+
+    /**
+     * Who may NOT set the permissions of $user_id here:
+     * a company login only its own "Company user" users; everybody else never a Company user.
+     */
+    private function isBlockedTarget($user_id)
+    {
+        if ($this->isCompanyLogin())
+        {
+            $row = pjAuthUserModel::factory()->select('t1.role_id, t1.company_id')->find((int) $user_id)->getData();
+            $cid = class_exists('pjCompanyContext') ? (int) pjCompanyContext::activeId($this->getRoleId(), $this->getUserId()) : 0;
+            return empty($row) || (int) $row['role_id'] !== 5 || $cid <= 0 || (int) $row['company_id'] !== $cid;
+        }
+        return $this->isCompanyCreatedUser($user_id);
+    }
+
+    /**
+     * Permission keys a company may give to its users: the ones the company has itself,
+     * without user / permission management and the company's own "My company" page.
+     */
+    private function givableKeys()
+    {
+        $mine = $this->session->has($this->defaultPermissions) ? (array) $this->session->getData($this->defaultPermissions) : array();
+        $out = array();
+        foreach ($mine as $key)
+        {
+            $key = (string) $key;
+            if ((strpos($key, 'pjBaseUsers') === 0 && $key !== 'pjBaseUsers_pjActionProfile')
+                || strpos($key, 'pjBasePermissions') === 0
+                || $key === 'pjAdminCompanies_pjActionProfile')
+            {
+                continue;
+            }
+            $out[$key] = $key;
+        }
+        return $out;
+    }
+
+    /** Keep only the permission tree items in $keys (an item stays when one of its children stays). */
+    private function filterTree($arr, $second_level, $third_level, $keys)
+    {
+        $keep = function ($item) use ($keys) { return isset($keys[$item['key']]); };
+        foreach ($third_level as $pid => $items)
+        {
+            $third_level[$pid] = array_values(array_filter($items, $keep));
+            if (empty($third_level[$pid])) { unset($third_level[$pid]); }
+        }
+        foreach ($second_level as $pid => $items)
+        {
+            $second_level[$pid] = array_values(array_filter($items, function ($item) use ($keep, $third_level) {
+                return $keep($item) || isset($third_level[$item['id']]);
+            }));
+            if (empty($second_level[$pid])) { unset($second_level[$pid]); }
+        }
+        $arr = array_filter($arr, function ($item) use ($keep, $second_level) {
+            return $keep($item) || isset($second_level[$item['id']]);
+        });
+        return array($arr, $second_level, $third_level);
+    }
+
+    /** After a reset, a company user keeps only what the company may give. */
+    private function trimToGivable($user_id)
+    {
+        $keys = $this->givableKeys();
+        $ids = pjAuthPermissionModel::factory()->findAll()->getDataPair('id', 'key');
+        $remove = array();
+        foreach ($ids as $id => $key)
+        {
+            if (!isset($keys[$key])) { $remove[] = (int) $id; }
+        }
+        if (!empty($remove))
+        {
+            pjAuthUserPermissionModel::factory()->where('user_id', (int) $user_id)->whereIn('permission_id', $remove)->eraseAll();
+        }
+    }
+
     public function pjActionIndex()
     {
         if (!$this->isAdmin())
@@ -74,7 +162,7 @@ class pjBasePermissions extends pjBase
                     $this->sendForbidden();
                     return;
                 }
-                if(!$this->isAdmin() && $this->isAdminUser($this->_get->toInt('id')))
+                if((!$this->isAdmin() && $this->isAdminUser($this->_get->toInt('id'))) || $this->isBlockedTarget($this->_get->toInt('id')))
                 {
                     $this->sendForbidden();
                     return;
@@ -93,6 +181,12 @@ class pjBasePermissions extends pjBase
                 $role_arr = pjAuth::init()->getRoleList();
                 $user_id = $this->_get->toInt('id');
                 $permission_id_arr = pjAuth::init(array('user_id' => $user_id))->getPermissionIdsByUser();
+                if ($this->isCompanyLogin())
+                {
+                    // never more than the company has itself
+                    $this->trimToGivable($user_id);
+                    $permission_id_arr = pjAuthUserPermissionModel::factory()->where('t1.user_id', $user_id)->findAll()->getDataPair(null, 'permission_id');
+                }
                 $response = pjAuth::init()->getPermissions();
                 $arr = array();
                 if (isset($GLOBALS['CONFIG'], $GLOBALS['CONFIG']["permission_items_order"])
@@ -112,9 +206,16 @@ class pjBasePermissions extends pjBase
                 }else{
                     $arr = $response['arr'];
                 }
+                $second_level = $response['second_level'];
+                $third_level = $response['third_level'];
+                if ($this->isCompanyLogin())
+                {
+                    // a company sees only the permissions it has itself
+                    list($arr, $second_level, $third_level) = $this->filterTree($arr, $second_level, $third_level, $this->givableKeys());
+                }
                 $this->set('arr', $arr);
-                $this->set('second_level', $response['second_level']);
-                $this->set('third_level', $response['third_level']);
+                $this->set('second_level', $second_level);
+                $this->set('third_level', $third_level);
                 $this->set('role_arr', $role_arr);
                 $this->set('user', $user);
                 $this->set('permission_id_arr', $permission_id_arr);
@@ -159,7 +260,7 @@ class pjBasePermissions extends pjBase
                 {
                     self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'Access denied.'));
                 }
-                if($this->isAdminUser($this->_post->toInt('user_id')))
+                if($this->isAdminUser($this->_post->toInt('user_id')) || $this->isBlockedTarget($this->_post->toInt('user_id')))
                 {
                     self::jsonResponse(array('status' => 'ERR', 'code' => '100'));
                 }
@@ -174,7 +275,9 @@ class pjBasePermissions extends pjBase
                     if ($data['type'] === 'insert')
                     {
                         $perm = pjAuthPermissionModel::factory()->find($data['permission_id'])->getData();
-                        $mine = $this->session->has($this->defaultPermissions) ? (array) $this->session->getData($this->defaultPermissions) : array();
+                        $mine = $this->isCompanyLogin()
+                            ? array_values($this->givableKeys())
+                            : ($this->session->has($this->defaultPermissions) ? (array) $this->session->getData($this->defaultPermissions) : array());
                         if (empty($perm) || !in_array($perm['key'], $mine, true))
                         {
                             self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'Access denied.'));
@@ -204,7 +307,7 @@ class pjBasePermissions extends pjBase
             {
                 self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'Access denied!'));
             }
-            if($this->isAdminUser($this->_post->toInt('user_id')))
+            if($this->isAdminUser($this->_post->toInt('user_id')) || $this->isBlockedTarget($this->_post->toInt('user_id')))
             {
                 self::jsonResponse(array('status' => 'ERR', 'code' => '100'));
             }
@@ -212,7 +315,12 @@ class pjBasePermissions extends pjBase
             {
                 self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'Access denied.'));
             }
-            self::jsonResponse(pjAuth::init(array('user_id' => $this->_post->toInt('user_id')))->resetUserPermission());
+            $response = pjAuth::init(array('user_id' => $this->_post->toInt('user_id')))->resetUserPermission();
+            if ($this->isCompanyLogin() && isset($response['status']) && $response['status'] === 'OK')
+            {
+                $this->trimToGivable($this->_post->toInt('user_id'));
+            }
+            self::jsonResponse($response);
 		}
 	}
 }

@@ -29,26 +29,72 @@ class pjBaseUsers extends pjBase
 		{
 			return null;
 		}
-		$cid = 0;
-		if ($this->isUsersAdmin() && $this->_post->check('company'))
+		// Users made by an administrator belong to the admin side: no company
+		// (they work in every company with the company switcher, see pjCompanyContext::isGlobalUser).
+		if ($this->isUsersAdmin())
 		{
-			$cid = pjCompanyContext::idFromHash($this->_post->toString('company'));
+			return ':NULL';
 		}
-		if ($cid <= 0)
-		{
-			$cid = $this->usersCompanyId();
-		}
-		return pjCompanyContext::companyForRole($role_id, $cid);
+		return pjCompanyContext::companyForRole($role_id, $this->usersCompanyId());
 	}
 
-	/** Stop unless the user belongs to the active company (or is a global administrator). */
+	const ROLE_COMPANY = 4;
+	const ROLE_COMPANY_USER = 5;
+
+	/** The logged-in user is a company login (manages the company's own users). */
+	private function isCompanyLogin()
+	{
+		return (int) $this->getRoleId() === self::ROLE_COMPANY;
+	}
+
+	/**
+	 * SQL condition: the users this user may see and manage in Users.
+	 * - Administrators: the system users (no company, no Company / Company user role).
+	 * - A company login: only the "Company user" users of its own company.
+	 * - Other roles: the users of their company, never administrators, company logins or company users.
+	 */
+	private function usersScopeSql($alias = 't1')
+	{
+		if (!class_exists('pjCompanyContext'))
+		{
+			return '1 = 1';
+		}
+		if ($this->isUsersAdmin())
+		{
+			// every admin-side user, also users an older version tied to a company
+			return sprintf("(%1\$s.`role_id` NOT IN (%2\$u, %3\$u))", $alias, self::ROLE_COMPANY, self::ROLE_COMPANY_USER);
+		}
+		$cid = $this->usersCompanyId();
+		if ($this->isCompanyLogin())
+		{
+			return sprintf("(%1\$s.`company_id` = %2\$u AND %1\$s.`role_id` = %3\$u)", $alias, $cid, self::ROLE_COMPANY_USER);
+		}
+		return sprintf("(%s AND %s.`role_id` NOT IN (%u, %u))", pjCompanyContext::userScopeSql($cid, $alias, false), $alias, self::ROLE_COMPANY, self::ROLE_COMPANY_USER);
+	}
+
+	/** May the logged-in user give this role in Users? */
+	private function canGiveRole($role_id)
+	{
+		$role_id = (int) $role_id;
+		if ($this->isCompanyLogin())
+		{
+			return $role_id === self::ROLE_COMPANY_USER;
+		}
+		return $this->isRoleAllowed($role_id) && !in_array($role_id, array(self::ROLE_COMPANY, self::ROLE_COMPANY_USER), true);
+	}
+
+	/** Stop unless the user is one this user may manage (see usersScopeSql). */
 	private function assertCompanyUser($user_id)
 	{
 		if ($this->isUsersAdmin())
 		{
-			return;
+			// administrators manage every user except the users that a company created
+			$row = pjAuthUserModel::factory()->select('t1.role_id')->find((int) $user_id)->getData();
+			$ok = empty($row) || (int) $row['role_id'] !== self::ROLE_COMPANY_USER;
+		} else {
+			$ok = (int) pjAuthUserModel::factory()->where('t1.id', (int) $user_id)->where($this->usersScopeSql('t1'))->findCount()->getData() > 0;
 		}
-		if (class_exists('pjCompanyContext') && !pjCompanyContext::isCompanyUser($user_id, $this->usersCompanyId()))
+		if (!$ok)
 		{
 			if ($this->isXHR())
 			{
@@ -90,11 +136,19 @@ class pjBaseUsers extends pjBase
 
 	private function filterCompanyUsers($ids)
 	{
+		$ids = array_values(array_filter(array_map('intval', (array) $ids)));
+		if (empty($ids))
+		{
+			return array();
+		}
+		$m = pjAuthUserModel::factory()->whereIn('t1.id', $ids);
 		if ($this->isUsersAdmin())
 		{
-			return array_values(array_filter(array_map('intval', (array) $ids)));
+			$m->where('t1.role_id !=', self::ROLE_COMPANY_USER);
+		} else {
+			$m->where($this->usersScopeSql('t1'));
 		}
-		return class_exists('pjCompanyContext') ? pjCompanyContext::filterUserIds($ids, $this->usersCompanyId()) : array_map('intval', (array) $ids);
+		return array_map('intval', $m->findAll()->getDataPair(null, 'id'));
 	}
 
 	public function pjActionCheckEmail()
@@ -172,22 +226,8 @@ class pjBaseUsers extends pjBase
 		    					->join('pjAuthRole', 't2.id=t1.role_id', 'left')
 		    					->where('t2.is_backend', 'T')
 		    					->where('t2.is_admin', 'T');
-			if (class_exists('pjCompanyContext'))
-			{
-				if (!$this->isUsersAdmin())
-				{
-					// non-admins: users of their company + the administrators
-					$pjAuthUserModel->where(pjCompanyContext::userScopeSql($this->usersCompanyId()));
-				} elseif ($this->_get->check('company') && $this->_get->toString('company') !== '') {
-					// admins see every user; optional company filter
-					if ($this->_get->toString('company') === 'none')
-					{
-						$pjAuthUserModel->where('t1.company_id IS NULL');
-					} else {
-						$pjAuthUserModel->where('t1.company_id', (int) pjCompanyContext::idFromHash($this->_get->toString('company')));
-					}
-				}
-			}
+			// who is listed: see usersScopeSql (a company sees only its own company users)
+			$pjAuthUserModel->where($this->usersScopeSql('t1'));
 			if ($q = $this->_get->toString('q'))
 			{
 				$q = str_replace(array('%', '_'), array('\%', '\_'), trim($pjAuthUserModel->escapeStr($q)));
@@ -259,8 +299,8 @@ class pjBaseUsers extends pjBase
 		{
 			$data = array();
 			$data['status'] = $this->_post->check('status') ? 'T': 'F';
-			$data['role_id'] = $this->_post->toInt('role_id');
-			if (!$this->isRoleAllowed($data['role_id']))
+			$data['role_id'] = $this->isCompanyLogin() ? self::ROLE_COMPANY_USER : $this->_post->toInt('role_id');
+			if (!$this->canGiveRole($data['role_id']))
 			{
 				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjBaseUsers&action=pjActionIndex&err=PU04");
 			}
@@ -294,11 +334,13 @@ class pjBaseUsers extends pjBase
 		{
 		    $this->assertCompanyUser($this->_post->toInt('id'));
 		    $user_id = $this->_post->toInt('id');
-		    $new_role_id = $this->_post->toInt('role_id');
-		    $current = pjAuthUserModel::factory()->select('t1.role_id, t1.status')->find($user_id)->getData();
+		    $new_role_id = $this->isCompanyLogin() ? self::ROLE_COMPANY_USER : $this->_post->toInt('role_id');
+		    $current = pjAuthUserModel::factory()->select('t1.role_id, t1.status, t1.company_id')->find($user_id)->getData();
 		    $goes_inactive = $has_revert && !$this->_post->check('status');
 		    if (empty($current)
 		        || !$this->isRoleAllowed($new_role_id)
+		        || ($new_role_id === 4 && (int) $current['role_id'] !== 4)
+		        || ($new_role_id !== (int) $current['role_id'] && !$this->canGiveRole($new_role_id))
 		        || ($this->isLastAdmin($user_id) && ($new_role_id !== 1 || $goes_inactive)))
 		    {
 		        // never give the Administrator role from a company account, never leave the system without an active administrator
@@ -315,7 +357,11 @@ class pjBaseUsers extends pjBase
 		    }
 		    if (class_exists('pjCompanyContext'))
 		    {
-		        $post['company_id'] = $this->postedCompanyId($new_role_id);
+		        // the edit form has no company field: the user keeps his company
+		        // (administrators have none; a user without one gets the active company)
+		        $post['company_id'] = ($this->isUsersAdmin() && (int) $current['role_id'] !== self::ROLE_COMPANY) || empty($current['company_id'])
+		            ? $this->postedCompanyId($new_role_id)
+		            : pjCompanyContext::companyForRole($new_role_id, (int) $current['company_id']);
 		    }
 			$data = array();
 			$data['id'] = $this->_post->toInt('id');
@@ -324,7 +370,7 @@ class pjBaseUsers extends pjBase
 				$data['status'] = $this->_post->check('status') ? 'T' : 'F';
 			}
 			$data['ip'] = pjUtil::getClientIp();
-			$data['role_id'] = $this->_post->toInt('role_id');
+			$data['role_id'] = $new_role_id;
 			if ($this->_post->has('password') && !$this->_post->isEmpty('password'))
 			{
 				$data['password'] = $this->_post->toString('password');

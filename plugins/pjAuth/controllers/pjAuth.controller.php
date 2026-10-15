@@ -322,6 +322,18 @@ class pjAuth extends pjAuthAppController
 		return self::init($params);
     }
     
+    /** Text of one password rule (codes of validatePassword), '' if unknown. */
+    public function passwordRuleText($code)
+    {
+        $code = (string) (int) $code;
+        $errors = __('plugin_auth_pwd_error', true);
+        if (!is_array($errors) || !isset($errors[$code]) || $errors[$code] === '')
+        {
+            return '';
+        }
+        return $code === '100' ? sprintf($errors[$code], (int) $this->option_arr['o_password_min_length']) : $errors[$code];
+    }
+
     public function validatePassword($password)
     {
         $option_arr = $this->option_arr;
