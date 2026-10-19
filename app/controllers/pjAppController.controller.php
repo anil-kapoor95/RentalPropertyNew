@@ -72,7 +72,7 @@ class pjAppController extends pjBaseAppController
 	public function beforeFilter()
     {
     	parent::beforeFilter();
-    	if(!in_array($this->_get->toString('controller'), array('pjFront', 'pjInstaller', 'pjListings', 'pjCron')))
+    	if(!in_array($this->_get->toString('controller'), array('pjFront', 'pjInstaller', 'pjListings', 'pjCron', 'pjJabbApi')))
     	{
     		// Everything in the back-office works inside the active company.
     		$company_id = $this->getCompanyId();

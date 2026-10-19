@@ -15,6 +15,7 @@ $use_captcha = $tpl['option_arr']['o_secure_login_use_captcha'] == 'Yes';
 
 <form action="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjBase&amp;action=pjActionLogin" method="post" id="frmLogin" class="m-t" role="form" novalidate="novalidate">
     <input type="hidden" name="login_user" value="1">
+    <?php if (class_exists('pjAppController')): ?><input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(pjAppController::getCsrfToken(), ENT_QUOTES, 'UTF-8'); ?>"><?php endif; ?>
 
     <?php
     if($login_2_factor == 'Yes' && $second_factor == false)

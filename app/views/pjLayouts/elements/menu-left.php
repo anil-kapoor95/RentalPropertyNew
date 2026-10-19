@@ -30,6 +30,7 @@ $isScriptDiscounts = in_array($controller_name, array('pjAdminDiscounts'));
 // Settings
 $isScriptOptions = in_array($controller_name, array('pjAdminOptions')) && !in_array($action_name, array('pjActionPreview', 'pjActionInstall'));
 $isScriptOptionsNotifications         = $isScriptOptions && in_array($action_name, array('pjActionNotifications'));
+$isScriptOptionsAi                    = $isScriptOptions && $action_name === 'pjActionAi';
 
 
 // Permissions - Dashboard
@@ -49,6 +50,7 @@ $hasAccessScriptMyCompany          = (int) $controller->getRoleId() === 4 && pjA
 // Permissions - Settings
 $hasAccessScriptOptions                 = pjAuth::factory('pjAdminOptions')->hasAccess();
 $hasAccessScriptOptionsNotifications          = pjAuth::factory('pjAdminOptions', 'pjActionNotifications')->hasAccess();
+$hasAccessScriptOptionsAi          = $controller->isAdmin() && pjAuth::factory('pjAdminOptions', 'pjActionAi')->hasAccess();
 
 // Permissions - Extras
 $hasAccessScriptExtras          = pjAuth::factory('pjAdminExtras', 'pjActionIndex')->hasAccess();
@@ -169,8 +171,8 @@ $pjcsToken = pjAppController::getCsrfToken();
     </li>
 <?php endif; ?>
 
-<?php if ($hasAccessScriptOptionsNotifications || $hasAccessScriptExtras || $hasAccessScriptFeatures || $hasAccessScriptSubscriptions): ?>
-    <li<?php echo $isScriptOptionsNotifications || $isScriptExtras || $isScriptFeatures || $isScriptSubPayments ? ' class="active"' : NULL; ?>>
+<?php if ($hasAccessScriptOptionsNotifications || $hasAccessScriptExtras || $hasAccessScriptFeatures || $hasAccessScriptSubscriptions || $hasAccessScriptOptionsAi): ?>
+    <li<?php echo $isScriptOptionsNotifications || $isScriptExtras || $isScriptFeatures || $isScriptSubPayments || $isScriptOptionsAi ? ' class="active"' : NULL; ?>>
         <a href="#"><i class="fa fa-cogs"></i> <span class="nav-label"><?php __('menuOptions');?></span><span class="fa arrow"></span></a>
         <ul class="nav nav-second-level collapse">
             <?php if ($hasAccessScriptOptionsNotifications): ?>
@@ -185,6 +187,9 @@ $pjcsToken = pjAppController::getCsrfToken();
                 <?php endif; ?>
             <?php if ($hasAccessScriptSubscriptions): ?>
                 <li<?php echo $isScriptSubPayments ? ' class="active"' : NULL; ?>><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminSubscriptions&amp;action=pjActionGateways"><?php __('sub_menu_payments');?></a></li>
+            <?php endif; ?>
+            <?php if ($hasAccessScriptOptionsAi): ?>
+                <li<?php echo $isScriptOptionsAi ? ' class="active"' : NULL; ?>><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminOptions&amp;action=pjActionAi"><?php __('ai_menu');?></a></li>
             <?php endif; ?>
 
         </ul>

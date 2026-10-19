@@ -24,6 +24,117 @@ class pjAdminOptions extends pjAdmin
 		$this->appendJs('pjAdminOptions.js');
 	}
 	
+	/**
+	 * Options > AI settings (administrators only): AI service, model and API keys used by the
+	 * public sign-up to write property descriptions (pjAi). Platform settings, not per company.
+	 *   GET                       page
+	 *   POST ai_save=1            save (service, per service: model, new key, remove key)
+	 *   XHR POST do=models|test   load the models of a service / test service + key + model
+	 */
+	public function pjActionAi()
+	{
+		$this->checkLogin();
+		if (!pjAuth::factory()->hasAccess() || !$this->isAdmin())
+		{
+			$this->sendForbidden();
+			return;
+		}
+
+		if ($this->isXHR() && self::isPost())
+		{
+			$this->setAjax(true);
+			$service = $this->_post->toString('service');
+			if (!isset(pjAi::$services[$service]))
+			{
+				self::jsonResponse(array('status' => 'ERR', 'text' => 'Unknown AI service.'));
+			}
+			$key = trim((string) $this->_post->toString('key'));
+			switch ($this->_post->toString('do'))
+			{
+				case 'models':
+					self::jsonResponse(pjAi::listModels($service, $key));
+					break;
+				case 'test':
+					@set_time_limit(pjAi::TIMEOUT + 30);
+					$model = trim((string) $this->_post->toString('model'));
+					if (!pjAi::validModel($model))
+					{
+						self::jsonResponse(array('status' => 'ERR', 'text' => 'Choose a model first.'));
+					}
+					$check = pjAi::test($service, $key, $model);
+					self::jsonResponse($check === true
+						? array('status' => 'OK', 'text' => pjAi::$services[$service]['name'] . ' answered with ' . $model . ' in ' . pjAi::$lastSeconds . ' s. The settings work.')
+						: array('status' => 'ERR', 'text' => (string) $check));
+					break;
+			}
+			self::jsonResponse(array('status' => 'ERR', 'text' => 'Bad request.'));
+		}
+
+		if (self::isPost() && $this->_post->check('ai_save'))
+		{
+			// Every value is read back after saving; what did not stick is reported by name.
+			$errors = array();
+			$saved_keys = array();
+			$provider = $this->_post->toString('ai_provider');
+			if (isset(pjAi::$services[$provider]) && !pjAi::saveOption('o_ai_provider', $provider))
+			{
+				$errors[] = 'service';
+			}
+			foreach (pjAi::$services as $s => $info)
+			{
+				// Model: from the list, or "Custom model..." + the id typed in
+				$model = trim((string) $this->_post->toString('model_' . $s));
+				if ($model === '__custom__')
+				{
+					$model = trim((string) $this->_post->toString('custom_model_' . $s));
+					if ($model !== '' && pjAi::validModel($model))
+					{
+						$custom = pjAi::modelList('o_ai_custom_models_' . $s);
+						if (!in_array($model, $custom, true) && !in_array($model, pjAi::modelList('o_ai_models_' . $s), true))
+						{
+							$custom[] = $model;
+							pjAi::saveOption('o_ai_custom_models_' . $s, json_encode(array_values($custom)));
+						}
+					}
+				}
+				$drop = $this->_post->raw('remove_custom_' . $s);
+				if (is_array($drop) && !empty($drop))
+				{
+					pjAi::saveOption('o_ai_custom_models_' . $s, json_encode(array_values(array_diff(pjAi::modelList('o_ai_custom_models_' . $s), array_map('strval', $drop)))));
+				}
+				if ($model !== '' && !pjAi::validModel($model))
+				{
+					$errors[] = 'model_' . $s;
+				} elseif ($model !== '' && !pjAi::saveOption('o_ai_model_' . $s, $model)) {
+					$errors[] = 'db_model_' . $s;
+				}
+				// API key: empty field keeps the saved key
+				if ($this->_post->check('remove_key_' . $s))
+				{
+					pjAi::saveOption('o_' . $s . '_api_key', '');
+				} else {
+					$key = trim((string) $this->_post->raw('key_' . $s));
+					if ($key !== '')
+					{
+						if (!preg_match('/^\S{10,300}$/', $key))
+						{
+							$errors[] = 'key_' . $s;
+						} elseif (pjAi::saveOption('o_' . $s . '_api_key', $key)) {
+							$saved_keys[] = $s;
+						} else {
+							$errors[] = 'db_key_' . $s;
+						}
+					}
+				}
+			}
+			$q = '&err=' . (empty($errors) ? 'AIS01' : 'AIS02') . '&keys=' . implode(',', $saved_keys) . '&errs=' . implode(',', $errors);
+			pjUtil::redirect($_SERVER['PHP_SELF'] . '?controller=pjAdminOptions&action=pjActionAi' . $q);
+		}
+
+		$this->set('ai', pjAi::settings());
+		$this->appendJs('pjAdminAi.js');
+	}
+
 	public function pjActionNotifications()
 	{
 		if (!pjAuth::factory()->hasAccess())

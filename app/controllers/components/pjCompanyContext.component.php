@@ -348,7 +348,12 @@ class pjCompanyContext
 
 	public static $globalOptionKeys = array(
 		'o_captcha_type', 'o_captcha_mode', 'o_captcha_length', 'o_captcha_background',
-		'o_captcha_site_key', 'o_captcha_secret_key', 'o_captcha_location', 'o_secure_login_use_captcha'
+		'o_captcha_site_key', 'o_captcha_secret_key', 'o_captcha_location', 'o_secure_login_use_captcha',
+		// sign-up AI (Options > AI settings): platform settings, administrators only, never per company
+		'o_ai_provider', 'o_ai_model_gemini', 'o_ai_model_openai', 'o_ai_model_anthropic',
+		'o_gemini_api_key', 'o_openai_api_key', 'o_anthropic_api_key',
+		'o_ai_models_gemini', 'o_ai_models_openai', 'o_ai_models_anthropic',
+		'o_ai_custom_models_gemini', 'o_ai_custom_models_openai', 'o_ai_custom_models_anthropic'
 	);
 
 	public static function isCompanyOptionKey($key, $tab_id)
