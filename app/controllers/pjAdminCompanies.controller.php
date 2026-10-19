@@ -367,6 +367,12 @@ class pjAdminCompanies extends pjAdmin
 		pjCompanyCountryModel::factory()->where('company_id', $company_id)->eraseAll();
 		// Its users stay (they are not deleted) but no longer point to a company that does
 		// not exist; until an administrator assigns them a company they see no data.
+		// Subscription of the company: removed (payments and the audit log stay as billing history)
+		if (class_exists('pjEntitlement') && pjEntitlement::isReady())
+		{
+			pjCompanySubscriptionModel::factory()->where('company_id', $company_id)->eraseAll();
+			pjBillingTransactionModel::factory()->where('company_id', $company_id)->where('status', 'pending')->modifyAll(array('status' => 'cancelled', 'failure_reason' => 'Company deleted'));
+		}
 		// "Company user" users only exist for their company: they are switched off (not deleted)
 		pjAuthUserModel::factory()->where('company_id', $company_id)->where('role_id', 5)->modifyAll(array('status' => 'F'));
 		pjAuthUserModel::factory()->where('company_id', $company_id)->where('role_id !=', 1)->modifyAll(array('company_id' => ':NULL'));

@@ -176,7 +176,7 @@
 					var s=document.getElementById('pjtcSaved'); s.classList.add('on');
 					setTimeout(function(){ s.classList.remove('on'); }, 2000);
 				} else {
-					alert('Could not save the colours. Please try again.');
+					pjPopup.message('Could not save the colours. Please try again.');
 				}
 			}
 		};

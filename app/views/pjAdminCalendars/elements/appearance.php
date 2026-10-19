@@ -1,6 +1,8 @@
 <div id="appearance" class="tab-pane<?php echo $active_tab == 'appearance' ? ' active' : NULL;?>">
     <div class="panel-body">
 		<div class="panel-body-inner">
+<?php $plan_feature = 'themes'; include dirname(__FILE__) . '/plan-lock.php'; ?>
+
 			<form action="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminCalendars&amp;action=pjActionUpdate" method="post" id="frmUpdateAppearance" class="form pj-form" enctype="multipart/form-data">
 				<input type="hidden" name="property_update" value="1" />
 				<input type="hidden" name="csrf_token" value="<?php echo pjAppController::getCsrfToken(); ?>" />

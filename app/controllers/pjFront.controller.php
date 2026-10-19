@@ -1245,6 +1245,11 @@ class pjFront extends pjAppController
 				{
 					pjAppController::jsonResponse($resp);
 				}
+				// Subscription expired / cancelled with "suspend new bookings": refuse politely.
+				if (class_exists('pjEntitlement') && pjEntitlement::frontSuspended(pjCompanyContext::companyOfCalendar($data['calendar_id'])))
+				{
+					pjAppController::jsonResponse(array('status' => 'ERR', 'code' => 402, 'text' => __('subFrontSuspended', true)));
+				}
 				
 				// Booking form values come from the visitor: never let them set the record id,
 				// payment-gateway fields, timestamps or the money fields (recalculated below).
@@ -1644,6 +1649,12 @@ class pjFront extends pjAppController
 	    {
 	        if($uuid = $this->requestAction(array('controller' => $pjPlugin, 'action' => 'pjActionGetCustom', 'params' => $_REQUEST), array('return')))
 	        {
+	            // A company paying its subscription plan (not a booking): handled separately.
+	            if (class_exists('pjSubscriptionBilling') && ($sub_url = pjSubscriptionBilling::confirmFromGateway($this, $pjPlugin, $uuid, $_REQUEST)) !== false)
+	            {
+	                echo $sub_url;
+	                exit;
+	            }
 	            $pjReservationModel = pjReservationModel::factory();
 	            
 	            $booking_arr = $pjReservationModel

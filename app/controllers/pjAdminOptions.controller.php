@@ -195,6 +195,7 @@ class pjAdminOptions extends pjAdmin
 	public function pjActionColors()
 	{
 		$this->checkLogin();
+		$this->requirePlanFeature('themes');
 
 		if (!pjAuth::factory()->hasAccess())
 		{
@@ -223,6 +224,7 @@ class pjAdminOptions extends pjAdmin
 
 	public function pjActionSaveThemeColors()
 	{
+		$this->requirePlanFeature('themes');
 		$this->setAjax(true);
 
 		if (!$this->isXHR() || !self::isPost())

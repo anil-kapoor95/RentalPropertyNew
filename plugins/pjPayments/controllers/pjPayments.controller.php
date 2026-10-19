@@ -30,6 +30,12 @@ class pjPayments extends pjPaymentsAppController
 	    $this->checkLogin();
 	    
 	    $this->setAjax(true);
+	    // Global payment settings (foreign_id 1): administrator only.
+	    if (!$this->isAdmin())
+	    {
+	        header('HTTP/1.1 403 Forbidden');
+	        exit;
+	    }
 	    if ($this->_post->check('options_update'))
 	    {
 	        if (pjObject::getPlugin('pjPayments') !== NULL && $this->_post->check('plugin_payment_options'))

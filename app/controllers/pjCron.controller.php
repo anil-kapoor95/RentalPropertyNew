@@ -44,8 +44,28 @@ class pjCron extends pjAppController
 		return null;
 	}
 
+	/**
+	 * Subscriptions: write the date-based status changes (trial end, overdue, expiry,
+	 * cancellation at period end) and close unpaid checkouts. System run only.
+	 */
+	public function pjActionSubscriptions()
+	{
+		$cid = class_exists('pjCompanyContext') ? (int) pjCompanyContext::$cronCompanyId : 0;
+		if ($cid > 0)
+		{
+			return 'Runs once for the whole system.';
+		}
+		return class_exists('pjEntitlement') ? pjEntitlement::runTransitions() : 'Subscriptions are not installed.';
+	}
+
 	public function pjActionSyncIcalUrls()
 	{
+		// Subscription plan: iCal / Airbnb sync for this company.
+		$plan_cid = class_exists('pjCompanyContext') ? (int) pjCompanyContext::$cronCompanyId : 0;
+		if ($plan_cid > 0 && class_exists('pjEntitlement') && !pjEntitlement::allows($plan_cid, 'ical_sync'))
+		{
+			return 'Not included in the subscription plan.';
+		}
 		$pjIcalUrlsModel = pjIcalUrlsModel::factory()->reset();
 		// Cron job running for one company: only that company's properties.
 		if (($filter = $this->cronCalendarSql()) !== null)

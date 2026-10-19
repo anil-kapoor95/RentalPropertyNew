@@ -15,6 +15,11 @@ class pjBaseCron extends pjBase
         }
 
         $arr = pjBaseCronJobModel::factory()->findAll()->getData();
+        // The subscriptions job is a platform job: administrators only.
+        if (!$this->isAdmin())
+        {
+            $arr = array_values(array_filter($arr, function ($job) { return !($job['controller'] === 'pjCron' && $job['action'] === 'pjActionSubscriptions'); }));
+        }
 
         // Company: its own on/off switch, next run, last run and result for every job.
         $cid = $this->cronCompany();

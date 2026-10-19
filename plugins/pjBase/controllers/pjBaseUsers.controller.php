@@ -304,6 +304,11 @@ class pjBaseUsers extends pjBase
 			{
 				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjBaseUsers&action=pjActionIndex&err=PU04");
 			}
+			// Subscription plan: number of company users.
+			if ($this->isCompanyLogin() && class_exists('pjEntitlement') && !pjEntitlement::canAddUser($this->usersCompanyId()))
+			{
+				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminSubscriptions&action=pjActionMyPlan&msg=subErrLimit");
+			}
 			if (class_exists('pjCompanyContext'))
 			{
 				// New users belong to the active company (administrators are global).

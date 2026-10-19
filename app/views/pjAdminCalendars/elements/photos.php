@@ -63,11 +63,10 @@
 		var btn = e.target.closest ? e.target.closest('.btnDeleteCalendarPhoto') : null;
 		if (!btn) { return; }
 		e.preventDefault();
-		if (!confirm("<?php __('lblPhotoDeleteConfirm', false, true); ?>")) {
-			return false;
-		}
-		document.getElementById('delete_photo_id').value = btn.getAttribute('data-id');
-		document.getElementById('frmCalendarPhotos').submit();
+		pjPopup.confirm("<?php __('lblPhotoDeleteConfirm', false, true); ?>", function () {
+			document.getElementById('delete_photo_id').value = btn.getAttribute('data-id');
+			document.getElementById('frmCalendarPhotos').submit();
+		});
 	});
 	</script>
 

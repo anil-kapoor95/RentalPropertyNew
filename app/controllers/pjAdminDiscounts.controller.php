@@ -6,6 +6,18 @@ if (!defined("ROOT_PATH"))
 }
 class pjAdminDiscounts extends pjAdmin
 {
+	/** Coupons & discounts are a subscription plan feature (every action, incl. Ajax). */
+	public function beforeFilter()
+	{
+		$res = parent::beforeFilter();
+		if ($res === false)
+		{
+			return false;
+		}
+		$this->requirePlanFeature('coupons');
+		return $res;
+	}
+
 	public function pjActionCreate()
 	{
 		$this->setAjax(true);

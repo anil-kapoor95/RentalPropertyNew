@@ -1,6 +1,8 @@
 <div id="limits" class="tab-pane<?php echo $active_tab == 'limits' ? ' active' : NULL;?>">
     <div class="panel-body">
 		<div class="panel-body-inner">
+<?php $plan_feature = 'booking_policies'; include dirname(__FILE__) . '/plan-lock.php'; ?>
+
 			<?php 
 			$info = str_replace("[STAG]", "<a href='#' data-toggle='modal' data-target='#modalCopyLimits' class='btn btn-primary btn-outline'>", __('copyLimitsInfo', true));
 			$info = str_replace("[ETAG]", "</a>", $info); 

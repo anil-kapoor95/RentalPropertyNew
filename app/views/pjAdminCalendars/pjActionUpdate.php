@@ -59,6 +59,9 @@ $rs = __('reservation_statuses', true);
         	?>
         	<input type="hidden" name="calendar_id" id="calendar_id" value="<?php echo $controller->getCalendarId();?>" />
 			<div id="datePickerOptions" style="display:none;" data-wstart="<?php echo (int) $tpl['option_arr']['o_week_start']; ?>" data-format="<?php echo pjUtil::toBootstrapDate($tpl['option_arr']['o_date_format']); ?>" data-months="<?php echo implode("_", $months);?>" data-days="<?php echo implode("_", $short_days);?>"></div>
+			<?php if ($controller->_get->check('plan_locked')) { ?>
+			<div class="alert alert-warning"><i class="fa fa-lock m-r-xs"></i> <?php __('subLocked'); ?></div>
+			<?php } ?>
 			<div class="tabs-container">
 				<div class="tabs-left">
 					<ul class="nav nav-tabs">

@@ -127,3 +127,64 @@ var jQuery = jQuery || $.noConflict();
 	pjPatchRequired();
 	$(pjPatchRequired);
 })(window.jQuery);
+
+/*
+ * In-page popups for the whole back-office (never the browser's alert / confirm boxes).
+ *   pjPopup.confirm(text, onYes)        - Yes / Cancel popup
+ *   pjPopup.message(text, type)         - message popup ("error", "warning", "success", "info")
+ *   <form data-sub-confirm="text">       - asks in a popup before the form is sent
+ */
+(function (window, document) {
+	function meta(name, def) {
+		var m = document.querySelector('meta[name="' + name + '"]');
+		return m && m.getAttribute('content') ? m.getAttribute('content') : def;
+	}
+	function fallback(text, buttons, done) {
+		// sweetalert missing: a small built-in popup
+		var wrap = document.createElement('div');
+		wrap.className = 'pj-popup-wrap';
+		wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px';
+		wrap.innerHTML = '<div class="pj-popup" role="dialog" aria-modal="true" style="background:#fff;border-radius:10px;padding:24px;max-width:420px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,.2)"><p style="margin:0 0 18px;font-size:15px"></p><div class="pj-popup-btns" style="display:flex;gap:8px;justify-content:flex-end"></div></div>';
+		wrap.querySelector('p').textContent = text;
+		var box = wrap.querySelector('.pj-popup-btns');
+		buttons.forEach(function (b) {
+			var el = document.createElement('button');
+			el.type = 'button';
+			el.className = 'btn ' + (b.primary ? 'btn-primary' : 'btn-white');
+			el.textContent = b.label;
+			el.addEventListener('click', function () { document.body.removeChild(wrap); if (b.primary && done) { done(); } });
+			box.appendChild(el);
+		});
+		document.body.appendChild(wrap);
+		box.lastChild.focus();
+	}
+	var pjPopup = {
+		confirm: function (text, onYes) {
+			var yes = meta('pj-label-yes', 'Yes'), no = meta('pj-label-cancel', 'Cancel');
+			if (typeof window.swal === 'function') {
+				window.swal({title: '', text: text, type: 'warning', showCancelButton: true, confirmButtonColor: '#DD6B55',
+					confirmButtonText: yes, cancelButtonText: no, closeOnConfirm: true}, function (ok) { if (ok && onYes) { onYes(); } });
+			} else {
+				fallback(text, [{label: no}, {label: yes, primary: true}], onYes);
+			}
+		},
+		message: function (text, type) {
+			var okLbl = meta('pj-label-close', 'OK');
+			if (typeof window.swal === 'function') {
+				window.swal({title: '', text: text, type: type || 'error', confirmButtonColor: '#DD6B55', confirmButtonText: okLbl});
+			} else {
+				fallback(text, [{label: okLbl, primary: true}]);
+			}
+		}
+	};
+	window.pjPopup = pjPopup;
+	document.addEventListener('submit', function (e) {
+		var form = e.target;
+		if (!form || !form.getAttribute || !form.hasAttribute('data-sub-confirm') || form.getAttribute('data-sub-confirmed') === '1') { return; }
+		e.preventDefault();
+		pjPopup.confirm(form.getAttribute('data-sub-confirm'), function () {
+			form.setAttribute('data-sub-confirmed', '1');
+			if (typeof form.requestSubmit === 'function') { form.requestSubmit(); } else { form.submit(); }
+		});
+	}, true);
+})(window, document);

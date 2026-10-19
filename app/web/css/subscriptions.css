@@ -1,0 +1,33 @@
+/* Subscriptions module */
+.sub-tabs{display:flex;flex-wrap:wrap;gap:6px;padding:12px 20px 0;background:#fff;border-bottom:1px solid #e7eaec}
+.sub-tabs a{padding:9px 14px;border-radius:8px 8px 0 0;color:#6b7280;font-weight:600}
+.sub-tabs a.active,.sub-tabs a:hover{background:#fff3ea;color:#e0640c}
+.sub-badge{display:inline-block;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:600;vertical-align:middle;background:#f1f2f4;color:#6b7280}
+.sub-badge.sub-active,.sub-badge.sub-tx-paid{background:#e8f7ee;color:#16a34a}
+.sub-badge.sub-trial{background:#eaf2ff;color:#2563eb}
+.sub-badge.sub-past_due,.sub-badge.sub-tx-pending{background:#fff7e6;color:#d97706}
+.sub-badge.sub-cancelled,.sub-badge.sub-expired,.sub-badge.sub-tx-failed{background:#fdecec;color:#dc2626}
+.sub-table td,.sub-table th{vertical-align:middle!important}
+.sub-kv th{width:40%;color:#6b7280;font-weight:600}
+.sub-features{list-style:none;padding:0;margin:0;columns:2;column-gap:24px}
+.sub-features li{padding:3px 0;break-inside:avoid}
+.sub-features li.on i{color:#16a34a}.sub-features li.off{color:#9ca3af}
+.sub-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.sub-form .form-control{width:auto;min-width:140px}
+.sub-inline{display:inline-block;margin:0 6px 6px 0}
+.sub-check{font-weight:500;display:inline-flex;gap:6px;align-items:center;margin-bottom:6px}
+.sub-events{list-style:none;padding:0;margin:0;max-height:420px;overflow:auto}.sub-events li{padding:6px 0;border-bottom:1px solid #f0f1f3}
+.sub-plan{border:1px solid #e7eaec;border-radius:14px;overflow:hidden}.sub-plan.current{border-color:#f97618;box-shadow:0 0 0 3px rgba(249,118,24,.12)}
+.sub-price{font-size:24px;font-weight:800;margin:4px 0 8px}.sub-price small{font-size:13px;color:#6b7280;font-weight:500}
+.sub-limits{padding-left:18px;color:#6b7280}
+.sub-usage .progress-mini{height:6px;margin:4px 0 0;max-width:280px}
+.sub-lock{border-left:4px solid #f97618}
+@media (max-width:767px){.sub-features{columns:1}.sub-form .form-control{width:100%}}
+/* payment method choice (My plan) and payment page */
+.sub-methods{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.sub-method{display:flex;flex-direction:column;align-items:center;gap:6px;border:1px solid #e7eaec;border-radius:10px;padding:12px;cursor:pointer;font-weight:600;margin:0;text-align:center}
+.sub-method img{max-height:34px;max-width:110px}
+.sub-method input{margin:0}
+.sub-method:has(input:checked){border-color:#f97618;box-shadow:0 0 0 3px rgba(249,118,24,.12)}
+.sub-waiting{padding:8px 0;border-bottom:1px solid #f0f1f3}
+.sub-pay .sub-pay-form{min-height:40px}

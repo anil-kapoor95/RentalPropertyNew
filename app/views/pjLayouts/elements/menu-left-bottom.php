@@ -7,7 +7,8 @@ $isScriptColors  = $controller_name == 'pjAdminOptions' && $action_name == 'pjAc
 $isScriptInstall = $controller_name == 'pjAdminOptions' && $action_name == 'pjActionInstall';
 
 $hasAccessScriptPreview = pjAuth::factory('pjAdminOptions', 'pjActionPreview')->hasAccess();
-$hasAccessScriptColors  = pjAuth::factory('pjAdminOptions', 'pjActionColors')->hasAccess();
+$hasAccessScriptColors  = pjAuth::factory('pjAdminOptions', 'pjActionColors')->hasAccess()
+	&& (!class_exists('pjEntitlement') || pjEntitlement::allows(pjCompanyContext::activeId($controller->getRoleId(), $controller->getUserId()), 'themes'));
 $hasAccessScriptInstall = pjAuth::factory('pjAdminOptions', 'pjActionInstall')->hasAccess();
 ?>
 <?php if ($hasAccessScriptPreview || $hasAccessScriptColors): ?>

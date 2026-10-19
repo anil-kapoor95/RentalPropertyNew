@@ -130,6 +130,17 @@ class pjAdmin extends pjAppController
 			// checked inside the action (admin: any company; company user: his own)
 			'pjAdminCompanies::pjActionDeleteLogo' => 'pjAdmin::pjActionIndex',
 			'pjAdminCompanies::pjActionCheckPassword' => 'pjAdmin::pjActionIndex',
+			// Subscriptions: the company return page belongs to "My plan"; the admin pages
+			// check the Administrator role in the controller.
+			'pjAdminSubscriptions::pjActionCheckoutReturn' => 'pjAdminSubscriptions::pjActionMyPlan',
+			'pjAdminSubscriptions::pjActionPay' => 'pjAdminSubscriptions::pjActionMyPlan',
+			'pjAdminSubscriptions::pjActionGateways' => 'pjAdminSubscriptions::pjActionIndex',
+			'pjAdminSubscriptions::pjActionGatewayOptions' => 'pjAdminSubscriptions::pjActionIndex',
+			'pjAdminSubscriptions::pjActionManage' => 'pjAdminSubscriptions::pjActionIndex',
+			'pjAdminSubscriptions::pjActionPlans' => 'pjAdminSubscriptions::pjActionIndex',
+			'pjAdminSubscriptions::pjActionPlan' => 'pjAdminSubscriptions::pjActionIndex',
+			'pjAdminSubscriptions::pjActionBilling' => 'pjAdminSubscriptions::pjActionIndex',
+			'pjAdminSubscriptions::pjActionSettings' => 'pjAdminSubscriptions::pjActionIndex',
 
 			'pjAdminVouchers::pjActionGetVoucher' => 'pjAdminVouchers::pjActionIndex',
 			'pjAdminVouchers::pjActionSaveVoucher' => 'pjAdminVouchers::pjActionUpdate',

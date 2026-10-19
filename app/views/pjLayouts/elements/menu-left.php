@@ -55,10 +55,17 @@ $hasAccessScriptExtras          = pjAuth::factory('pjAdminExtras', 'pjActionInde
 $hasAccessScriptFeatures          = pjAuth::factory('pjAdminFeatures', 'pjActionIndex')->hasAccess();
 
 // Permissions - Vouchers
-$hasAccessScriptVouchers          = pjAuth::factory('pjAdminVouchers', 'pjActionIndex')->hasAccess();
+// Subscriptions: the plan of the active company decides what is shown (and allowed, see pjEntitlement).
+$pjPlanCid = (int) pjCompanyContext::activeId($controller->getRoleId(), $controller->getUserId());
+$pjPlanOn = function ($feature) use ($pjPlanCid) { return !class_exists('pjEntitlement') || pjEntitlement::allows($pjPlanCid, $feature); };
+$hasAccessScriptSubscriptions     = $controller->isAdmin() && class_exists('pjEntitlement') && pjEntitlement::isReady();
+$hasAccessScriptMyPlan            = (int) $controller->getRoleId() === 4 && class_exists('pjEntitlement') && pjEntitlement::isReady() && pjAuth::factory('pjAdminSubscriptions', 'pjActionMyPlan')->hasAccess();
+$isScriptSubPayments              = $controller->_get->toString('controller') == 'pjAdminSubscriptions' && in_array($controller->_get->toString('action'), array('pjActionGateways', 'pjActionGatewayOptions'), true);
+$isScriptSubscriptions            = $controller->_get->toString('controller') == 'pjAdminSubscriptions' && !$isScriptSubPayments;
+$hasAccessScriptVouchers          = pjAuth::factory('pjAdminVouchers', 'pjActionIndex')->hasAccess() && $pjPlanOn('coupons');
 
 // Permissions - Discounts
-$hasAccessScriptDiscounts          = pjAuth::factory('pjAdminDiscounts', 'pjActionIndex')->hasAccess();
+$hasAccessScriptDiscounts          = pjAuth::factory('pjAdminDiscounts', 'pjActionIndex')->hasAccess() && $pjPlanOn('coupons');
 
 $hasDemoData = pjCalendarModel::factory()->reset()->where('t1.uuid LIKE', 'rpbcd%')->where('t1.company_id', pjCompanyContext::activeId($controller->getRoleId(), $controller->getUserId()))->findCount()->getData() > 0;
 
@@ -138,9 +145,21 @@ $pjcsToken = pjAppController::getCsrfToken();
     </li>
 <?php endif; ?>
 
+<?php if ($hasAccessScriptSubscriptions): ?>
+    <li<?php echo $isScriptSubscriptions ? ' class="active"' : NULL; ?>>
+        <a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminSubscriptions&amp;action=pjActionIndex"><i class="fa fa-credit-card"></i> <span class="nav-label"><?php __('sub_menu');?></span></a>
+    </li>
+<?php endif; ?>
+
 <?php if ($hasAccessScriptVouchers || $hasAccessScriptDiscounts): ?>
     <li<?php echo $isScriptVouchers || $isScriptDiscounts ? ' class="active"' : NULL; ?>>
         <a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=<?php echo $hasAccessScriptDiscounts ? 'pjAdminDiscounts' : 'pjAdminVouchers'; ?>&amp;action=pjActionIndex"><i class="fa fa-ticket"></i> <span class="nav-label"><?php __('menuCouponsDiscounts');?></span></a>
+    </li>
+<?php endif; ?>
+
+<?php if ($hasAccessScriptMyPlan): ?>
+    <li<?php echo $isScriptSubscriptions ? ' class="active"' : NULL; ?>>
+        <a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminSubscriptions&amp;action=pjActionMyPlan"><i class="fa fa-star"></i> <span class="nav-label"><?php __('sub_myplan_title');?></span></a>
     </li>
 <?php endif; ?>
 
@@ -150,8 +169,8 @@ $pjcsToken = pjAppController::getCsrfToken();
     </li>
 <?php endif; ?>
 
-<?php if ($hasAccessScriptOptionsNotifications || $hasAccessScriptExtras || $hasAccessScriptFeatures): ?>
-    <li<?php echo $isScriptOptionsNotifications || $isScriptExtras || $isScriptFeatures ? ' class="active"' : NULL; ?>>
+<?php if ($hasAccessScriptOptionsNotifications || $hasAccessScriptExtras || $hasAccessScriptFeatures || $hasAccessScriptSubscriptions): ?>
+    <li<?php echo $isScriptOptionsNotifications || $isScriptExtras || $isScriptFeatures || $isScriptSubPayments ? ' class="active"' : NULL; ?>>
         <a href="#"><i class="fa fa-cogs"></i> <span class="nav-label"><?php __('menuOptions');?></span><span class="fa arrow"></span></a>
         <ul class="nav nav-second-level collapse">
             <?php if ($hasAccessScriptOptionsNotifications): ?>
@@ -164,6 +183,9 @@ $pjcsToken = pjAppController::getCsrfToken();
                 <?php if ($hasAccessScriptFeatures): ?>
                     <li<?php echo $isScriptFeatures ? ' class="active"' : NULL; ?>><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminFeatures&amp;action=pjActionIndex"><?php __('menuFeatures');?></a></li>
                 <?php endif; ?>
+            <?php if ($hasAccessScriptSubscriptions): ?>
+                <li<?php echo $isScriptSubPayments ? ' class="active"' : NULL; ?>><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminSubscriptions&amp;action=pjActionGateways"><?php __('sub_menu_payments');?></a></li>
+            <?php endif; ?>
 
         </ul>
     </li>

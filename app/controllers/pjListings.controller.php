@@ -128,10 +128,12 @@ class pjListings extends pjFront
 			'showMap' => ($lat !== '' && $lng !== '' && is_numeric($lat) && is_numeric($lng)),
 		));
 		$this->set('gallery', $gallery);
+		// SEO settings are a subscription plan feature of the property's company.
+		$seo_allowed = !class_exists('pjEntitlement') || pjEntitlement::allows(pjCompanyContext::companyOfCalendar($c['id']), 'seo');
 		$this->set('seo', array(
-			'title'       => trim(strip_tags((string) $c['m_meta_title'])),
-			'keywords'    => trim(strip_tags((string) $c['m_meta_keywords'])),
-			'description' => trim(strip_tags((string) $c['m_meta_description'])),
+			'title'       => $seo_allowed ? trim(strip_tags((string) $c['m_meta_title'])) : '',
+			'keywords'    => $seo_allowed ? trim(strip_tags((string) $c['m_meta_keywords'])) : '',
+			'description' => $seo_allowed ? trim(strip_tags((string) $c['m_meta_description'])) : '',
 		));
 		$this->set('propFeat', $fetchFeatures(2));
 		$this->set('commFeat', $fetchFeatures(1));

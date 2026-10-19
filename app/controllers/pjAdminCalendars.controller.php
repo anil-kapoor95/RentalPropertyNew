@@ -160,6 +160,11 @@ class pjAdminCalendars extends pjAdmin
 		{
 			pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminCompanies&action=pjActionIndex&msg=msgNoCompanySelected");
 		}
+		// Subscription plan: number of properties (checked for the form and for the save).
+		if (class_exists('pjEntitlement') && !pjEntitlement::canAddProperty($this->getCompanyId()))
+		{
+			pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminCalendars&action=pjActionIndex&plan_limit=properties");
+		}
 
 		if ($this->_post->check('calendar_create'))
 		{
@@ -465,6 +470,7 @@ class pjAdminCalendars extends pjAdmin
 	    $this->set('has_delete_bulk', pjAuth::factory('pjAdminCalendars', 'pjActionDeleteCalendarBulk')->hasAccess());
 	    $this->set('has_booking_options', pjAuth::factory('pjAdminOptions', 'pjActionIndex')->hasAccess());
 	    $this->set('has_update_booking', pjAuth::factory('pjAdminReservations', 'pjActionUpdate')->hasAccess());
+	    $this->set('plan_can_add', !class_exists('pjEntitlement') || pjEntitlement::canAddProperty($this->getCompanyId()));
 	    
 		$this->appendJs('jquery.datagrid.js', PJ_FRAMEWORK_LIBS_PATH . 'pj/js/');
 		$this->appendJs('pjAdminCalendars.js');
@@ -590,6 +596,12 @@ class pjAdminCalendars extends pjAdmin
         $calendar_id = $this->getCalendarId();
         if ($this->_post->check('property_update'))
         {
+        	// Subscription plan: Appearance (2), Limits / booking policies (10) and SEO (15) tabs.
+        	$plan_tab = self::planFeatureOfTab($this->_post->toInt('tab_id'));
+        	if ($plan_tab !== null && class_exists('pjEntitlement') && !pjEntitlement::allows($this->getCompanyId(), $plan_tab))
+        	{
+        		pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminCalendars&action=pjActionUpdate&id=" . $calendar_id . "&plan_locked=" . $plan_tab);
+        	}
 	        $pjOptionModel
 		        ->where('foreign_id', $calendar_id)
 		        ->where('type', 'bool')
@@ -1109,6 +1121,13 @@ class pjAdminCalendars extends pjAdmin
 		$this->set('period_arr', $period_arr);
     }
 	
+	/** Property tab => subscription feature that unlocks it (null: every plan). */
+	public static function planFeatureOfTab($tab_id)
+	{
+		$map = array(2 => 'themes', 10 => 'booking_policies', 15 => 'seo');
+		return isset($map[(int) $tab_id]) ? $map[(int) $tab_id] : null;
+	}
+
 	public function pjActionCheckAssignCalendar()
 	{
 	    $this->setAjax(true);
@@ -1139,6 +1158,26 @@ class pjAdminCalendars extends pjAdmin
         if ($this->_post->check('options_update') && $foreign_id === NULL && !$this->isAdmin())
         {
             self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'Access denied.'));
+        }
+        if($this->_post->check('options_update') && $foreign_id !== NULL && class_exists('pjEntitlement'))
+        {
+            // Subscription plan: number of online payment gateways switched on per property
+            // (cash / bank transfer are not gateways). Only switching ON a gateway is limited.
+            $max = pjEntitlement::limit($this->getCompanyId(), 'max_payment_gateways');
+            if ($max !== null)
+            {
+                $active = array_flip(pjEntitlement::activeGateways($foreign_id));
+                foreach ((array) $this->_post->toArray('plugin_payment_options') as $method => $opts)
+                {
+                    if (in_array($method, pjEntitlement::$offlineMethods, true) || !is_array($opts) || !isset($opts['is_active'])) { continue; }
+                    if ((int) $opts['is_active'] === 1) { $active[$method] = true; } else { unset($active[$method]); }
+                }
+                $before = pjEntitlement::activeGateways($foreign_id);
+                if (count($active) > $max && count($active) > count($before))
+                {
+                    self::jsonResponse(array('status' => 'ERR', 'code' => 402, 'text' => __('subGatewayLimit', true)));
+                }
+            }
         }
         if($this->_post->check('options_update'))
         {
@@ -2131,6 +2170,10 @@ class pjAdminCalendars extends pjAdmin
 			}
 			if (!$this->isCompanyCalendar($this->_post->toInt('calendar_id'))) {
 				$this->denyCompanyAccess();
+			}
+			$plan_tab = self::planFeatureOfTab($this->_post->toInt('tab_id'));
+			if ($plan_tab !== null && class_exists('pjEntitlement') && !pjEntitlement::allows($this->getCompanyId(), $plan_tab)) {
+				pjAppController::jsonResponse(array('status' => 'ERR', 'code' => 402, 'copy_tab' => $copy_tab, 'text' => __('subLocked', true)));
 			}
 			if ($this->_post->toInt('tab_id') == 11 && !$this->_post->check('confirmed')) {
 				$option_arr = pjOptionModel::factory()->getPairs($this->_post->toInt('calendar_id'));

@@ -1,6 +1,8 @@
 <div id="seo" class="tab-pane<?php echo $active_tab == 'seo' ? ' active' : NULL;?>">
 	<div class="panel-body form-horizontal">
 		<div class="panel-body-inner">
+<?php $plan_feature = 'seo'; include dirname(__FILE__) . '/plan-lock.php'; ?>
+
 
 			<div class="alert alert-success"><?php __('lblSeoInfo'); ?></div>
 

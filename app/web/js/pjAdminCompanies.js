@@ -100,7 +100,7 @@ var jQuery = jQuery || $.noConflict();
 					$btn.closest(".pj-company-logo-box").remove();
 				} else {
 					$btn.removeClass("disabled");
-					if (data && data.text) { window.alert(data.text); }
+					if (data && data.text) { pjPopup.message(data.text); }
 				}
 			}).fail(function () {
 				$btn.removeClass("disabled");

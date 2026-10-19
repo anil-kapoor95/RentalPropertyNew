@@ -16,6 +16,10 @@ $bodies = __('error_bodies', true);
 
 <div class="row wrapper wrapper-content animated fadeInRight">
     <div class="col-lg-12">
+    	<?php if ($controller->_get->check('plan_limit') || (isset($tpl['plan_can_add']) && !$tpl['plan_can_add'])) { ?>
+<div class="alert alert-warning sub-lock"><i class="fa fa-lock m-r-xs"></i> <?php __('subLimitProperties'); ?>
+<?php if ((int) $controller->getRoleId() === 4) { ?> <a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminSubscriptions&amp;action=pjActionMyPlan"><?php __('sub_btn_see_plans'); ?></a><?php } ?></div>
+<?php } ?>
     	<?php
     	$error_code = $controller->_get->toString('err');
     	if (!empty($error_code))
@@ -45,7 +49,12 @@ $bodies = __('error_bodies', true);
                 <div class="row">
                     <div class="col-lg-3 col-md-3 col-sm-4">
                         <?php 
-                        if ($tpl['has_create'])
+                        if ($tpl['has_create'] && isset($tpl['plan_can_add']) && !$tpl['plan_can_add'])
+                        {
+                        	?>
+                        	<div class="form-group"><span class="btn btn-default disabled" title="<?php __('subLimitProperties', false, true); ?>"><i class="fa fa-lock"></i> <?php __('btnAddCalendar');?></span></div>
+                        	<?php
+                        } elseif ($tpl['has_create'])
                         {
                         	?>
                         	<div class="form-group">

@@ -1038,14 +1038,14 @@ var jQuery = jQuery || $.noConflict();
 					ical_urls.push(val);
 				});
 				if(req_err != ""){
-					alert(req_err);
+					pjPopup.message(req_err);
 					return false;
 				}
 				if(ext_err != ""){
 					return false;
 				}
 				if(ical_urls.length == 0){
-					alert("All fields are required!");
+					pjPopup.message("All fields are required!");
 					return false;
 				}
 				var ical_urls_arr = ical_urls.join(', ');

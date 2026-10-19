@@ -420,6 +420,38 @@ class pjAppController extends pjBaseAppController
 	 * ------------------------------------------------------------------ */
 
 	/** Active company id (0 = none available). */
+	/**
+	 * Subscription plan check for the active company (server side, see pjEntitlement).
+	 * Stops the request when the plan does not include $feature.
+	 */
+	public function requirePlanFeature($feature)
+	{
+		if (!class_exists('pjEntitlement') || pjEntitlement::allows($this->getCompanyId(), $feature))
+		{
+			return true;
+		}
+		$this->planDenied();
+	}
+
+	/** Answer for a request the plan does not allow (JSON for Ajax, a page otherwise). */
+	public function planDenied()
+	{
+		if ($this->isXHR())
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 402, 'text' => __('subLocked', true)));
+		}
+		if ((int) $this->getRoleId() === 4)
+		{
+			pjUtil::redirect($_SERVER['PHP_SELF'] . '?controller=pjAdminSubscriptions&action=pjActionMyPlan&msg=subLocked');
+		}
+		if ($this->isAdmin())
+		{
+			pjUtil::redirect($_SERVER['PHP_SELF'] . '?controller=pjAdminSubscriptions&action=pjActionManage&id=' . pjCompanyContext::hashOf($this->getCompanyId()) . '&msg=subLocked');
+		}
+		pjUtil::redirect($_SERVER['PHP_SELF'] . '?controller=pjAdmin&action=pjActionIndex');
+		exit;
+	}
+
 	public function getCompanyId()
 	{
 		return (int) pjCompanyContext::activeId($this->getRoleId(), $this->getUserId());
@@ -919,7 +951,9 @@ class pjAppController extends pjBaseAppController
 		
 		$sub_total = $amount + $extra_price;
 		
-		if($promo_code != '')
+		// Coupons and discounts are a plan feature of the property's company.
+		$coupons_allowed = !class_exists('pjEntitlement') || pjEntitlement::allows(pjCompanyContext::companyOfCalendar($calendar_id), 'coupons');
+		if($promo_code != '' && $coupons_allowed)
 		{
 			// Coupon of the property's company only (codes are unique per company).
 			$voucher_company_id = pjCompanyContext::companyOfCalendar($calendar_id);
@@ -999,6 +1033,10 @@ class pjAppController extends pjBaseAppController
 			->where('t1.company_id', pjCompanyContext::companyOfCalendar($calendar_id))
 			->findAll()
 			->getData();
+		if (!$coupons_allowed)
+		{
+			$discount_arr = array();
+		}
 		
 		foreach($discount_arr as $k => $v)
 		{

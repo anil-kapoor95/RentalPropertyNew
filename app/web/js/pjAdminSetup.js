@@ -73,7 +73,7 @@
 		var remove = document.getElementById('pjRemoveDemo');
 		if (remove) {
 			remove.addEventListener('click', function () {
-				if (!window.confirm(remove.getAttribute('data-confirm') || 'Remove all demo properties? This cannot be undone.')) { return; }
+				pjPopup.confirm(remove.getAttribute('data-confirm') || 'Remove all demo properties? This cannot be undone.', function () {
 				disableAll(true);
 				status(statusEl, remove.getAttribute('data-busy') || 'Removing demo properties…', 'busy');
 				post('pjActionRemoveDemo', function () {
@@ -82,6 +82,7 @@
 				}, function (msg) {
 					disableAll(false);
 					status(statusEl, msg, 'err');
+				});
 				});
 			});
 		}

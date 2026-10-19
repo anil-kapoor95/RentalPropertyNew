@@ -7,6 +7,9 @@
         <title><?php __('script_name') ?> by PHPJabbers.com</title>
         <?php if (!in_array(isset($_GET['controller']) ? $_GET['controller'] : '', array('pjFront', 'pjFrontEnd', 'pjFrontPublic', 'pjCron', 'pjInstaller'))): ?>
         <meta name="csrf-token" content="<?php echo pjAppController::getCsrfToken(); ?>" />
+        <meta name="pj-label-yes" content="<?php __('btnYes', false, true); ?>" />
+        <meta name="pj-label-cancel" content="<?php __('btnCancel', false, true); ?>" />
+        <meta name="pj-label-close" content="<?php __('btnClose', false, true); ?>" />
         <?php endif; ?>
         <?php
         $cnt = count($controller->getCss());
