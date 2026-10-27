@@ -593,11 +593,18 @@ $routes = array(
     'pjActionSignupTheme' => 'pjJabbApi',
     'pjActionSignupStatus'  => 'pjJabbApi',
     'pjActionSignupResume'  => 'pjJabbApi',
+    'pjActionSignupLogin'   => 'pjJabbApi',
+    'pjActionSignupLogout'  => 'pjJabbApi',
+    'pjActionSignupGoogle'  => 'pjJabbApi',
+    'pjActionGetAuthConfig' => 'pjJabbApi',
     'pjActionCheckEmail'    => 'pjJabbApi',
     'pjActionCheckPassword' => 'pjJabbApi',
     // Lists
     'pjActionGetCountries'  => 'pjJabbApi',
     'pjActionGetThemes'     => 'pjJabbApi',
+    // Payment gateways (host)
+    'pjActionGetPaymentMethods' => 'pjJabbApi',
+    'pjActionSavePaymentMethod' => 'pjJabbApi',
 );
 
 $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
