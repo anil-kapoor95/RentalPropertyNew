@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Local archives (never commit: large, and may contain code or data)
+/*.zip
+
+# Local secrets / settings
+/app/config/google.php
+
+# Logs
+error_log
+
+# Runtime data written by the API (log-in throttle counters)
+/app/web/upload/api_throttle/
+app/web/upload/13_pending_end.jpg

@@ -602,6 +602,7 @@ $routes = array(
     // Lists
     'pjActionGetCountries'  => 'pjJabbApi',
     'pjActionGetThemes'     => 'pjJabbApi',
+    'pjActionGetPlans'      => 'pjJabbApi',
     // Airbnb listing import (duplicate check)
     'pjActionCheckAirbnbListing' => 'pjJabbApi',
     // Payment gateways (host)
@@ -700,6 +701,10 @@ foreach ($_FILES as $key => $file)
         }
     }
 }
+
+// The controller is called from this server, so it sees this server's address: pass on the caller's
+// (used for log-in throttling; never taken from the request).
+$data['api_client_ip'] = isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : '';
 
 $Http = new pjHttp();
 $Http->setMethod('POST');

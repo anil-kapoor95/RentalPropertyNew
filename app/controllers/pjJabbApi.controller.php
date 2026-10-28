@@ -11,8 +11,9 @@ if (!defined("ROOT_PATH"))
  * property + photos = Properties > Add; theme = Options > Theme colours):
  *
  *   Step 1  pjActionSignupAccount      account (name, e-mail, phone, password)   -> signup_token
- *   Step 2  pjActionSignupCompany      company details (+ optional logo)
- *   Step 3  pjActionSignupProperty     property basics
+ *   Step 2  pjActionSignupProperty     property basics (creates the company too, filled in from the
+ *                                      account and the property address, when there is none yet)
+ *   Step 3  pjActionSignupCompany      company details, prefilled from step 2 (+ optional logo)
  *   Step 4  pjActionSignupPhotos       property photos (pjActionSignupDeletePhoto removes one)
  *   Step 5  pjActionSignupDescription  page headline, description, guest questions
  *           (pjActionSignupGenerateDescription: AI suggestion in English, tone warm|premium|simple, Options > AI settings)
@@ -41,7 +42,7 @@ class pjJabbApi extends pjAppController
 	const ROLE_COMPANY = 4;
 
 	/** Steps of the sign-up, in order (step number => name). The last one completes the sign-up. */
-	private static $steps = array(1 => 'account', 2 => 'company', 3 => 'property', 4 => 'photos', 5 => 'description', 6 => 'theme');
+	private static $steps = array(1 => 'account', 2 => 'property', 3 => 'company', 4 => 'photos', 5 => 'description', 6 => 'theme');
 
 	/** Photos one property may have during the sign-up. */
 	const MAX_PHOTOS = 20;
@@ -55,6 +56,16 @@ class pjJabbApi extends pjAppController
 		'premium' => 'Premium: polished, refined and understated, like a boutique hotel. Elegant but not flowery, no cliches.',
 		'simple'  => 'Simple: short, plain and factual sentences that are easy to scan. No marketing words.',
 	);
+
+	/** Property types the front end offers (saved as the property text "property_type"). */
+	private static $propertyTypes = array('villa', 'homestay', 'apartment', 'cottage', 'resort');
+
+	/** Amenities one property may have, and the longest amenity name. */
+	const MAX_AMENITIES = 100;
+	const MAX_AMENITY_LENGTH = 80;
+
+	/** Feature category of amenities created by the sign-up (Options > Features: 2 = "Property features"). */
+	const AMENITY_CATEGORY = 2;
 
 	/** Questions guests ask (step 5): most saved per property. */
 	const MAX_FAQS = 8;
@@ -170,6 +181,144 @@ class pjJabbApi extends pjAppController
 		return (bool) preg_match('/^\+?[0-9\s\-().]{6,30}$/', $phone) && $digits >= 6 && $digits <= 15;
 	}
 
+	/* ------------------------------------------------------------------
+	 * Throttling (brute force / enumeration protection)
+	 * ------------------------------------------------------------------ */
+
+	/** bucket => array(max requests, window in seconds). */
+	private static $throttleRules = array(
+		'login_ip'    => array(30, 900),  // failed log-ins from one IP address
+		'login_email' => array(8, 900),   // failed log-ins for one e-mail address
+		'check_email' => array(60, 900),  // live e-mail checks from one IP address
+		'airbnb'      => array(30, 3600), // Airbnb listing checks of one sign-up
+	);
+
+	/**
+	 * Client IP for throttling. api.php calls this controller over HTTP from the server itself and sends the
+	 * caller's address as api_client_ip; it is only trusted on such local calls (forwarded headers can be forged).
+	 */
+	private function throttleIp()
+	{
+		$remote = isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : 'unknown';
+		$local = array('127.0.0.1', '::1', isset($_SERVER['SERVER_ADDR']) ? (string) $_SERVER['SERVER_ADDR'] : '');
+		$forwarded = $this->param('api_client_ip');
+		if ($forwarded !== '' && in_array($remote, $local, true) && filter_var($forwarded, FILTER_VALIDATE_IP))
+		{
+			return $forwarded;
+		}
+		return $remote;
+	}
+
+	/** Folder of the throttle counters: app/web/upload/api_throttle (web access denied), else the system temp folder. */
+	private static function throttleDir()
+	{
+		static $dir = null;
+		if ($dir !== null)
+		{
+			return $dir;
+		}
+		$candidates = array(PJ_UPLOAD_PATH . 'api_throttle', rtrim(sys_get_temp_dir(), '/\\') . '/stayowned_api_throttle');
+		foreach ($candidates as $candidate)
+		{
+			if (!is_dir($candidate))
+			{
+				@mkdir($candidate, 0755, true);
+			}
+			if (is_dir($candidate) && is_writable($candidate))
+			{
+				if (!is_file($candidate . '/.htaccess'))
+				{
+					@file_put_contents($candidate . '/.htaccess', "<IfModule mod_authz_core.c>\n\tRequire all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n\tDeny from all\n</IfModule>\n");
+					@file_put_contents($candidate . '/index.html', '');
+				}
+				return $dir = $candidate;
+			}
+		}
+		return $dir = '';
+	}
+
+	private static function throttleFile($bucket, $key)
+	{
+		$dir = self::throttleDir();
+		if ($dir === '')
+		{
+			return '';
+		}
+		return $dir . '/' . $bucket . '_' . hash('sha256', ROOT_PATH . '|' . $bucket . '|' . strtolower($key)) . '.json';
+	}
+
+	/** Reads (and with $add > 0 increments) the counter of a bucket: array(count, resets_at). */
+	private static function throttleCount($bucket, $key, $add = 0)
+	{
+		$window = self::$throttleRules[$bucket][1];
+		$now = time();
+		$file = self::throttleFile($bucket, $key);
+		$fp = $file !== '' ? @fopen($file, 'c+') : false;
+		if ($fp === false)
+		{
+			// Never lock people out because the counter can't be stored.
+			return array(0, $now + $window);
+		}
+		flock($fp, $add > 0 ? LOCK_EX : LOCK_SH);
+		$data = json_decode((string) stream_get_contents($fp), true);
+		$count = is_array($data) && isset($data['c'], $data['r']) && (int) $data['r'] > $now ? (int) $data['c'] : 0;
+		$resets = $count > 0 ? (int) $data['r'] : $now + $window;
+		if ($add > 0)
+		{
+			$count += $add;
+			ftruncate($fp, 0);
+			rewind($fp);
+			fwrite($fp, json_encode(array('c' => $count, 'r' => $resets)));
+			fflush($fp);
+		}
+		flock($fp, LOCK_UN);
+		fclose($fp);
+		return array($count, $resets);
+	}
+
+	private static function throttleHit($bucket, $key)
+	{
+		self::throttleCount($bucket, $key, 1);
+	}
+
+	private static function throttleClear($bucket, $key)
+	{
+		$file = self::throttleFile($bucket, $key);
+		if ($file !== '' && is_file($file))
+		{
+			@unlink($file);
+		}
+	}
+
+	/** Answers 429 when the bucket is full. */
+	private function throttleCheck($bucket, $key, $message = 'Too many attempts. Please wait a few minutes and try again.')
+	{
+		list($count, $resets) = self::throttleCount($bucket, $key);
+		if ($count >= self::$throttleRules[$bucket][0])
+		{
+			header('Retry-After: ' . max(1, $resets - time()));
+			$this->respond(429, $message);
+		}
+	}
+
+	/** Checks e-mail + password with the log-in throttle (failed attempts per IP and per e-mail). */
+	private function verifyCredentials($email, $password)
+	{
+		$ip = $this->throttleIp();
+		$message = 'Too many failed log-in attempts. Please wait 15 minutes and try again.';
+		$this->throttleCheck('login_ip', $ip, $message);
+		$this->throttleCheck('login_email', $email, $message);
+		$user = $this->findUserByEmail($email);
+		if (empty($user) || !$this->isCurrentPassword((int) $user['id'], $password))
+		{
+			self::throttleHit('login_ip', $ip);
+			self::throttleHit('login_email', $email);
+			$this->respond(401, 'Invalid email or password');
+		}
+		self::throttleClear('login_email', $email);
+		return $user;
+	}
+
 	/** Back-office user with this e-mail (any back-office role), except $except_user_id. Same rule as Companies > Add. */
 	private function findUserByEmail($email, $except_user_id = 0)
 	{
@@ -245,7 +394,23 @@ class pjJabbApi extends pjAppController
 		{
 			$this->respond(401, 'Sign-up account not found.');
 		}
+		$signup = self::normalizeStep($signup);
 		$signup['user'] = $user;
+		return $signup;
+	}
+
+	/**
+	 * Until 2026-10-28 the company was step 2 and the property step 3. A sign-up that stopped after the old
+	 * company step (step 2 without a property) has not done the new step 2 (property) yet: it continues there,
+	 * and its company is kept (the company step shows it again).
+	 */
+	private static function normalizeStep($signup)
+	{
+		if (!empty($signup) && $signup['status'] !== 'completed' && (int) $signup['step'] === 2 && empty($signup['calendar_id']))
+		{
+			pjCompanySignupModel::factory()->set('id', (int) $signup['id'])->modify(array('step' => 1));
+			$signup['step'] = 1;
+		}
 		return $signup;
 	}
 
@@ -274,7 +439,7 @@ class pjJabbApi extends pjAppController
 	}
 
 	/**
-	 * Step $step is done. The login becomes active once the company exists (step 2), as with
+	 * Step $step is done. The login becomes active once the company exists (created with the property, step 2), as with
 	 * a company added in the back office; only a login without a company stays inactive.
 	 * After the last step the sign-up is completed.
 	 */
@@ -297,13 +462,13 @@ class pjJabbApi extends pjAppController
 		return $done;
 	}
 
-	/** Property created in step 3 (with its company), or stops. */
+	/** Property created in step 2 (with its company), or stops. */
 	private function signupProperty($signup)
 	{
 		$calendar = !empty($signup['calendar_id']) ? pjCalendarModel::factory()->find((int) $signup['calendar_id'])->getData() : array();
 		if (empty($calendar) || (int) $calendar['company_id'] !== (int) $signup['company_id'])
 		{
-			$this->respond(409, 'Please complete step 3 (property) first.', $this->signupState($signup));
+			$this->respond(409, 'Please complete step 2 (property) first.', $this->signupState($signup));
 		}
 		return $calendar;
 	}
@@ -479,7 +644,7 @@ class pjJabbApi extends pjAppController
 	/** What the front end needs to continue: steps, next step, and the saved values for prefill. */
 	private function signupState($signup)
 	{
-		$signup = pjCompanySignupModel::factory()->find((int) $signup['id'])->getData();
+		$signup = self::normalizeStep(pjCompanySignupModel::factory()->find((int) $signup['id'])->getData());
 		$user = pjAuthUserModel::factory()->find((int) $signup['user_id'])->getData();
 		$name = isset($user['name']) ? (string) $user['name'] : '';
 		$parts = explode(' ', $name, 2);
@@ -528,6 +693,8 @@ class pjJabbApi extends pjAppController
 				// Guests: "Max people" of the property (Limits in the back office)
 				$opt = self::calendarOptions($cal['id'], $signup['company_id']);
 				$property['id'] = (int) $cal['id'];
+				$property['property_type'] = isset($t['property_type']) && in_array($t['property_type'], self::$propertyTypes, true) ? $t['property_type'] : null;
+				$property['amenities'] = self::propertyAmenities($cal['id'], $signup['company_id']);
 				$property['max_guests'] = isset($opt['o_max_people']) && (int) $opt['o_max_people'] > 0 ? (int) $opt['o_max_people'] : null;
 				$photos = self::photoList($cal['id']);
 				// stored as HTML for the back-office editor; the form gets plain text
@@ -868,8 +1035,272 @@ class pjJabbApi extends pjAppController
 			array_merge(array('signup_token' => $token, 'resumed' => false), $this->signupState(array('id' => $signup_id))));
 	}
 
+	/* ------------------------------------------------------------------
+	 * Amenities (Options > Features of the company, Properties > Features)
+	 * ------------------------------------------------------------------ */
+
+	/** "Wi-Fi", "wifi", " WIFI " -> "wifi": the same amenity whatever its spelling. */
+	private static function amenityKey($name)
+	{
+		$name = function_exists('mb_strtolower') ? mb_strtolower($name, 'UTF-8') : strtolower($name);
+		return (string) preg_replace('/[^\p{L}\p{N}]+/u', '', $name);
+	}
+
 	/**
-	 * Step 2: company. signup_token + company fields (same fields as Companies > Add company):
+	 * amenities parameter (JSON array of names) -> clean, unique names, or an error text.
+	 * Returns array(names, error).
+	 */
+	private function amenitiesParam()
+	{
+		$raw = $this->param('amenities');
+		$list = $raw === '' ? array() : json_decode($raw, true);
+		if (!is_array($list))
+		{
+			return array(array(), 'Send the amenities as a list');
+		}
+		$names = array();
+		foreach ($list as $item)
+		{
+			if (!is_string($item))
+			{
+				continue;
+			}
+			$name = trim(preg_replace('/\s+/u', ' ', strip_tags($item)));
+			$key = self::amenityKey($name);
+			if ($key === '' || isset($names[$key]))
+			{
+				continue;
+			}
+			if (self::tooLong($name, self::MAX_AMENITY_LENGTH))
+			{
+				return array(array(), sprintf('Amenity names can have at most %u characters', self::MAX_AMENITY_LENGTH));
+			}
+			$names[$key] = $name;
+		}
+		if (count($names) > self::MAX_AMENITIES)
+		{
+			return array(array(), sprintf('A property can have at most %u amenities', self::MAX_AMENITIES));
+		}
+		return array($names, null);
+	}
+
+	/** Features of the company: amenity key => feature id (names in every language count). */
+	private static function companyFeatureKeys($company_id)
+	{
+		$ids = pjFeatureModel::factory()->where('t1.company_id', (int) $company_id)->orderBy('t1.id ASC')->findAll()->getDataPair(null, 'id');
+		$keys = array();
+		if (!empty($ids))
+		{
+			$rows = pjMultiLangModel::factory()
+				->where('t1.model', 'pjFeature')
+				->where('t1.field', 'name')
+				->whereIn('t1.foreign_id', array_map('intval', $ids))
+				->orderBy('t1.foreign_id ASC')
+				->findAll()
+				->getData();
+			foreach ($rows as $r)
+			{
+				$key = self::amenityKey((string) $r['content']);
+				if ($key !== '' && !isset($keys[$key]))
+				{
+					$keys[$key] = (int) $r['foreign_id'];
+				}
+			}
+		}
+		return $keys;
+	}
+
+	/**
+	 * Links the property to exactly these amenities (as Properties > Features does). Amenities the company
+	 * doesn't have yet are added to its features (Options > Features); an existing one is reused whatever
+	 * its spelling ("Wi-Fi" = "wifi"), so nothing is created twice.
+	 */
+	private static function saveAmenities($calendar_id, $company_id, $names)
+	{
+		$keys = self::companyFeatureKeys($company_id);
+		$locales = self::companyLocales($company_id);
+		$ids = array();
+		foreach ($names as $key => $name)
+		{
+			if (!isset($keys[$key]))
+			{
+				$id = pjFeatureModel::factory()->setAttributes(array(
+					'company_id'  => (int) $company_id,
+					'category_id' => self::AMENITY_CATEGORY,
+					'status'      => 'T',
+				))->insert()->getInsertId();
+				if ($id === false || (int) $id <= 0)
+				{
+					continue;
+				}
+				$i18n = array();
+				foreach ($locales as $lid)
+				{
+					$i18n[$lid] = array('name' => $name);
+				}
+				pjMultiLangModel::factory()->saveMultiLang($i18n, (int) $id, 'pjFeature');
+				$keys[$key] = (int) $id;
+			}
+			$ids[$keys[$key]] = true;
+		}
+		pjCalendarFeatureModel::factory()->where('calendar_id', (int) $calendar_id)->eraseAll();
+		if (!empty($ids))
+		{
+			$model = pjCalendarFeatureModel::factory();
+			foreach (array_keys($ids) as $fid)
+			{
+				$model->addBatchRow(array((int) $calendar_id, (int) $fid));
+			}
+			$model->setBatchFields(array('calendar_id', 'feature_id'))->insertBatch();
+		}
+	}
+
+	/** Names of the property's amenities (company language; English when there is one). */
+	private static function propertyAmenities($calendar_id, $company_id)
+	{
+		$fids = pjCalendarFeatureModel::factory()->where('t1.calendar_id', (int) $calendar_id)->findAll()->getDataPair(null, 'feature_id');
+		if (empty($fids))
+		{
+			return array();
+		}
+		$fids = array_map('intval', $fids);
+		$active = pjFeatureModel::factory()->whereIn('t1.id', $fids)->where('t1.status', 'T')->findAll()->getDataPair(null, 'id');
+		if (empty($active))
+		{
+			return array();
+		}
+		$locale = pjCompanyContext::companyDefaultLocale((int) $company_id);
+		$en = pjBaseLocaleModel::factory()->unscoped()->where('t1.language_iso LIKE', 'en%')->orderBy('t1.id ASC')->limit(1)->findAll()->getDataIndex(0);
+		$en_id = !empty($en) ? (int) $en['id'] : 0;
+		$rows = pjMultiLangModel::factory()
+			->where('t1.model', 'pjFeature')
+			->where('t1.field', 'name')
+			->whereIn('t1.foreign_id', array_map('intval', $active))
+			->findAll()
+			->getData();
+		// English name first, then the company's default language, then any other.
+		$names = array();
+		$ranks = array();
+		foreach ($rows as $r)
+		{
+			$fid = (int) $r['foreign_id'];
+			$content = trim((string) $r['content']);
+			if ($content === '')
+			{
+				continue;
+			}
+			$rank = (int) $r['locale'] === $en_id ? 0 : ((int) $r['locale'] === (int) $locale ? 1 : 2);
+			if (!isset($ranks[$fid]) || $rank < $ranks[$fid])
+			{
+				$ranks[$fid] = $rank;
+				$names[$fid] = $content;
+			}
+		}
+		$out = array();
+		foreach ($active as $fid)
+		{
+			if (isset($names[(int) $fid]))
+			{
+				$out[] = $names[(int) $fid];
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Creates the company of a sign-up (same set-up as Companies > Add company) and links the login to it.
+	 * $data: company fields (values or ':NULL'). Returns the company id, or stops.
+	 */
+	private function createSignupCompany($user, $data)
+	{
+		$data['user_id'] = (int) $user['id'];
+		$data['status'] = 'T';
+		$data['hash'] = bin2hex(random_bytes(16));
+		$company_id = pjCompanyModel::factory()->setAttributes($data)->insert()->getInsertId();
+		if ($company_id === false || (int) $company_id <= 0)
+		{
+			$this->respond(500, 'Company could not be created. Please try again.');
+		}
+		$company_id = (int) $company_id;
+		// The login belongs to the company.
+		pjAuthUserModel::factory()->set('id', (int) $user['id'])->modify(array('company_id' => $company_id));
+		pjCompanyContext::clearCache();
+		pjCompanyContext::seedFeatures($company_id);
+		pjCompanyContext::ensureNotifications($company_id);
+		pjCompanyContext::seedNewCompanyLocales($company_id);
+		return $company_id;
+	}
+
+	/**
+	 * Before the company step (3) is done, the company follows the property: a company field that is empty or
+	 * still holds the value it took from the property (name, address) is updated to the property's new value;
+	 * empty contact fields are taken from the account. Values the host typed in the company step are kept.
+	 */
+	private function syncSignupCompany($signup, $company_id, $v, $country_id)
+	{
+		$company = pjCompanyModel::factory()->find((int) $company_id)->getData();
+		if (empty($company))
+		{
+			return;
+		}
+		$old = array('name' => '', 'address_1' => '', 'city' => '', 'state' => '', 'zip' => '', 'country_id' => '');
+		$cal = !empty($signup['calendar_id']) ? pjCalendarModel::factory()->find((int) $signup['calendar_id'])->getData() : array();
+		if (!empty($cal) && (int) $cal['company_id'] === (int) $company_id)
+		{
+			$t = self::propertyTexts($cal['id'], $company_id);
+			$old = array(
+				'name'       => isset($t['name']) ? (string) $t['name'] : '',
+				'address_1'  => isset($t['address_1']) ? (string) $t['address_1'] : '',
+				'city'       => isset($t['address_city']) ? (string) $t['address_city'] : '',
+				'state'      => (string) $cal['address_state'],
+				'zip'        => (string) $cal['address_zip'],
+				'country_id' => (string) $cal['address_country'],
+			);
+		}
+		$new = array(
+			'name'       => self::cut($v['name'], 255),
+			'address_1'  => self::cut($v['address_1'], 255),
+			'city'       => self::cut($v['city'], 100),
+			'state'      => self::cut($v['state'], 100),
+			'zip'        => self::cut($v['zip'], 20),
+			'country_id' => (string) (int) $country_id,
+		);
+		$data = array();
+		foreach ($new as $f => $value)
+		{
+			$current = isset($company[$f]) ? trim((string) $company[$f]) : '';
+			if (($current === '' || $current === '0' || $current === trim($old[$f])) && $current !== $value)
+			{
+				$data[$f] = $value !== '' ? $value : ':NULL';
+			}
+		}
+		$user = $signup['user'];
+		foreach (array('contact_person' => 'name', 'email' => 'email', 'phone' => 'phone') as $f => $uf)
+		{
+			if ((!isset($company[$f]) || trim((string) $company[$f]) === '') && isset($user[$uf]) && (string) $user[$uf] !== '')
+			{
+				$data[$f] = (string) $user[$uf];
+			}
+		}
+		if (!empty($data))
+		{
+			if (isset($data['name']) && $data['name'] === ':NULL')
+			{
+				unset($data['name']); // the company always keeps a name
+			}
+			$data['modified'] = date('Y-m-d H:i:s');
+			pjCompanyModel::factory()->set('id', (int) $company_id)->modify($data);
+		}
+	}
+
+	/** First characters of $value (UTF-8), for a shorter column. */
+	private static function cut($value, $max)
+	{
+		return function_exists('mb_substr') ? mb_substr($value, 0, $max, 'UTF-8') : substr($value, 0, $max);
+	}
+
+	/**
+	 * Step 3: company. signup_token + company fields (same fields as Companies > Add company):
 	 *   name*, legal_name, registration_no, tax_no, contact_person, company_email, phone,
 	 *   website, address_1*, address_2, city*, state, zip, country_id*, description, logo (file)
 	 * contact_person / company_email / phone default to the account values.
@@ -881,7 +1312,7 @@ class pjJabbApi extends pjAppController
 		$this->requireSignupTable();
 
 		$signup = $this->signupFromToken();
-		$this->requireStep($signup, 2);
+		$this->requireStep($signup, 3);
 		$user = $signup['user'];
 
 		$limits = array('name' => 255, 'legal_name' => 255, 'registration_no' => 100, 'tax_no' => 100,
@@ -965,15 +1396,7 @@ class pjJabbApi extends pjAppController
 
 		if ($is_new)
 		{
-			$data['user_id'] = (int) $user['id'];
-			$data['status'] = 'T';
-			$data['hash'] = bin2hex(random_bytes(16));
-			$company_id = pjCompanyModel::factory()->setAttributes($data)->insert()->getInsertId();
-			if ($company_id === false || (int) $company_id <= 0)
-			{
-				$this->respond(500, 'Company could not be created. Please try again.');
-			}
-			$company_id = (int) $company_id;
+			$company_id = $this->createSignupCompany($user, $data);
 		} else {
 			$data['modified'] = date('Y-m-d H:i:s');
 			pjCompanyModel::factory()->set('id', $company_id)->modify($data);
@@ -985,19 +1408,7 @@ class pjJabbApi extends pjAppController
 			pjCompanyModel::factory()->set('id', $company_id)->modify(array('logo' => $logo));
 		}
 
-		// The login belongs to the company (it becomes active when the last step is done).
-		pjAuthUserModel::factory()->set('id', (int) $user['id'])->modify(array('company_id' => $company_id));
-
-		if ($is_new)
-		{
-			// Same set-up as a company added in the back office.
-			pjCompanyContext::clearCache();
-			pjCompanyContext::seedFeatures($company_id);
-			pjCompanyContext::ensureNotifications($company_id);
-			pjCompanyContext::seedNewCompanyLocales($company_id);
-		}
-
-		$done = $this->completeStep($signup, 2, array('company_id' => $company_id));
+		$done = $this->completeStep($signup, 3, array('company_id' => $company_id));
 
 		$state = $this->signupState($signup);
 		if ($logo_error !== null)
@@ -1008,7 +1419,11 @@ class pjJabbApi extends pjAppController
 	}
 
 	/**
-	 * Step 3: property basics (same as Properties > Add property).
+	 * Step 2: property basics (same as Properties > Add property).
+	 *   property_type (villa|homestay|apartment|cottage|resort, optional), amenities (optional JSON list of names:
+	 *   the property gets exactly these; names the company doesn't have yet are added to Options > Features, without duplicates)
+	 * The sign-up has no company yet: it is created here, filled in from the account (contact, e-mail, phone)
+	 * and the property (name, address), and the host checks it in step 3.
 	 *   signup_token, name*, address_1*, city*, country_id*, state, zip, bedrooms, bathrooms,
 	 *   ical_url (optional: calendar export link of Airbnb / Booking.com / Vrbo ...)
 	 * Sent again (while the sign-up is open) it updates the same property.
@@ -1022,8 +1437,7 @@ class pjJabbApi extends pjAppController
 		$this->requireSignupTable();
 
 		$signup = $this->signupFromToken();
-		$this->requireStep($signup, 3);
-		$company_id = (int) $signup['company_id'];
+		$this->requireStep($signup, 2);
 
 		$v = array();
 		foreach (array('name' => 255, 'address_1' => 255, 'city' => 255, 'state' => 255, 'zip' => 255) as $f => $max)
@@ -1053,6 +1467,21 @@ class pjJabbApi extends pjAppController
 			$errors['country_id'] = 'Country is required';
 		} elseif ((int) pjBaseCountryModel::factory()->where('t1.id', $country_id)->where('t1.status', 'T')->where('t1.company_id IS NULL')->findCount()->getData() === 0) {
 			$errors['country_id'] = 'Invalid country';
+		}
+		$property_type = strtolower($this->param('property_type'));
+		if ($property_type !== '' && !in_array($property_type, self::$propertyTypes, true))
+		{
+			$errors['property_type'] = 'Choose one of: ' . implode(', ', self::$propertyTypes);
+		}
+		// Amenities (optional): sent -> the property has exactly these (new ones are added to the company's features)
+		$amenities = null;
+		if ($this->has('amenities'))
+		{
+			list($amenities, $amenity_error) = $this->amenitiesParam();
+			if ($amenity_error !== null)
+			{
+				$errors['amenities'] = $amenity_error;
+			}
 		}
 		$max_guests = $this->param('max_guests');
 		if ($max_guests !== '' && (!ctype_digit($max_guests) || (int) $max_guests < 1 || (int) $max_guests > 99))
@@ -1093,6 +1522,29 @@ class pjJabbApi extends pjAppController
 			$this->respond(422, 'Validation failed', array(), $errors);
 		}
 
+		// The property belongs to the company: create it now when the sign-up has none yet.
+		$company_id = (int) $signup['company_id'];
+		if ($company_id <= 0 || !pjCompanyModel::factory()->find($company_id)->getData())
+		{
+			$user = $signup['user'];
+			$company_id = $this->createSignupCompany($user, array(
+				'name'           => self::cut($v['name'], 255),
+				'contact_person' => (string) $user['name'] !== '' ? self::cut((string) $user['name'], 255) : ':NULL',
+				'email'          => (string) $user['email'] !== '' ? (string) $user['email'] : ':NULL',
+				'phone'          => (string) $user['phone'] !== '' ? self::cut((string) $user['phone'], 50) : ':NULL',
+				'address_1'      => self::cut($v['address_1'], 255),
+				'city'           => self::cut($v['city'], 100),
+				'state'          => $v['state'] !== '' ? self::cut($v['state'], 100) : ':NULL',
+				'zip'            => $v['zip'] !== '' ? self::cut($v['zip'], 20) : ':NULL',
+				'country_id'     => $country_id,
+			));
+			pjCompanySignupModel::factory()->set('id', (int) $signup['id'])->modify(array('company_id' => $company_id));
+			$signup['company_id'] = $company_id;
+		} elseif ((int) $signup['step'] < 3) {
+			// Company not checked yet (step 3): keep the details it took from the property and the account up to date.
+			$this->syncSignupCompany($signup, $company_id, $v, $country_id);
+		}
+
 		$attr = array(
 			'bedrooms'        => $bedrooms !== '' ? (int) $bedrooms : ':NULL',
 			'bathrooms'       => $bathrooms !== '' ? (int) $bathrooms : ':NULL',
@@ -1104,6 +1556,10 @@ class pjJabbApi extends pjAppController
 		foreach (self::companyLocales($company_id) as $lid)
 		{
 			$i18n[$lid] = array('name' => $v['name'], 'address_1' => $v['address_1'], 'address_city' => $v['city']);
+			if ($property_type !== '')
+			{
+				$i18n[$lid]['property_type'] = $property_type;
+			}
 		}
 
 		$calendar_id = (int) $signup['calendar_id'];
@@ -1159,6 +1615,10 @@ class pjJabbApi extends pjAppController
 			pjUtil::pjActionGenerateImages($calendar_id, $pjOptionModel->reset()->getAllPairs($calendar_id));
 		}
 
+		if ($amenities !== null)
+		{
+			self::saveAmenities($calendar_id, $company_id, $amenities);
+		}
 		if ($max_guests !== '')
 		{
 			// Guests: "Max people" of the property (Limits in the back office)
@@ -1174,7 +1634,7 @@ class pjJabbApi extends pjAppController
 			}
 		}
 
-		$this->completeStep($signup, 3, array('calendar_id' => $calendar_id));
+		$this->completeStep($signup, 2, array('calendar_id' => $calendar_id, 'company_id' => $company_id));
 
 		$state = $this->signupState($signup);
 		if ($ical_url !== '')
@@ -1471,8 +1931,10 @@ class pjJabbApi extends pjAppController
 		$facts = array_filter(array(
 			'Property name' => isset($t['name']) ? $t['name'] : '',
 			'Location' => implode(', ', array_filter(array(isset($t['address_city']) ? $t['address_city'] : '', $calendar['address_state'], $country))),
+			'Property type' => isset($t['property_type']) && in_array($t['property_type'], self::$propertyTypes, true) ? $t['property_type'] : '',
 			'Bedrooms' => $calendar['bedrooms'],
 			'Bathrooms' => $calendar['bathrooms'],
+			'Amenities' => implode(', ', array_slice(self::propertyAmenities($calendar['id'], $company_id), 0, 40)),
 			'Host' => !empty($company['name']) ? $company['name'] : '',
 			'Owner notes' => $highlights,
 		), function ($x) { return $x !== null && $x !== ''; });
@@ -1693,36 +2155,133 @@ class pjJabbApi extends pjAppController
 	}
 
 	/** Themes (colour palettes) for step 6. signup_token optional: tells whether the plan allows choosing one. */
+	/** The free theme: the first palette (Options > Theme colours). Every other palette needs a plan with themes. */
+	private static function freeThemeId()
+	{
+		$ids = array_keys(pjColorHelper::getPalettes());
+		return !empty($ids) ? (string) $ids[0] : '0';
+	}
+
+	/**
+	 * Paid themes for this company: its plan must include themes (Pro / Business) and be current
+	 * (trial, active or in grace). A company without a plan gets the free theme only, whatever
+	 * "unassigned_mode" says. Without the subscription system every theme is free.
+	 */
+	private function paidThemesAllowed($company_id)
+	{
+		if (!class_exists('pjEntitlement') || !pjEntitlement::isReady())
+		{
+			return true;
+		}
+		if ((int) $company_id <= 0)
+		{
+			return false;
+		}
+		$state = pjEntitlement::state((int) $company_id);
+		if ($state['source'] === 'admin')
+		{
+			return true;
+		}
+		return $state['source'] === 'plan' && $state['entitled'] && in_array('themes', $state['features'], true);
+	}
+
+	/**
+	 * Themes (colour palettes). signup_token optional.
+	 * Data: themes[] {id, name, colors, free, locked}, default_id (the free theme), free_id, allowed (paid themes unlocked)
+	 */
 	public function pjActionGetThemes()
 	{
 		$this->setAjax(true);
-		$allowed = true;
+		$allowed = false;
 		if ($this->param('signup_token') !== '')
 		{
 			$this->requireSignupTable();
 			$signup = $this->signupFromToken();
-			$allowed = $this->themesAllowed((int) $signup['company_id']);
+			$allowed = $this->paidThemesAllowed((int) $signup['company_id']);
+		} elseif (!class_exists('pjEntitlement') || !pjEntitlement::isReady()) {
+			$allowed = true;
 		}
+		$free_id = self::freeThemeId();
 		$themes = array();
 		foreach (pjColorHelper::getPalettes() as $id => $p)
 		{
+			$free = (string) $id === $free_id;
 			$themes[] = array(
 				'id' => (string) $id, 'name' => $p['name'],
 				'colors' => array('brand' => $p['brand'], 'accent' => $p['accent'], 'text' => $p['text'],
 					'background' => $p['bg'], 'price' => $p['price'], 'page_background' => $p['pageBg']),
+				'free' => $free,
+				'locked' => !$free && !$allowed,
 			);
 		}
-		$this->respond(200, 'OK', array('themes' => $themes, 'default_id' => '0', 'allowed' => $allowed));
+		$this->respond(200, 'OK', array('themes' => $themes, 'default_id' => $free_id, 'free_id' => $free_id, 'allowed' => $allowed));
 	}
 
-	private function themesAllowed($company_id)
+	/**
+	 * Plans hosts can buy (Subscriptions > Plans: active and public), for the upgrade dialog. signup_token optional:
+	 * then also the company's current plan and where to buy (Subscriptions > My plan in the dashboard).
+	 * Data: plans[] {id, code, name, description, price, currency, billing_interval, interval_count, trial_days,
+	 *       features[] {key, label}, includes_themes, purchasable}, current {code, name, status} | null, my_plan_url
+	 */
+	public function pjActionGetPlans()
 	{
-		return !(class_exists('pjEntitlement') && pjEntitlement::isReady()) || pjEntitlement::allows((int) $company_id, 'themes');
+		$this->setAjax(true);
+		$plans = array();
+		if (class_exists('pjEntitlement') && pjEntitlement::isReady())
+		{
+			foreach (pjEntitlement::plans(true) as $plan)
+			{
+				if ((int) $plan['is_public'] !== 1)
+				{
+					continue;
+				}
+				$features = array();
+				foreach ($plan['feature_list'] as $key)
+				{
+					$label = __(pjEntitlement::$features[$key], true);
+					$features[] = array('key' => $key, 'label' => is_string($label) && $label !== '' ? $label : $key);
+				}
+				$plans[] = array(
+					'id'               => (int) $plan['id'],
+					'code'             => (string) $plan['code'],
+					'name'             => (string) $plan['name'],
+					'description'      => (string) $plan['description'],
+					'price'            => $plan['price'],
+					'currency'         => (string) $plan['currency'],
+					'billing_interval' => (string) $plan['billing_interval'],
+					'interval_count'   => (int) $plan['interval_count'],
+					'trial_days'       => (int) $plan['trial_days'],
+					'features'         => $features,
+					'includes_themes'  => in_array('themes', $plan['feature_list'], true),
+					'purchasable'      => pjEntitlement::isPurchasable($plan),
+				);
+			}
+		}
+		$current = null;
+		if ($this->param('signup_token') !== '')
+		{
+			$this->requireSignupTable();
+			$signup = $this->signupFromToken();
+			if ((int) $signup['company_id'] > 0 && class_exists('pjEntitlement') && pjEntitlement::isReady())
+			{
+				$state = pjEntitlement::state((int) $signup['company_id']);
+				if ($state['source'] === 'plan' && !empty($state['plan']))
+				{
+					$current = array('code' => (string) $state['plan']['code'], 'name' => (string) $state['plan']['name'], 'status' => (string) $state['status']);
+				}
+			}
+		}
+		$this->respond(200, 'OK', array(
+			'plans'       => $plans,
+			'current'     => $current,
+			'my_plan_url' => PJ_INSTALL_URL . 'index.php?controller=pjAdminSubscriptions&action=pjActionMyPlan',
+		));
 	}
 
 	/**
 	 * Step 6 (last): theme. signup_token, palette_id* (from pjActionGetThemes), font_family (optional)
-	 * Saved like Options > Theme colours. Completes the sign-up.
+	 * Saved like Options > Theme colours. Completes the sign-up. The first theme is free; another theme
+	 * needs a plan with themes (402 otherwise, nothing saved: the front end offers the plans).
 	 */
 	public function pjActionSignupTheme()
 	{
@@ -1753,9 +2312,13 @@ class pjJabbApi extends pjAppController
 		{
 			$this->respond(422, 'Validation failed', array(), $errors);
 		}
+		if ((string) $palette_id !== self::freeThemeId() && !$this->paidThemesAllowed($company_id))
+		{
+			$this->respond(402, 'This theme is part of the paid plans. Choose a plan to unlock it, or publish with the free theme.',
+				array('free_id' => self::freeThemeId()), array('palette_id' => 'This theme needs a paid plan'));
+		}
 
-		$applied = $this->themesAllowed($company_id);
-		if ($applied)
+		$applied = true;
 		{
 			$p = $palettes[$palette_id];
 			$saved = array(
@@ -1775,7 +2338,7 @@ class pjJabbApi extends pjAppController
 		$this->completeStep($signup, 6);
 		$state = $this->signupState($signup);
 		$state['theme_applied'] = $applied;
-		$this->respond(200, $applied ? 'Registration completed. You can now log in.' : 'Registration completed. Your plan uses the default theme. You can now log in.', $state);
+		$this->respond(200, 'Registration completed. You can now log in.', $state);
 	}
 
 	/** Where is this sign-up? signup_token -> next step + saved values. */
@@ -1807,6 +2370,8 @@ class pjJabbApi extends pjAppController
 		$this->requireSignupTable();
 
 		$signup = $this->signupFromToken();
+		$this->throttleCheck('airbnb', 'signup:' . (int) $signup['id'], 'Too many listing checks. Please wait a while and try again.');
+		self::throttleHit('airbnb', 'signup:' . (int) $signup['id']);
 		$listing_id = $this->param('listing_id');
 		if (!preg_match('/^[0-9]{1,20}$/', $listing_id))
 		{
@@ -2077,11 +2642,7 @@ class pjJabbApi extends pjAppController
 			$this->respond(422, 'Validation failed', array(), $errors);
 		}
 
-		$user = $this->findUserByEmail($email);
-		if (empty($user) || !$this->isCurrentPassword((int) $user['id'], $password))
-		{
-			$this->respond(401, 'Invalid email or password');
-		}
+		$user = $this->verifyCredentials($email, $password);
 		$this->loginUser($user);
 	}
 
@@ -2323,11 +2884,7 @@ class pjJabbApi extends pjAppController
 			$this->respond(422, 'Validation failed', array(), $errors);
 		}
 
-		$user = $this->findUserByEmail($email);
-		if (empty($user) || !$this->isCurrentPassword((int) $user['id'], $password))
-		{
-			$this->respond(401, 'Invalid email or password');
-		}
+		$user = $this->verifyCredentials($email, $password);
 		$signup = pjCompanySignupModel::factory()->where('t1.user_id', (int) $user['id'])->limit(1)->findAll()->getDataIndex(0);
 		if (empty($signup))
 		{
@@ -2355,6 +2912,8 @@ class pjJabbApi extends pjAppController
 		{
 			$this->respond(422, 'Validation failed', array(), array('email' => 'Invalid email format'));
 		}
+		$this->throttleCheck('check_email', $this->throttleIp(), 'Too many checks. Please wait a few minutes and try again.');
+		self::throttleHit('check_email', $this->throttleIp());
 		$except = 0;
 		if ($this->param('signup_token') !== '')
 		{
