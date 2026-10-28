@@ -602,6 +602,8 @@ $routes = array(
     // Lists
     'pjActionGetCountries'  => 'pjJabbApi',
     'pjActionGetThemes'     => 'pjJabbApi',
+    // Airbnb listing import (duplicate check)
+    'pjActionCheckAirbnbListing' => 'pjJabbApi',
     // Payment gateways (host)
     'pjActionGetPaymentMethods' => 'pjJabbApi',
     'pjActionSavePaymentMethod' => 'pjJabbApi',

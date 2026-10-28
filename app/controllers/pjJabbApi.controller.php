@@ -28,6 +28,7 @@ if (!defined("ROOT_PATH"))
  *   pjActionCheckPassword  password            -> OK or the password rule that is not met
  *   pjActionGetCountries                       -> countries for the company / property forms
  *
+ *   pjActionCheckAirbnbListing signup_token + listing_id       -> is this Airbnb listing already connected (iCal feeds)?
  *   pjActionGetPaymentMethods  signup_token                    -> saved Razorpay / Stripe settings of the sign-up property (prefill)
  *   pjActionSavePaymentMethod  signup_token + gateway settings -> online payment gateway of the sign-up property
  *                              (same table and fields as Properties > Payments; secret keys are never sent back)
@@ -1785,6 +1786,62 @@ class pjJabbApi extends pjAppController
 		$this->requireSignupTable();
 		$signup = $this->signupFromToken();
 		$this->respond(200, 'OK', $this->signupState($signup));
+	}
+
+	/* ------------------------------------------------------------------
+	 * Airbnb listing import
+	 * ------------------------------------------------------------------ */
+
+	/**
+	 * Duplicate check before an Airbnb listing is imported (called by the Next.js import route).
+	 * A listing counts as connected when one of its Airbnb calendar links (Properties > iCal feeds,
+	 * https://www.airbnb.com/calendar/ical/<listing id>.ics) is saved for a property.
+	 *
+	 * POST signup_token, listing_id (digits)
+	 * -> status: none | this_property | company (another property of the same company) | other (another account)
+	 */
+	public function pjActionCheckAirbnbListing()
+	{
+		$this->setAjax(true);
+		$this->requirePost();
+		$this->requireSignupTable();
+
+		$signup = $this->signupFromToken();
+		$listing_id = $this->param('listing_id');
+		if (!preg_match('/^[0-9]{1,20}$/', $listing_id))
+		{
+			$this->respond(422, 'Validation failed', array(), array('listing_id' => 'Invalid Airbnb listing ID'));
+		}
+
+		$status = 'none';
+		$feeds = pjFeedModel::factory()
+			->select('t1.calendar_id, t1.url, t2.company_id')
+			->join('pjCalendar', 't2.id=t1.calendar_id', 'left')
+			->where('t1.provider_id', 2)
+			// listing_id is digits only (checked above); every match is checked again exactly below
+			->where(sprintf("t1.url LIKE '%%/ical/%s.ics%%'", $listing_id))
+			->findAll()
+			->getData();
+		foreach ($feeds as $feed)
+		{
+			if (!preg_match('#/calendar/ical/' . $listing_id . '\.ics(\?|$)#', (string) $feed['url']))
+			{
+				continue;
+			}
+			if (!empty($signup['calendar_id']) && (int) $feed['calendar_id'] === (int) $signup['calendar_id'])
+			{
+				$status = 'this_property';
+				break;
+			}
+			if ((int) $feed['company_id'] === (int) $signup['company_id'])
+			{
+				$status = 'company';
+			} elseif ($status === 'none') {
+				$status = 'other';
+			}
+		}
+		// Another account's property is never named.
+		$this->respond(200, 'OK', array('listing_id' => $listing_id, 'status' => $status));
 	}
 
 	/* ------------------------------------------------------------------
