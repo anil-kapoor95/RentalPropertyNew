@@ -6,7 +6,7 @@ if (!defined("ROOT_PATH"))
 }
 /**
  * Subscription plans & billing.
- *  Administrator only : Index (company subscriptions), Manage, Plans, Plan, Billing, Settings,
+ *  Administrator only : Index (company subscriptions), Manage, Plans, Plan, Promos, Promo, Billing,
  *                       Gateways + GatewayOptions (Options > Payments: how companies pay)
  *  Company login (4)  : MyPlan, Pay, CheckoutReturn - always the company's own data only
  */
@@ -285,39 +285,124 @@ class pjAdminSubscriptions extends pjAdmin
 	}
 
 	/* ------------------------------------------------------------------
-	 * Administrator: billing history & settings
+	 * Administrator: coupons & discounts on plan prices
+	 * ------------------------------------------------------------------ */
+
+	private function promoKind($kind)
+	{
+		return $kind === 'coupon' ? 'coupon' : 'discount';
+	}
+
+	public function pjActionPromos()
+	{
+		if (!$this->requireAdmin()) { return; }
+		$kind = $this->promoKind($this->_get->toString('kind'));
+		$plans = array();
+		foreach (pjEntitlement::plans() as $p)
+		{
+			$plans[(int) $p['id']] = $p['name'];
+		}
+		$this->set('kind', $kind);
+		$this->set('promos', pjSubscriptionPromos::promos($kind));
+		$this->set('counts', array('discount' => count(pjSubscriptionPromos::promos('discount')), 'coupon' => count(pjSubscriptionPromos::promos('coupon'))));
+		$this->set('uses', pjSubscriptionPromos::isReady() ? pjSubscriptionPromos::usesAll() : array());
+		$this->set('plans', $plans);
+	}
+
+	public function pjActionPromo()
+	{
+		if (!$this->requireAdmin()) { return; }
+		$id = self::isPost() ? $this->_post->toInt('id') : $this->_get->toInt('id');
+		$promo = $id > 0 ? pjSubscriptionPromos::find($id) : false;
+		$kind = $promo ? $promo['kind'] : $this->promoKind(self::isPost() ? $this->_post->toString('kind') : $this->_get->toString('kind'));
+		if (($id > 0 && !$promo) || !pjSubscriptionPromos::isReady())
+		{
+			$this->back('pjActionPromos', 'subErrSave', '&kind=' . $kind);
+		}
+		if (self::isPost())
+		{
+			if (!$this->csrfOk())
+			{
+				$this->back('pjActionPromos', 'subErrCsrf', '&kind=' . $kind);
+			}
+			if ($this->_post->toString('do') === 'delete' && $promo)
+			{
+				pjSubscriptionPromoModel::factory()->set('id', $promo['id'])->erase();
+				$this->back('pjActionPromos', 'subSaved', '&kind=' . $kind);
+			}
+			$again = '&kind=' . $kind . ($promo ? '&id=' . $promo['id'] : '');
+			$name = trim((string) $this->_post->toString('name'));
+			$type = $this->_post->toString('type') === 'amount' ? 'amount' : 'percent';
+			$value = round((float) str_replace(',', '.', (string) $this->_post->toString('value')), 2);
+			$code = $kind === 'coupon' ? pjSubscriptionPromos::normalizeCode($this->_post->toString('code')) : '';
+			$date = function ($v) { $v = trim((string) $v); return preg_match('/^\d{4}-\d{2}-\d{2}$/', $v) && strtotime($v) ? $v : ':NULL'; };
+			$num = function ($v) { $v = trim((string) $v); return $v === '' ? ':NULL' : max(0, (int) $v); };
+			if ($name === '' || mb_strlen($name) > 100 || $value <= 0 || ($type === 'percent' && $value > 100)
+				|| ($kind === 'coupon' && !pjSubscriptionPromos::isValidCode($code)))
+			{
+				$this->back('pjActionPromo', 'subErrPromoFields', $again);
+			}
+			if ($kind === 'coupon')
+			{
+				$dup = pjSubscriptionPromoModel::factory()->where('t1.code', $code);
+				if ($promo) { $dup->where('t1.id !=', $promo['id']); }
+				if ((int) $dup->findCount()->getData() > 0)
+				{
+					$this->back('pjActionPromo', 'subErrPromoCode', $again);
+				}
+			}
+			$plan_ids = array();
+			foreach (pjEntitlement::plans() as $p)
+			{
+				$plan_ids[] = (int) $p['id'];
+			}
+			$plan_ids = array_values(array_intersect($plan_ids, array_map('intval', (array) $this->_post->toArray('plan_ids'))));
+			$kinds = array_values(array_intersect(pjSubscriptionPromos::$kinds, (array) $this->_post->toArray('kinds')));
+			$currency = strtoupper(trim((string) $this->_post->toString('currency')));
+			if (!preg_match('/^[A-Z]{3}$/', $currency))
+			{
+				$currency = strtoupper((string) pjEntitlement::setting('currency'));
+			}
+			$from = $date($this->_post->toString('date_from'));
+			$to = $date($this->_post->toString('date_to'));
+			if ($from !== ':NULL' && $to !== ':NULL' && $to < $from)
+			{
+				list($from, $to) = array($to, $from);
+			}
+			$data = array(
+				'kind' => $kind, 'name' => $name, 'code' => $kind === 'coupon' ? $code : ':NULL',
+				'type' => $type, 'value' => number_format($value, 2, '.', ''),
+				'currency' => $type === 'amount' && $currency !== '' ? $currency : ':NULL',
+				'plan_ids' => !empty($plan_ids) ? implode(',', $plan_ids) : ':NULL',
+				'kinds' => !empty($kinds) ? implode(',', $kinds) : ':NULL',
+				'date_from' => $from, 'date_to' => $to,
+				'max_uses' => $num($this->_post->toString('max_uses')),
+				'max_per_company' => $num($this->_post->toString('max_per_company')),
+				'status' => $this->_post->check('status') ? 'T' : 'F',
+				'modified' => date('Y-m-d H:i:s'),
+			);
+			if ($promo)
+			{
+				pjSubscriptionPromoModel::factory()->set('id', $promo['id'])->modify($data);
+			} else {
+				$data['created'] = date('Y-m-d H:i:s');
+				pjSubscriptionPromoModel::factory()->setAttributes($data)->insert();
+			}
+			$this->back('pjActionPromos', 'subSaved', '&kind=' . $kind);
+		}
+		$this->set('kind', $kind);
+		$this->set('promo', $promo);
+		$this->set('plans', pjEntitlement::plans());
+	}
+
+	/* ------------------------------------------------------------------
+	 * Administrator: billing history
 	 * ------------------------------------------------------------------ */
 
 	public function pjActionBilling()
 	{
 		if (!$this->requireAdmin()) { return; }
 		$this->set('transactions', $this->transactions(0, 500));
-	}
-
-	public function pjActionSettings()
-	{
-		if (!$this->requireAdmin()) { return; }
-		if (self::isPost())
-		{
-			if (!$this->csrfOk())
-			{
-				$this->back('pjActionSettings', 'subErrCsrf');
-			}
-			$allowed = array(
-				'unassigned_mode' => array('full', 'restricted'), 'expired_mode' => array('read_only', 'suspend'), 'self_trial' => array('0', '1'),
-			);
-			foreach ($allowed as $k => $vals)
-			{
-				$v = (string) $this->_post->toString($k);
-				if (in_array($v, $vals, true)) { pjEntitlement::saveSetting($k, $v); }
-			}
-			$cur = strtoupper((string) $this->_post->toString('currency'));
-			if (preg_match('/^[A-Z]{3}$/', $cur)) { pjEntitlement::saveSetting('currency', $cur); }
-			pjEntitlement::saveSetting('grace_days', (string) max(0, min(90, $this->_post->toInt('grace_days'))));
-			$this->back('pjActionSettings', 'subSaved');
-		}
-		$this->set('settings', pjEntitlement::settings());
-		$this->set('methods', pjSubscriptionBilling::activeMethods());
 	}
 
 	/* ------------------------------------------------------------------
@@ -440,15 +525,28 @@ class pjAdminSubscriptions extends pjAdmin
 					{
 						$this->back('pjActionMyPlan', 'subErrPlan');
 					}
-					$kind = ($cur && (int) $cur['id'] === (int) $plan['id']) ? 'renewal' : (($cur && (int) $plan['sort'] > (int) $cur['sort']) ? 'upgrade' : 'new');
+					$kind = $this->payKind($plan, $cur);
+					// the administrator's discount / coupon (Subscriptions > Coupons & Discounts), worked out here
+					$quote = pjEntitlement::isPurchasable($plan) ? pjSubscriptionPromos::quote($plan, $kind, $cid, $this->_post->toString('coupon_code')) : null;
+					if ($quote && $quote['error'] !== '')
+					{
+						$this->back('pjActionMyPlan', $quote['error']);
+					}
+					if ($quote && !empty($quote['promo_ids']) && $quote['amount'] <= 0)
+					{
+						// nothing left to pay: the plan starts now
+						$txn = pjEntitlement::createTransaction($cid, $plan, $kind, 'promo', $uid, $quote);
+						$res = $txn ? pjEntitlement::applyPayment($txn['id'], $txn['uuid'], 0, $txn['currency'], $uid) : '';
+						$this->back('pjActionMyPlan', $res === 'applied' ? 'subPaymentOk' : 'subErrCheckout');
+					}
 					if (pjEntitlement::isPurchasable($plan) && count(pjSubscriptionBilling::activeMethods()) === 0)
 					{
 						// no payment method switched on yet: leave a payment request for the administrator
-						$txn = pjEntitlement::createTransaction($cid, $plan, $kind, 'manual', $uid);
+						$txn = pjEntitlement::createTransaction($cid, $plan, $kind, 'manual', $uid, $quote);
 						pjEntitlement::log($cid, 'payment_requested', 'Payment requested for plan ' . $plan['name'] . ($txn ? ' (' . $txn['amount'] . ' ' . $txn['currency'] . ')' : ''), $uid);
 						$this->back('pjActionMyPlan', 'subRequestSent');
 					}
-					$res = pjSubscriptionBilling::checkout($company, $plan, $kind, (string) $this->_post->toString('method'), $uid);
+					$res = pjSubscriptionBilling::checkout($company, $plan, $kind, (string) $this->_post->toString('method'), $uid, $quote);
 					if (isset($res['txn']))
 					{
 						pjUtil::redirect($_SERVER['PHP_SELF'] . '?controller=pjAdminSubscriptions&action=pjActionPay&txn=' . $res['txn']['uuid']);
@@ -482,10 +580,49 @@ class pjAdminSubscriptions extends pjAdmin
 		$this->set('company', $company);
 		$this->set('state', $state);
 		$this->set('usage', pjEntitlement::usage($cid));
-		$this->set('plans', pjEntitlement::plans(true));
+		$plans = pjEntitlement::plans(true);
+		$quotes = array();
+		foreach ($plans as $p)
+		{
+			if (pjEntitlement::isPurchasable($p))
+			{
+				$quotes[(int) $p['id']] = pjSubscriptionPromos::quote($p, $this->payKind($p, $state['plan']), $cid);
+			}
+		}
+		$this->set('plans', $plans);
+		$this->set('quotes', $quotes);
 		$this->set('transactions', $this->transactions($cid, 50));
 		$this->set('methods', pjSubscriptionBilling::activeMethods());
 		$this->set('self_trial', pjEntitlement::setting('self_trial') === '1');
+	}
+
+	/** What buying the plan is for the company: renewal of its plan, upgrade or a new plan. */
+	private function payKind($plan, $cur)
+	{
+		return ($cur && (int) $cur['id'] === (int) $plan['id']) ? 'renewal' : (($cur && (int) $plan['sort'] > (int) $cur['sort']) ? 'upgrade' : 'new');
+	}
+
+	/** My plan (Ajax): the price of a plan with the discount and the coupon code typed in the payment popup. */
+	public function pjActionCheckPromo()
+	{
+		$this->setAjax(true);
+		if (!$this->requireCompanyLogin()) { exit; }
+		$cid = $this->getCompanyId();
+		$plan = pjEntitlement::plan($this->_get->toInt('plan_id'));
+		if (!$plan || $plan['status'] !== 'T' || (int) $plan['is_public'] !== 1 || !pjEntitlement::isPurchasable($plan))
+		{
+			self::jsonResponse(array('status' => 'ERR', 'text' => __('subErrPlan', true)));
+		}
+		$state = pjEntitlement::state($cid);
+		$q = pjSubscriptionPromos::quote($plan, $this->payKind($plan, $state['plan']), $cid, $this->_get->toString('code'));
+		$money = function ($v) use ($plan) { return number_format((float) $v, 2) . ' ' . $plan['currency']; };
+		self::jsonResponse(array(
+			'status' => $q['error'] === '' ? 'OK' : 'ERR',
+			'text' => $q['error'] !== '' ? __($q['error'], true) : ($q['coupon_code'] !== '' ? __('sub_coupon_ok', true) : ''),
+			'list' => $money($q['list']),
+			'discount' => $q['discount'] > 0 ? '- ' . $money($q['discount']) : '',
+			'amount' => $money($q['amount']),
+		));
 	}
 
 	/** Company's own pending payment: gateway form, or bank / cash instructions. */

@@ -68,6 +68,7 @@ $name = function ($s) use ($ai) { return isset($ai['services'][$s]) ? $ai['servi
 				</div>
 			</div>
 
+			<style>.ai-key-masked{-webkit-text-security:disc;text-security:disc}</style>
 			<?php foreach ($ai['services'] as $s => $info):
 				// Models shown: last list loaded from the service + custom ones + the current model
 				$models = $info['loaded'];
@@ -79,8 +80,13 @@ $name = function ($s) use ($ai) { return isset($ai['services'][$s]) ? $ai['servi
 				<div class="row">
 					<div class="col-md-6 form-group">
 						<label><?php __('ai_api_key'); ?></label>
-						<input class="form-control ai-key" type="text" name="key_<?php echo $s; ?>" value="" autocomplete="off" spellcheck="false"
-							placeholder="<?php echo $info['has_key'] ? pjSanitize::html(sprintf(__('ai_key_placeholder_saved', true), $info['key_hint'])) : pjSanitize::html(__('ai_key_placeholder', true)); ?>">
+						<div class="input-group">
+							<input class="form-control ai-key ai-key-masked" type="text" name="key_<?php echo $s; ?>" value="<?php echo pjSanitize::html($info['key']); ?>" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore
+								placeholder="<?php echo pjSanitize::html(__('ai_key_placeholder', true)); ?>">
+							<span class="input-group-btn">
+								<button type="button" class="btn btn-default ai-key-toggle" title="Show / hide the key" aria-label="Show the key" aria-pressed="false"><i class="fa fa-eye"></i></button>
+							</span>
+						</div>
 						<p class="text-muted small m-t-xs">
 							<?php if ($info['has_key']): ?>
 								<span class="text-success"><i class="fa fa-check"></i> <?php echo pjSanitize::html(sprintf(__('ai_key_saved_masked', true), $info['key_hint'])); ?></span>

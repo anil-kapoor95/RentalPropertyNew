@@ -620,16 +620,28 @@ class pjEntitlement
 		return true;
 	}
 
-	/** New pending transaction (amount always from the plan, never from the request). */
-	public static function createTransaction($company_id, $plan, $kind, $provider, $user_id)
+	/**
+	 * New pending transaction. The amount comes from the plan, never from the request; $quote
+	 * (pjSubscriptionPromos::quote, worked out on the server) takes the discount / coupon off.
+	 */
+	public static function createTransaction($company_id, $plan, $kind, $provider, $user_id, $quote = null)
 	{
 		$uuid = bin2hex(function_exists('random_bytes') ? random_bytes(16) : md5(uniqid(mt_rand(), true), true));
-		$id = pjBillingTransactionModel::factory()->setAttributes(array(
+		$data = array(
 			'uuid' => $uuid, 'company_id' => (int) $company_id, 'plan_id' => (int) $plan['id'], 'kind' => $kind,
 			'amount' => number_format((float) $plan['price'], 2, '.', ''), 'currency' => $plan['currency'],
 			'status' => 'pending', 'provider' => $provider, 'created_by' => $user_id ? (int) $user_id : ':NULL',
 			'created' => date('Y-m-d H:i:s'),
-		))->insert()->getInsertId();
+		);
+		if (!empty($quote) && !empty($quote['promo_ids']))
+		{
+			$data['amount'] = number_format((float) $quote['amount'], 2, '.', '');
+			$data['list_amount'] = number_format((float) $quote['list'], 2, '.', '');
+			$data['discount_amount'] = number_format((float) $quote['discount'], 2, '.', '');
+			$data['promo_ids'] = implode(',', $quote['promo_ids']);
+			$data['coupon_code'] = $quote['coupon_code'] !== '' ? $quote['coupon_code'] : ':NULL';
+		}
+		$id = pjBillingTransactionModel::factory()->setAttributes($data)->insert()->getInsertId();
 		return ($id !== false && (int) $id > 0) ? pjBillingTransactionModel::factory()->find($id)->getData() : false;
 	}
 

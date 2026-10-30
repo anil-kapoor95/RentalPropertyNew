@@ -44,6 +44,10 @@ class pjSubscriptionBilling
 		{
 			return __('sub_provider_manual', true);
 		}
+		if ($method === 'promo')
+		{
+			return __('sub_provider_promo', true);
+		}
 		return is_array($names) && !empty($names[$method]) ? $names[$method] : ucfirst(str_replace('_', ' ', (string) $method));
 	}
 
@@ -115,7 +119,7 @@ class pjSubscriptionBilling
 	 * Duplicate prevention: an open payment of the same company / plan / kind / method is reused
 	 * (online: from the last 30 minutes; bank / cash: while it is still open).
 	 */
-	public static function checkout($company, $plan, $kind, $method, $user_id)
+	public static function checkout($company, $plan, $kind, $method, $user_id, $quote = null)
 	{
 		if (!pjEntitlement::isPurchasable($plan))
 		{
@@ -139,11 +143,13 @@ class pjSubscriptionBilling
 			$m->where('t1.created >', date('Y-m-d H:i:s', time() - 1800));
 		}
 		$open = $m->orderBy('t1.id DESC')->limit(1)->findAll()->getDataIndex(0);
-		if (!empty($open) && round((float) $open['amount'], 2) === round((float) $plan['price'], 2))
+		$amount = $quote ? (float) $quote['amount'] : (float) $plan['price'];
+		$coupon = $quote ? (string) $quote['coupon_code'] : '';
+		if (!empty($open) && round((float) $open['amount'], 2) === round($amount, 2) && (string) $open['coupon_code'] === $coupon)
 		{
 			return array('txn' => $open);
 		}
-		$txn = pjEntitlement::createTransaction($company['id'], $plan, $kind, $method, $user_id);
+		$txn = pjEntitlement::createTransaction($company['id'], $plan, $kind, $method, $user_id, $quote);
 		if (!$txn)
 		{
 			return array('error' => 'subErrCheckout');

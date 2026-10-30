@@ -57,13 +57,51 @@
 			});
 		}
 
+		/* ---- Subscriptions > Coupons & Discounts: the currency only matters for a fixed amount ---- */
+		var $promoType = $('#subPromoType');
+		if ($promoType.length) {
+			$promoType.on('change', function () {
+				$('.subPromoCurrency').toggle(this.value === 'amount');
+			}).trigger('change');
+		}
+
 		/* ---- My plan: choose the payment method in a popup ---- */
 		var $pay = $('#subPayModal');
 		if ($pay.length) {
+			var $frm = $('#frmSubPay'),
+				checkUrl = ($frm.attr('data-check') || '').replace(/&amp;/g, '&');
+			// price with the discount and the coupon (worked out on the server; the payment uses the same rules)
+			var quote = function (code) {
+				var $msg = $frm.find('.subCouponMsg').text('').removeClass('text-danger text-success');
+				$.getJSON(checkUrl, {plan_id: $frm.find('input[name="plan_id"]').val(), code: code}).done(function (data) {
+					if (!data) { return; }
+					if (data.list) {
+						$frm.find('.subQuoteList').text(data.list);
+						$frm.find('.subQuoteDiscount').text(data.discount || '');
+						$frm.find('.subQuoteDiscountRow').toggle(!!data.discount);
+						$frm.find('.subQuoteAmount').text(data.amount);
+					}
+					if (data.text) {
+						$msg.text(data.text).addClass(data.status === 'OK' ? 'text-success' : 'text-danger');
+					}
+				});
+			};
 			$doc.on('click', '.subPayBtn', function (e) {
 				e.preventDefault();
-				$('#frmSubPay').find('input[name="plan_id"]').val($(this).attr('data-plan'));
+				$frm.find('input[name="plan_id"]').val($(this).attr('data-plan'));
+				$frm.find('input[name="coupon_code"]').val('');
+				var name = $.trim($(this).closest('.sub-plan').find('h3').first().text());
+				if (name) { $pay.find('.modal-title').text(name); }
+				quote('');
 				$pay.modal('show');
+			}).on('click', '#frmSubPay .subCouponApply', function (e) {
+				e.preventDefault();
+				quote($.trim($frm.find('input[name="coupon_code"]').val()));
+			}).on('keydown', '#frmSubPay input[name="coupon_code"]', function (e) {
+				if (e.which === 13) {
+					e.preventDefault();
+					quote($.trim($(this).val()));
+				}
 			});
 			$doc.on('submit', '#frmSubPay', function () {
 				$(this).find('button[type="submit"]').prop('disabled', true);

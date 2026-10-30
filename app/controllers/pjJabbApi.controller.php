@@ -209,6 +209,15 @@ class pjJabbApi extends pjAppController
 		return $remote;
 	}
 
+	/** Address of the sign-up website that made the call (api.php sends it only for an allowed origin), or ''. */
+	private function signupSiteUrl()
+	{
+		$remote = isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : '';
+		$local = array('127.0.0.1', '::1', isset($_SERVER['SERVER_ADDR']) ? (string) $_SERVER['SERVER_ADDR'] : '');
+		$url = $this->param('api_site_url');
+		return in_array($remote, $local, true) && preg_match('~^https?://[^\s/]+$~i', $url) ? $url : '';
+	}
+
 	/** Folder of the throttle counters: app/web/upload/api_throttle (web access denied), else the system temp folder. */
 	private static function throttleDir()
 	{
@@ -738,8 +747,13 @@ class pjJabbApi extends pjAppController
 			'tones' => array_keys(self::$tones),
 			// currency of the prices (Options of the account); the price itself is property.price
 			'currency' => self::accountCurrency(!empty($signup['company_id']) ? (int) $signup['company_id'] : 0),
+			// System options > Price format and currency position (for showing prices like the back office)
+			'price_format' => self::priceFormat(!empty($signup['company_id']) ? (int) $signup['company_id'] : 0),
+			'currency_sign' => self::currencySign(self::accountCurrency(!empty($signup['company_id']) ? (int) $signup['company_id'] : 0)),
 			'theme' => $theme,
-			'ai_available' => pjAi::isConfigured(),
+			// AI writing: configured (Options > AI settings) and included in the company's plan
+			'ai_available' => pjAi::isConfigured() && self::aiAllowed(!empty($signup['company_id']) ? (int) $signup['company_id'] : 0),
+			'ai_locked'    => pjAi::isConfigured() && !self::aiAllowed(!empty($signup['company_id']) ? (int) $signup['company_id'] : 0),
 			'ai_generations_left' => max(0, self::MAX_AI_GENERATIONS - (int) (isset($signup['ai_generations']) ? $signup['ai_generations'] : 0)),
 		);
 		if ($signup['status'] === 'completed')
@@ -921,7 +935,7 @@ class pjJabbApi extends pjAppController
 		$this->requirePost();
 		$this->requireSignupTable();
 
-		// Editing step 1 of an existing sign-up
+		// Step 1 is done once: an existing sign-up can't change its account details here.
 		if ($this->param('signup_token') !== '')
 		{
 			$signup = $this->signupFromToken();
@@ -929,27 +943,7 @@ class pjJabbApi extends pjAppController
 			{
 				$this->respond(409, 'Registration is already completed. Please log in.', $this->signupState($signup));
 			}
-			list($errors, $acc) = $this->validateAccount((int) $signup['user_id']);
-			if (empty($errors['email']) && $this->findUserByEmail($acc['email'], (int) $signup['user_id']))
-			{
-				$errors['email'] = 'Email already exists';
-			}
-			if (!empty($errors))
-			{
-				$this->respond(422, 'Validation failed', array(), $errors);
-			}
-			$data = array('name' => $acc['name'], 'email' => $acc['email'], 'phone' => $acc['phone']);
-			if ($acc['password'] !== '')
-			{
-				$data['password'] = $acc['password'];
-				$data['pswd_modified'] = ':NOW()';
-			}
-			pjAuthUserModel::factory()->set('id', (int) $signup['user_id'])->modify($data);
-			pjCompanySignupModel::factory()->set('id', (int) $signup['id'])->modify(array(
-				'step' => max(1, (int) $signup['step']),
-				'modified' => date('Y-m-d H:i:s'),
-			));
-			$this->respond(200, 'Account details saved.', $this->signupState($signup));
+			$this->respond(409, 'Your account is already created. Please continue with the next step.', $this->signupState($signup));
 		}
 
 		// Sign-up with Google: the e-mail is the verified Google one, the password is optional.
@@ -1031,8 +1025,237 @@ class pjJabbApi extends pjAppController
 		}
 
 		$token = $this->issueToken((int) $signup_id);
-		$this->respond(200, 'Account created. Please continue with your company details.',
+		// Options > Sign-up emails: welcome email to the host, "new sign-up" email to the administrator
+		pjSignupMail::accountCreated(array('name' => $acc['name'], 'email' => $acc['email'], 'phone' => $acc['phone']), $this->signupSiteUrl());
+		$this->respond(200, 'Account created. Please continue with your property details.',
 			array_merge(array('signup_token' => $token, 'resumed' => false), $this->signupState(array('id' => $signup_id))));
+	}
+
+	/* ------------------------------------------------------------------
+	 * Currencies and price format (System options in the back office)
+	 * ------------------------------------------------------------------ */
+
+	/** Currency codes offered in System options > Currency (the admin's list), in its order. */
+	private static function currencyCodes()
+	{
+		$row = pjBaseOptionModel::factory()->where('t1.foreign_id', 1)->where('t1.key', 'o_currency')->limit(1)->findAll()->getDataIndex(0);
+		if (empty($row))
+		{
+			return array();
+		}
+		list($list) = explode('::', (string) $row['value'] . '::');
+		return array_values(array_unique(array_filter(array_map('trim', explode('|', $list)), function ($c) { return (bool) preg_match('/^[A-Z]{3}$/', $c); })));
+	}
+
+	/** Currency of the company's prices (its System options), or of the whole system. */
+	private static function companyCurrency($company_id)
+	{
+		$pairs = pjCompanyContext::basePairs((int) $company_id);
+		return !empty($pairs['o_currency']) ? (string) $pairs['o_currency'] : 'USD';
+	}
+
+	/**
+	 * Sets the currency of the company's prices (its System options > Currency), keeping the admin's list.
+	 * Returns false when the company has no own currency setting.
+	 */
+	private static function saveCompanyCurrency($company_id, $code)
+	{
+		$fid = pjCompanyContext::optionsForeignId((int) $company_id);
+		$m = pjBaseOptionModel::factory();
+		$row = $m->where('t1.foreign_id', $fid)->where('t1.key', 'o_currency')->limit(1)->findAll()->getDataIndex(0);
+		if (empty($row))
+		{
+			return false;
+		}
+		list($list) = explode('::', (string) $row['value'] . '::');
+		$m->reset()->where('foreign_id', $fid)->where('`key`', 'o_currency')->limit(1)->modifyAll(array('value' => $list . '::' . $code));
+		return true;
+	}
+
+	/** Sign of a currency (Currencies data in the back office), or its code. */
+	private static function currencySign($code)
+	{
+		$row = pjBaseCurrencyDataModel::factory()->where('t1.code', (string) $code)->limit(1)->findAll()->getDataIndex(0);
+		$sign = !empty($row['sign']) ? trim(html_entity_decode((string) $row['sign'], ENT_QUOTES, 'UTF-8')) : '';
+		return $sign !== '' ? $sign : (string) $code;
+	}
+
+	/** Price format for the front end: System options > Price format (1-6) and currency position. */
+	private static function priceFormat($company_id)
+	{
+		$pairs = pjCompanyContext::basePairs((int) $company_id);
+		$format = isset($pairs['o_price_format']) ? (int) $pairs['o_price_format'] : 4;
+		return array(
+			'price_format'   => $format >= 1 && $format <= 6 ? $format : 4,
+			'currency_place' => isset($pairs['o_currency_place']) && $pairs['o_currency_place'] === 'front' ? 'front' : 'back',
+		);
+	}
+
+	/**
+	 * Currencies for the price field (System options > Currency) with their signs, the account's
+	 * currency and the price format. signup_token optional (then the company's own settings).
+	 * Data: currencies[] {code, sign}, default, price_format (1-6), currency_place (front|back)
+	 */
+	public function pjActionGetCurrencies()
+	{
+		$this->setAjax(true);
+		$company_id = 0;
+		if ($this->param('signup_token') !== '')
+		{
+			$this->requireSignupTable();
+			$signup = $this->signupFromToken();
+			$company_id = (int) $signup['company_id'];
+		}
+		$signs = pjBaseCurrencyDataModel::factory()->findAll()->getDataPair('code', 'sign');
+		$currencies = array();
+		foreach (self::currencyCodes() as $code)
+		{
+			$sign = isset($signs[$code]) ? trim(html_entity_decode((string) $signs[$code], ENT_QUOTES, 'UTF-8')) : '';
+			$currencies[] = array('code' => $code, 'sign' => $sign !== '' ? $sign : $code);
+		}
+		$this->respond(200, 'OK', array_merge(array(
+			'currencies' => $currencies,
+			'default'    => self::companyCurrency($company_id),
+		), self::priceFormat($company_id)));
+	}
+
+	/* ------------------------------------------------------------------
+	 * Property names (unique)
+	 * ------------------------------------------------------------------ */
+
+	/** "  Green   CASA " / "Green &amp; Casa" -> "green casa" / "green & casa": names compared this way. */
+	private static function propertyNameKey($name)
+	{
+		$name = html_entity_decode(strip_tags((string) $name), ENT_QUOTES, 'UTF-8');
+		$name = trim(preg_replace('/\s+/u', ' ', $name));
+		return function_exists('mb_strtolower') ? mb_strtolower($name, 'UTF-8') : strtolower($name);
+	}
+
+	/**
+	 * Another property (any account, any language) already has this name. Compared without
+	 * case, extra spaces or HTML entities, so "Green Casa", "green  casa" and "GREEN CASA" are the same.
+	 */
+	private static function propertyNameTaken($name, $except_calendar_id = 0)
+	{
+		$key = self::propertyNameKey($name);
+		if ($key === '')
+		{
+			return false;
+		}
+		$rows = pjMultiLangModel::factory()
+			->select('t1.foreign_id, t1.content')
+			->where('t1.model', 'pjCalendar')
+			->where('t1.field', 'name')
+			->where('t1.foreign_id !=', (int) $except_calendar_id)
+			->findAll()
+			->getData();
+		$ids = array();
+		foreach ($rows as $row)
+		{
+			if (self::propertyNameKey($row['content']) === $key)
+			{
+				$ids[(int) $row['foreign_id']] = true;
+			}
+		}
+		if (empty($ids))
+		{
+			return false;
+		}
+		// Only properties that still exist count.
+		return (int) pjCalendarModel::factory()->whereIn('t1.id', array_keys($ids))->findCount()->getData() > 0;
+	}
+
+	/** Another company (any account) already has this name (compared like property names). */
+	private static function companyNameTaken($name, $except_company_id = 0)
+	{
+		$key = self::propertyNameKey($name);
+		if ($key === '')
+		{
+			return false;
+		}
+		$rows = pjCompanyModel::factory()
+			->select('t1.id, t1.name')
+			->where('t1.id !=', (int) $except_company_id)
+			->findAll()
+			->getData();
+		foreach ($rows as $row)
+		{
+			if (self::propertyNameKey($row['name']) === $key)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** $name, or "$name 2", "$name 3"… when another company has it (placeholder names stay unique too). */
+	private static function uniqueCompanyName($name, $except_company_id = 0)
+	{
+		$name = self::cut(trim($name) !== '' ? trim($name) : 'My company', 240);
+		$try = $name;
+		for ($n = 2; $n < 1000 && self::companyNameTaken($try, $except_company_id); $n++)
+		{
+			$try = $name . ' ' . $n;
+		}
+		return $try;
+	}
+
+	/** Live check of the company name. name (+ signup_token: the sign-up's own company doesn't count) */
+	public function pjActionCheckCompanyName()
+	{
+		$this->setAjax(true);
+		$this->requirePost();
+		$name = trim(preg_replace('/\s+/u', ' ', $this->param('name')));
+		if ($name === '')
+		{
+			$this->respond(422, 'Validation failed', array(), array('name' => 'Company name is required'));
+		}
+		$except = 0;
+		if ($this->param('signup_token') !== '')
+		{
+			$this->requireSignupTable();
+			$signup = $this->signupFromToken();
+			$except = (int) $signup['company_id'];
+		}
+		if (self::companyNameTaken($name, $except))
+		{
+			$this->respond(422, 'Company name is taken', array('available' => false), array('name' => 'This company name is already taken. Please choose another name.'));
+		}
+		$this->respond(200, 'Company name is available', array('available' => true));
+	}
+
+	/** Live check of the property name. name (+ signup_token: the sign-up's own property doesn't count) */
+	public function pjActionCheckPropertyName()
+	{
+		$this->setAjax(true);
+		$this->requirePost();
+		$name = trim(preg_replace('/\s+/u', ' ', $this->param('name')));
+		if ($name === '')
+		{
+			$this->respond(422, 'Validation failed', array(), array('name' => 'Property name is required'));
+		}
+		$except = 0;
+		if ($this->param('signup_token') !== '')
+		{
+			$this->requireSignupTable();
+			$signup = $this->signupFromToken();
+			$except = (int) $signup['calendar_id'];
+		}
+		if (self::propertyNameTaken($name, $except))
+		{
+			$this->respond(422, 'Property name is taken', array('available' => false), array('name' => 'This property name is already taken. Please choose another name.'));
+		}
+		$this->respond(200, 'Property name is available', array('available' => true));
+	}
+
+	/* ------------------------------------------------------------------
+	 * AI writing
+	 * ------------------------------------------------------------------ */
+
+	/** AI writing is open to every sign-up (no plan needed); this is the one place to gate it again later. */
+	private static function aiAllowed($company_id)
+	{
+		return true;
 	}
 
 	/* ------------------------------------------------------------------
@@ -1258,7 +1481,7 @@ class pjJabbApi extends pjAppController
 			);
 		}
 		$new = array(
-			'name'       => self::cut($v['name'], 255),
+			'name'       => self::uniqueCompanyName($v['name'], (int) $company_id),
 			'address_1'  => self::cut($v['address_1'], 255),
 			'city'       => self::cut($v['city'], 100),
 			'state'      => self::cut($v['state'], 100),
@@ -1353,6 +1576,11 @@ class pjJabbApi extends pjAppController
 			{
 				$errors[$key] = sprintf('Maximum %u characters allowed', $max);
 			}
+		}
+		$data['name'] = trim(preg_replace('/\s+/u', ' ', $data['name']));
+		if (!isset($errors['name']) && self::companyNameTaken($data['name'], (int) $signup['company_id']))
+		{
+			$errors['name'] = 'This company name is already taken. Please choose another name.';
 		}
 		if (!isset($errors['company_email']) && !pjValidation::pjActionEmail($data['email']))
 		{
@@ -1449,6 +1677,9 @@ class pjJabbApi extends pjAppController
 		$bathrooms = $this->param('bathrooms');
 		// Price per night (optional): saved as the default price of the property (Properties > Prices)
 		$price = str_replace(array(' ', ','), '', $this->param('price'));
+		// Currency of the prices (optional): one of System options > Currency; saved as the account's currency
+		$currency = strtoupper($this->param('currency'));
+		$v['name'] = trim(preg_replace('/\s+/u', ' ', $v['name']));
 
 		$errors = array();
 		foreach (array('name' => 'Property name', 'address_1' => 'Address', 'city' => 'City') as $f => $label)
@@ -1459,6 +1690,14 @@ class pjJabbApi extends pjAppController
 			} elseif (self::tooLong($v[$f], 255)) {
 				$errors[$f] = 'Maximum 255 characters allowed';
 			}
+		}
+		if (!isset($errors['name']) && self::propertyNameTaken($v['name'], (int) $signup['calendar_id']))
+		{
+			$errors['name'] = 'This property name is already taken. Please choose another name.';
+		}
+		if ($currency !== '' && !in_array($currency, self::currencyCodes(), true))
+		{
+			$errors['currency'] = 'Choose a currency from the list';
 		}
 		if (self::tooLong($v['state'], 100)) { $errors['state'] = 'Maximum 100 characters allowed'; }
 		if (self::tooLong($v['zip'], 20)) { $errors['zip'] = 'Maximum 20 characters allowed'; }
@@ -1528,7 +1767,7 @@ class pjJabbApi extends pjAppController
 		{
 			$user = $signup['user'];
 			$company_id = $this->createSignupCompany($user, array(
-				'name'           => self::cut($v['name'], 255),
+				'name'           => self::uniqueCompanyName($v['name']),
 				'contact_person' => (string) $user['name'] !== '' ? self::cut((string) $user['name'], 255) : ':NULL',
 				'email'          => (string) $user['email'] !== '' ? (string) $user['email'] : ':NULL',
 				'phone'          => (string) $user['phone'] !== '' ? self::cut((string) $user['phone'], 50) : ':NULL',
@@ -1618,6 +1857,10 @@ class pjJabbApi extends pjAppController
 		if ($amenities !== null)
 		{
 			self::saveAmenities($calendar_id, $company_id, $amenities);
+		}
+		if ($currency !== '' && $currency !== self::companyCurrency($company_id))
+		{
+			self::saveCompanyCurrency($company_id, $currency);
 		}
 		if ($max_guests !== '')
 		{
@@ -1876,6 +2119,10 @@ class pjJabbApi extends pjAppController
 		{
 			$this->respond(503, 'AI writing is not available at the moment. Please write the texts yourself.');
 		}
+		if (!self::aiAllowed((int) $signup['company_id']))
+		{
+			$this->respond(402, 'AI writing comes with the paid plans. Please write the texts yourself, or choose a plan.');
+		}
 		if ((int) $signup['ai_generations'] >= self::MAX_AI_GENERATIONS)
 		{
 			$this->respond(429, 'You have used all AI suggestions. Please edit the last text or write your own.');
@@ -1927,6 +2174,7 @@ class pjJabbApi extends pjAppController
 			$country = !empty($row) ? $row['content'] : '';
 		}
 		$company = pjCompanyModel::factory()->find($company_id)->getData();
+		$opt = self::calendarOptions($calendar['id'], $company_id);
 
 		$facts = array_filter(array(
 			'Property name' => isset($t['name']) ? $t['name'] : '',
@@ -1934,6 +2182,7 @@ class pjJabbApi extends pjAppController
 			'Property type' => isset($t['property_type']) && in_array($t['property_type'], self::$propertyTypes, true) ? $t['property_type'] : '',
 			'Bedrooms' => $calendar['bedrooms'],
 			'Bathrooms' => $calendar['bathrooms'],
+			'Maximum guests' => (int) (isset($opt['o_max_people']) ? $opt['o_max_people'] : 0) > 0 ? (int) $opt['o_max_people'] : '',
 			'Amenities' => implode(', ', array_slice(self::propertyAmenities($calendar['id'], $company_id), 0, 40)),
 			'Host' => !empty($company['name']) ? $company['name'] : '',
 			'Owner notes' => $highlights,
@@ -1943,11 +2192,18 @@ class pjJabbApi extends pjAppController
 		{
 			$lines[] = '- ' . $k . ': ' . str_replace(array("\r", "\n"), ' ', (string) $val);
 		}
+		// What guests ask about, answered from this property's own amenities ("not listed" when it has none).
+		$topics = self::faqTopics(self::propertyAmenities($calendar['id'], $company_id));
+		$topic_lines = array();
+		foreach ($topics as $topic => $answer)
+		{
+			$topic_lines[] = '- ' . $topic . ': ' . $answer;
+		}
 
 		$keys = array(
 			'headline'    => '"headline": the page headline, one line, 4 to 10 words, at most 70 characters, no quotes, no full stop at the end.',
 			'description' => '"description": 100 to 160 words in 2 or 3 short paragraphs separated by a blank line (\n\n). Plain text.',
-			'faqs'        => '"faqs": an array of exactly 4 objects {"question": "...", "answer": "..."} with questions guests often ask before booking a place like this (check-in, guests, parking, things nearby...). Answers: 1 or 2 short sentences, based only on the facts; when the facts do not say, answer that guests can ask the host before booking.',
+			'faqs'        => '"faqs": an array of 4 to 6 objects {"question": "...", "answer": "..."} (fewer when the property has few amenities; never the same topic twice): questions guests ask before booking THIS property, answered from the facts and the guest topics below. Cover: how many bedrooms and bathrooms, how many guests can stay, parking, pets, then up to two other amenities this property HAS (from the Amenities fact or a guest topic marked yes, e.g. its pool, Wi-Fi or barbeque grill); never ask about an amenity it does not have. Answers: 1 or 2 short sentences with the real numbers and amenity names. When parking or pets is "not listed", say it is not listed for this property and guests can ask the host before booking; never answer yes for it. Do not ask about check-in times, prices, distances or places nearby.',
 		);
 		$wanted = $field === 'all' ? array_keys($keys) : array($field);
 		$spec = array();
@@ -1960,6 +2216,7 @@ class pjJabbApi extends pjAppController
 			. "TONE: " . self::$tones[$tone] . "\n"
 			. "Use only the facts below. Do not invent amenities, distances, ratings, awards or prices. No emojis, no markdown.\n"
 			. "Facts:\n" . implode("\n", $lines) . "\n"
+			. (in_array('faqs', $wanted, true) ? "Guest topics (from the property's amenity list):\n" . implode("\n", $topic_lines) . "\n" : '')
 			. ($field !== 'all' && $current !== '' ? "Write a new version that is clearly different from the current one:\n" . $current . "\n" : '')
 			. "Answer with one JSON object only (no code fence, no text before or after) with " . (count($wanted) > 1 ? 'these keys' : 'this key') . ":\n"
 			. implode("\n", $spec) . "\n";
@@ -1982,6 +2239,41 @@ class pjJabbApi extends pjAppController
 		$out['tone'] = $tone;
 		$out['ai_generations_left'] = max(0, self::MAX_AI_GENERATIONS - (int) $signup['ai_generations'] - 1);
 		$this->respond(200, 'Text generated. Check it and edit it before you publish.', $out);
+	}
+
+	/**
+	 * Guest questions topics for the FAQ prompt: each topic -> the matching amenities of the property,
+	 * or "not listed" (the AI must then not say yes).
+	 */
+	private static function faqTopics($amenities)
+	{
+		$rules = array(
+			'Parking'           => '/parking|garage/i',
+			'Pets'              => '/\\bpets?\\b|pet[- ]friendly|dogs?\\b/i',
+			'Wi-Fi'             => '/wi-?fi|internet|broadband/i',
+			'Kitchen'           => '/kitchen|cooking/i',
+			'Air conditioning'  => '/air[- ]?condition|\\ba\\/?c\\b/i',
+			'Swimming pool'     => '/pool/i',
+			'Workspace'         => '/workspace|work space|desk/i',
+			'Laundry'           => '/washing|laundry|washer|dryer/i',
+			'Housekeeping'      => '/housekeep|cleaning/i',
+			'Meals / chef'      => '/breakfast|chef|meal|cook on request/i',
+			'Power backup'      => '/power backup|inverter|generator/i',
+		);
+		$out = array();
+		foreach ($rules as $topic => $re)
+		{
+			$hit = array();
+			foreach ((array) $amenities as $name)
+			{
+				if (preg_match($re, (string) $name))
+				{
+					$hit[] = (string) $name;
+				}
+			}
+			$out[$topic] = empty($hit) ? 'not listed' : 'yes (' . implode(', ', $hit) . ')';
+		}
+		return $out;
 	}
 
 	/** Plain text from an AI answer (no markdown markers). */
@@ -2217,6 +2509,151 @@ class pjJabbApi extends pjAppController
 		$this->respond(200, 'OK', array('themes' => $themes, 'default_id' => $free_id, 'free_id' => $free_id, 'allowed' => $allowed));
 	}
 
+	/* ------------------------------------------------------------------
+	 * Guest page of a published property (localhost:3000/property/<slug>)
+	 * ------------------------------------------------------------------ */
+
+	/** "Green Casa, Goa!" -> "green-casa-goa" (same rule as slugify() of the website). */
+	private static function slugOf($name)
+	{
+		$s = html_entity_decode((string) $name, ENT_QUOTES, 'UTF-8');
+		$s = function_exists('mb_strtolower') ? mb_strtolower($s, 'UTF-8') : strtolower($s);
+		if (function_exists('iconv'))
+		{
+			$t = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $s);
+			if ($t !== false)
+			{
+				$s = strtolower($t);
+			}
+		}
+		$s = trim(preg_replace('/[^a-z0-9]+/', '-', $s), '-');
+		return substr($s, 0, 60);
+	}
+
+	/** Name of a country in English (the website is in English), '' when unknown. */
+	private static function countryNameEn($country_id, $company_id)
+	{
+		if ((int) $country_id <= 0)
+		{
+			return '';
+		}
+		$en = pjBaseLocaleModel::factory()->unscoped()->where('t1.language_iso LIKE', 'en%')->limit(1)->findAll()->getDataIndex(0);
+		$lid = !empty($en) ? (int) $en['id'] : pjCompanyContext::companyDefaultLocale((int) $company_id);
+		$row = pjMultiLangModel::factory()->where('t1.model', 'pjBaseCountry')->where('t1.foreign_id', (int) $country_id)
+			->where('t1.field', 'name')->where('t1.locale', $lid > 0 ? $lid : 1)->limit(1)->findAll()->getDataIndex(0);
+		return !empty($row) ? (string) $row['content'] : '';
+	}
+
+	/**
+	 * Public page data of a property made with the sign-up, once the sign-up is completed (published).
+	 *   slug (from the property name)
+	 * Data: slug, name, property_type, headline, description, faqs[], location {city, state, country, lat, lng},
+	 *   bedrooms, bathrooms, max_guests, amenities[], price, price_varies, price_based_on (nights|days), currency,
+	 *   currency_sign, price_format, photos[] {url, thumb_url}, host {name, logo, phone, email},
+	 *   theme {id, name, colors{brand, accent, text, background, price, page_background}} | null,
+	 *   booked[] {from, to} (next 12 months, "to" = check-out day), booking_url
+	 */
+	public function pjActionGetPropertyPage()
+	{
+		$this->setAjax(true);
+		$this->requireSignupTable();
+		$slug = strtolower($this->param('slug'));
+		if ($slug === '' || !preg_match('/^[a-z0-9-]{1,60}$/', $slug))
+		{
+			$this->respond(404, 'Page not found.');
+		}
+		$found = null;
+		foreach (pjCompanySignupModel::factory()->where('t1.status', 'completed')->where('t1.calendar_id IS NOT NULL')->findAll()->getData() as $s)
+		{
+			$t = self::propertyTexts((int) $s['calendar_id'], (int) $s['company_id']);
+			if (isset($t['name']) && self::slugOf($t['name']) === $slug)
+			{
+				$found = array($s, $t);
+				break;
+			}
+		}
+		if ($found === null)
+		{
+			$this->respond(404, 'Page not found.');
+		}
+		list($signup, $t) = $found;
+		$company_id = (int) $signup['company_id'];
+		$cal = pjCalendarModel::factory()->find((int) $signup['calendar_id'])->getData();
+		$company = pjCompanyModel::factory()->find($company_id)->getData();
+		if (empty($cal) || (isset($cal['status']) && $cal['status'] === 'F') || empty($company) || (isset($company['status']) && $company['status'] !== 'T'))
+		{
+			$this->respond(404, 'Page not found.');
+		}
+		$opt = self::calendarOptions($cal['id'], $company_id);
+		$price = self::propertyPrice($cal['id'], $company_id);
+
+		// theme chosen on step 6
+		$theme = null;
+		$copt = pjCompanyOptionModel::factory()->getPairs($company_id);
+		$palette_id = isset($copt['o_color_palette']) ? (string) $copt['o_color_palette'] : '';
+		foreach (pjColorHelper::getPalettes() as $id => $p)
+		{
+			if ((string) $id === $palette_id)
+			{
+				$theme = array('id' => (string) $id, 'name' => $p['name'],
+					'colors' => array('brand' => $p['brand'], 'accent' => $p['accent'], 'text' => $p['text'],
+						'background' => $p['bg'], 'price' => $p['price'], 'page_background' => $p['pageBg']));
+				break;
+			}
+		}
+
+		// nights already taken (bookings and imported calendars), next 12 months
+		$booked = array();
+		$rows = pjReservationModel::factory()
+			->where('t1.calendar_id', (int) $cal['id'])
+			->whereIn('t1.status', array('Confirmed', 'Pending'))
+			->where('t1.date_to >=', date('Y-m-d'))
+			->where('t1.date_from <=', date('Y-m-d', strtotime('+12 months')))
+			->orderBy('t1.date_from ASC')->findAll()->getData();
+		foreach ($rows as $r)
+		{
+			$booked[] = array('from' => $r['date_from'], 'to' => $r['date_to']);
+		}
+
+		$host_phone = !empty($company['phone']) ? (string) $company['phone'] : '';
+		$out = array(
+			'slug'          => $slug,
+			'name'          => (string) $t['name'],
+			'property_type' => isset($t['property_type']) && in_array($t['property_type'], self::$propertyTypes, true) ? $t['property_type'] : null,
+			'headline'      => isset($t['headline']) && $t['headline'] !== '' ? (string) $t['headline'] : null,
+			'description'   => isset($t['description']) && $t['description'] !== '' ? self::htmlToText($t['description']) : null,
+			'faqs'          => isset($t['faqs']) ? self::decodeFaqs($t['faqs']) : array(),
+			'location'      => array(
+				'city'    => isset($t['address_city']) ? (string) $t['address_city'] : '',
+				'state'   => (string) $cal['address_state'],
+				'country' => self::countryNameEn($cal['address_country'], $company_id),
+				'lat'     => isset($cal['lat']) && is_numeric($cal['lat']) && (float) $cal['lat'] != 0 ? (float) $cal['lat'] : null,
+				'lng'     => isset($cal['lng']) && is_numeric($cal['lng']) && (float) $cal['lng'] != 0 ? (float) $cal['lng'] : null,
+			),
+			'bedrooms'      => $cal['bedrooms'] !== null && $cal['bedrooms'] !== '' ? (int) $cal['bedrooms'] : null,
+			'bathrooms'     => $cal['bathrooms'] !== null && $cal['bathrooms'] !== '' ? (int) $cal['bathrooms'] : null,
+			'max_guests'    => isset($opt['o_max_people']) && (int) $opt['o_max_people'] > 0 ? (int) $opt['o_max_people'] : null,
+			'amenities'     => self::propertyAmenities($cal['id'], $company_id),
+			'price'         => $price['price'],
+			'price_varies'  => $price['price_varies'],
+			'price_based_on'=> isset($opt['o_price_based_on']) && $opt['o_price_based_on'] === 'days' ? 'days' : 'nights',
+			'currency'      => $price['currency'],
+			'currency_sign' => self::currencySign($price['currency']),
+			'price_format'  => self::priceFormat($company_id),
+			'photos'        => array_map(function ($p) { return array('url' => $p['url'], 'thumb_url' => $p['thumb_url']); }, self::photoList($cal['id'])),
+			'host'          => array(
+				'name'  => (string) $company['name'],
+				'logo'  => !empty($company['logo']) ? PJ_INSTALL_URL . ltrim($company['logo'], '/') : null,
+				'phone' => $host_phone,
+				'email' => !empty($company['email']) ? (string) $company['email'] : '',
+			),
+			'theme'         => $theme,
+			'booked'        => $booked,
+			'booking_url'   => PJ_INSTALL_URL . 'preview.php?cid=' . (int) $cal['id'],
+		);
+		$this->respond(200, 'OK', $out);
+	}
+
 	/**
 	 * Plans hosts can buy (Subscriptions > Plans: active and public), for the upgrade dialog. signup_token optional:
 	 * then also the company's current plan and where to buy (Subscriptions > My plan in the dashboard).
@@ -2414,29 +2851,94 @@ class pjJabbApi extends pjAppController
 	 * ------------------------------------------------------------------ */
 
 	/**
-	 * Gateways the front end can connect: payment_method => plugin and key formats.
-	 * Saved in the same plugin_payment_options fields as Properties > Payments; card details never reach this API.
+	 * Payment methods the host sets up on the front end, in this order. Saved per property in the same
+	 * plugin_payment_options fields as the back office's Properties > Payments (test mode: test_<column>).
+	 *   tier    free: every plan; pro: plans with "Payment gateway choice" (feature payment_gateway_choice)
+	 *   fields  form field => column, secret (never sent back), optional, pattern, mode (pattern that captures
+	 *           live|test, checked against test mode), timezone (Authorize.Net time zone)
+	 * Card details never reach this API.
 	 */
 	private static $paymentGateways = array(
+		'paypal' => array(
+			'plugin' => 'pjPaypal', 'name' => 'PayPal', 'tier' => 'free',
+			'fields' => array(
+				'client_id' => array('column' => 'merchant_id', 'label' => 'PayPal client ID', 'pattern' => '/^[A-Za-z0-9_-]{20,128}$/'),
+				'secret'    => array('column' => 'private_key', 'label' => 'PayPal secret', 'secret' => true, 'pattern' => '/^[A-Za-z0-9_-]{20,128}$/'),
+			),
+		),
+		'authorize' => array(
+			'plugin' => 'pjAuthorize', 'name' => 'Authorize.Net', 'tier' => 'pro',
+			'fields' => array(
+				'login_id'        => array('column' => 'merchant_id', 'label' => 'API login ID', 'pattern' => '/^[A-Za-z0-9]{6,25}$/'),
+				'transaction_key' => array('column' => 'public_key', 'label' => 'transaction key', 'secret' => true, 'pattern' => '/^[A-Za-z0-9]{16}$/'),
+				'signature_key'   => array('column' => 'private_key', 'label' => 'signature key', 'secret' => true, 'optional' => true, 'pattern' => '/^[A-Fa-f0-9]{128}$/'),
+				'tz'              => array('column' => 'tz', 'label' => 'time zone', 'timezone' => true),
+			),
+		),
 		'razorpay' => array(
-			'plugin'  => 'pjRazorpay',
-			'name'    => 'Razorpay',
-			'public'  => '/^rzp_(live|test)_[A-Za-z0-9]{8,40}$/',
-			'secret'  => '/^[A-Za-z0-9]{16,64}$/',
-			'public_hint' => 'rzp_%s_',
+			'plugin' => 'pjRazorpay', 'name' => 'Razorpay', 'tier' => 'pro',
+			'fields' => array(
+				'key_id'     => array('column' => 'public_key', 'label' => 'Razorpay key ID', 'pattern' => '/^rzp_(live|test)_[A-Za-z0-9]{8,40}$/', 'mode' => '/^rzp_(live|test)_/', 'hint' => 'rzp_%s_'),
+				'key_secret' => array('column' => 'private_key', 'label' => 'Razorpay key secret', 'secret' => true, 'pattern' => '/^[A-Za-z0-9]{16,64}$/'),
+			),
 		),
 		'stripe' => array(
-			'plugin'  => 'pjStripe',
-			'name'    => 'Stripe',
-			'public'  => '/^pk_(live|test)_[A-Za-z0-9]{10,247}$/',
-			'secret'  => '/^(sk|rk)_(live|test)_[A-Za-z0-9]{10,247}$/',
-			'public_hint' => 'pk_%s_',
+			'plugin' => 'pjStripe', 'name' => 'Stripe', 'tier' => 'pro',
+			'fields' => array(
+				'public_key' => array('column' => 'public_key', 'label' => 'Stripe public key', 'pattern' => '/^pk_(live|test)_[A-Za-z0-9]{10,247}$/', 'mode' => '/^pk_(live|test)_/', 'hint' => 'pk_%s_'),
+				'secret_key' => array('column' => 'private_key', 'label' => 'Stripe secret key', 'secret' => true, 'pattern' => '/^(?:sk|rk)_(live|test)_[A-Za-z0-9]{10,247}$/', 'mode' => '/^(?:sk|rk)_(live|test)_/', 'hint' => 'sk_%s_'),
+			),
+		),
+		'cash' => array(
+			'plugin' => null, 'name' => 'Cash', 'tier' => 'free', 'offline' => true,
+			'fields' => array(),
 		),
 	);
 
-	/** Saved settings of one gateway for the API answer (secret keys are only reported as saved / not saved). */
-	private static function paymentMethodState($calendar_id, $payment_method)
+	/** Payment methods available on this system (plugin installed), in the order above. */
+	private static function availableGateways()
 	{
+		if (pjObject::getPlugin('pjPayments') === NULL || !class_exists('pjPaymentOptionModel'))
+		{
+			return array();
+		}
+		$out = array();
+		foreach (self::$paymentGateways as $method => $gateway)
+		{
+			if ($gateway['plugin'] === null || pjObject::getPlugin($gateway['plugin']) !== NULL)
+			{
+				$out[$method] = $gateway;
+			}
+		}
+		return $out;
+	}
+
+	/** May this company use the Pro payment gateways? (plan with "Payment gateway choice", administrators always) */
+	private static function proGatewaysAllowed($company_id)
+	{
+		if (!class_exists('pjEntitlement') || !pjEntitlement::isReady())
+		{
+			return true;
+		}
+		if ((int) $company_id <= 0)
+		{
+			return false;
+		}
+		$state = pjEntitlement::state((int) $company_id);
+		if ($state['source'] === 'admin')
+		{
+			return true;
+		}
+		return $state['source'] === 'plan' && $state['entitled'] && in_array('payment_gateway_choice', $state['features'], true);
+	}
+
+	/**
+	 * Saved settings of one payment method for the API answer: values of the public fields per mode,
+	 * and for secret fields only whether one is saved.
+	 */
+	private static function paymentMethodState($calendar_id, $payment_method, $pro_allowed)
+	{
+		$gateway = self::$paymentGateways[$payment_method];
 		$row = pjPaymentOptionModel::factory()->getOptions((int) $calendar_id, $payment_method);
 		$labels = pjMultiLangModel::factory()->getMultiLang((int) $calendar_id, 'pjPayment');
 		$label = '';
@@ -2448,21 +2950,38 @@ class pjJabbApi extends pjAppController
 				break;
 			}
 		}
+		$values = array('live' => array(), 'test' => array());
+		$saved = array('live' => array(), 'test' => array());
+		foreach ($gateway['fields'] as $field => $f)
+		{
+			foreach (array('live' => '', 'test' => 'test_') as $mode => $prefix)
+			{
+				$v = !empty($row[$prefix . $f['column']]) ? (string) $row[$prefix . $f['column']] : '';
+				if (!empty($f['secret']))
+				{
+					$saved[$mode][$field] = $v !== '';
+				} else {
+					$values[$mode][$field] = $v;
+				}
+			}
+		}
 		return array(
-			'payment_method'      => $payment_method,
-			'is_active'           => !empty($row) && (int) $row['is_active'] === 1,
-			'is_test_mode'        => !empty($row) && (int) $row['is_test_mode'] === 1,
-			'label'               => (string) $label,
-			'public_key'          => !empty($row['public_key']) ? $row['public_key'] : '',
-			'test_public_key'     => !empty($row['test_public_key']) ? $row['test_public_key'] : '',
-			'has_secret_key'      => !empty($row['private_key']),
-			'has_test_secret_key' => !empty($row['test_private_key']),
+			'payment_method' => $payment_method,
+			'name'           => $gateway['name'],
+			'tier'           => $gateway['tier'],
+			'offline'        => !empty($gateway['offline']),
+			'locked'         => $gateway['tier'] === 'pro' && !$pro_allowed,
+			'is_active'      => !empty($row) && (int) $row['is_active'] === 1,
+			'is_test_mode'   => !empty($row) && (int) $row['is_test_mode'] === 1,
+			'label'          => (string) $label,
+			'values'         => $values,
+			'saved_secrets'  => $saved,
 		);
 	}
 
 	/**
-	 * Saved settings of every gateway the front end can connect, to fill in its forms
-	 * (secret keys are only reported as saved / not saved).
+	 * Payment methods of the sign-up property (PayPal, Authorize.Net, Razorpay, Stripe, Cash), to fill in the forms.
+	 * Data: payment_methods[] (in order), pro_allowed, active_gateways (online gateways switched on)
 	 */
 	public function pjActionGetPaymentMethods()
 	{
@@ -2473,30 +2992,25 @@ class pjJabbApi extends pjAppController
 		$signup = $this->signupFromToken();
 		$calendar = $this->signupProperty($signup);
 		$calendar_id = (int) $calendar['id'];
+		$pro = self::proGatewaysAllowed((int) $signup['company_id']);
 
 		$methods = array();
-		if (pjObject::getPlugin('pjPayments') !== NULL && class_exists('pjPaymentOptionModel'))
+		foreach (array_keys(self::availableGateways()) as $payment_method)
 		{
-			foreach (self::$paymentGateways as $payment_method => $gateway)
-			{
-				if (pjObject::getPlugin($gateway['plugin']) !== NULL)
-				{
-					$methods[$payment_method] = self::paymentMethodState($calendar_id, $payment_method);
-				}
-			}
+			$methods[] = self::paymentMethodState($calendar_id, $payment_method, $pro);
 		}
 		$this->respond(200, 'OK', array(
 			'payment_methods' => $methods,
+			'pro_allowed'     => $pro,
 			'active_gateways' => class_exists('pjEntitlement') ? pjEntitlement::activeGateways($calendar_id) : array(),
 		));
 	}
 
 	/**
-	 * Saves one online payment gateway of the sign-up property (Properties > Payments, plugin_payment_options).
+	 * Saves one payment method of the sign-up property (Properties > Payments, plugin_payment_options).
 	 *
-	 * POST signup_token, payment_method (razorpay|stripe), is_active (0|1), is_test_mode (0|1),
-	 *      label (optional), public_key, secret_key (optional when one is already saved for that mode).
-	 * The keys are saved for the mode sent: test mode -> test_public_key / test_private_key.
+	 * POST signup_token, payment_method (paypal|authorize|razorpay|stripe|cash), is_active (0|1), is_test_mode (0|1),
+	 *      label (optional), keys (JSON {field: value} for the mode sent; an empty secret keeps the saved one).
 	 */
 	public function pjActionSavePaymentMethod()
 	{
@@ -2510,56 +3024,72 @@ class pjJabbApi extends pjAppController
 		$company_id = (int) $signup['company_id'];
 
 		$payment_method = $this->param('payment_method');
+		$available = self::availableGateways();
 		if (!isset(self::$paymentGateways[$payment_method]))
 		{
 			$this->respond(422, 'Validation failed', array(), array('payment_method' => 'Unknown payment method'));
 		}
 		$gateway = self::$paymentGateways[$payment_method];
-		if (pjObject::getPlugin('pjPayments') === NULL || pjObject::getPlugin($gateway['plugin']) === NULL || !class_exists('pjPaymentOptionModel'))
+		if (!isset($available[$payment_method]))
 		{
 			$this->respond(503, sprintf('%s payments are not available on this system.', $gateway['name']));
 		}
 
 		$is_active = $this->param('is_active') === '1';
-		$is_test_mode = $this->param('is_test_mode') === '1';
+		$pro = self::proGatewaysAllowed($company_id);
+		if ($gateway['tier'] === 'pro' && $is_active && !$pro)
+		{
+			$this->respond(402, sprintf('%s comes with the Pro plan. PayPal and cash are free on every plan.', $gateway['name']));
+		}
+		$offline = !empty($gateway['offline']);
+		$is_test_mode = !$offline && $this->param('is_test_mode') === '1';
 		$mode = $is_test_mode ? 'test' : 'live';
-		$public_key = $this->param('public_key');
-		$secret_key = $this->param('secret_key');
+		$prefix = $is_test_mode ? 'test_' : '';
 		$label = $this->has('label') ? trim(strip_tags($this->param('label'))) : '';
-
+		$keys = json_decode($this->param('keys'), true);
+		$keys = is_array($keys) ? $keys : array();
 		$current = pjPaymentOptionModel::factory()->getOptions($calendar_id, $payment_method);
-		$public_field = $is_test_mode ? 'test_public_key' : 'public_key';
-		$secret_field = $is_test_mode ? 'test_private_key' : 'private_key';
-		$has_saved_secret = !empty($current[$secret_field]);
 
 		$errors = array();
-		if ($public_key === '')
+		$data = array();
+		foreach ($gateway['fields'] as $field => $f)
 		{
-			if ($is_active)
+			$value = isset($keys[$field]) && is_string($keys[$field]) ? trim($keys[$field]) : '';
+			$column = $prefix . $f['column'];
+			$secret = !empty($f['secret']);
+			$has_saved = !empty($current[$column]);
+			if ($value === '')
 			{
-				$errors['public_key'] = sprintf('Enter your %s %s', $gateway['name'], $payment_method === 'stripe' ? 'public key' : 'key ID');
+				// empty: keep what is saved; needed when switching on
+				if ($is_active && empty($f['optional']) && !$has_saved)
+				{
+					$errors[$field] = !empty($f['timezone']) ? 'Choose the time zone of your Authorize.Net account' : sprintf('Enter your %s', $f['label']);
+				}
+				continue;
 			}
-		} elseif (preg_match($gateway['secret'], $public_key)) {
-			// A secret key pasted into the public field must not be saved where it is shown to guests.
-			$errors['public_key'] = 'This is a secret key. Enter it in the secret key field.';
-		} elseif (!preg_match($gateway['public'], $public_key, $m)) {
-			$errors['public_key'] = sprintf('This is not a valid %s key. It should start with %s', $gateway['name'], sprintf($gateway['public_hint'], $mode));
-		} elseif ($m[1] !== $mode) {
-			$errors['public_key'] = sprintf('Test mode is %s, so use your %s key (%s...)', $is_test_mode ? 'on' : 'off', $mode, sprintf($gateway['public_hint'], $mode));
-		}
-		if ($secret_key === '')
-		{
-			if ($is_active && !$has_saved_secret)
+			if (!empty($f['timezone']))
 			{
-				$errors['secret_key'] = sprintf('Enter your %s secret key', $gateway['name']);
+				if (!in_array($value, timezone_identifiers_list(), true))
+				{
+					$errors[$field] = 'Choose a time zone from the list';
+				}
+			} elseif (strlen($value) > 255 || ctype_digit($value) && strlen($value) > 12) {
+				// (long digits only: never a gateway key, possibly a card number: not saved)
+				$errors[$field] = sprintf('This is not a valid %s', $f['label']);
+			} elseif (!$secret && self::looksLikeSecret($gateway, $value)) {
+				// A secret pasted into a field that is shown again must not be saved there.
+				$errors[$field] = 'This is a secret key. Enter it in its own field.';
+			} elseif (!preg_match($f['pattern'], $value)) {
+				$errors[$field] = isset($f['hint'])
+					? sprintf('This is not a valid %s. It should start with %s', $f['label'], sprintf($f['hint'], $mode))
+					: sprintf('This is not a valid %s', $f['label']);
+			} elseif (isset($f['mode']) && preg_match($f['mode'], $value, $m) && $m[1] !== $mode) {
+				$errors[$field] = sprintf('Test mode is %s, so use your %s key', $is_test_mode ? 'on' : 'off', $mode);
 			}
-		} elseif (preg_match($gateway['public'], $secret_key)) {
-			$errors['secret_key'] = 'This is a public key. Enter your secret key here.';
-		} elseif (ctype_digit($secret_key) || !preg_match($gateway['secret'], $secret_key, $m)) {
-			// (digits only: never a gateway key, possibly a card number: not saved)
-			$errors['secret_key'] = sprintf('This is not a valid %s secret key', $gateway['name']);
-		} elseif (isset($m[2]) && $m[2] !== $mode) {
-			$errors['secret_key'] = sprintf('Test mode is %s, so use your %s secret key', $is_test_mode ? 'on' : 'off', $mode);
+			if (!isset($errors[$field]))
+			{
+				$data[$column] = $value;
+			}
 		}
 		if (self::tooLong($label, 255))
 		{
@@ -2574,7 +3104,7 @@ class pjJabbApi extends pjAppController
 		}
 
 		// Subscription plan: number of online gateways switched on per property (same rule as Properties > Payments).
-		if ($is_active && class_exists('pjEntitlement'))
+		if ($is_active && !$offline && class_exists('pjEntitlement'))
 		{
 			$max = pjEntitlement::limit($company_id, 'max_payment_gateways');
 			$active = pjEntitlement::activeGateways($calendar_id);
@@ -2584,19 +3114,21 @@ class pjJabbApi extends pjAppController
 			}
 		}
 
-		$data = array(
-			'is_active'    => $is_active ? 1 : 0,
-			'is_test_mode' => $is_test_mode ? 1 : 0,
-		);
-		if ($public_key !== '')
+		if ($offline)
 		{
-			$data[$public_field] = $public_key;
+			// Cash: only switched on / off (as Properties > Payments does)
+			$m = pjPaymentOptionModel::factory();
+			if ((int) $m->where('foreign_id', $calendar_id)->where('`payment_method`', $payment_method)->findCount()->getData() === 0)
+			{
+				$m->reset()->setAttributes(array('foreign_id' => $calendar_id, 'payment_method' => $payment_method, 'is_active' => $is_active ? 1 : 0))->insert();
+			} else {
+				$m->reset()->where('foreign_id', $calendar_id)->where('`payment_method`', $payment_method)->limit(1)->modifyAll(array('is_active' => $is_active ? 1 : 0));
+			}
+		} else {
+			$data['is_active'] = $is_active ? 1 : 0;
+			$data['is_test_mode'] = $is_test_mode ? 1 : 0;
+			pjPaymentOptionModel::factory()->saveOptions(array($payment_method => $data), $calendar_id);
 		}
-		if ($secret_key !== '')
-		{
-			$data[$secret_field] = $secret_key;
-		}
-		pjPaymentOptionModel::factory()->saveOptions(array($payment_method => $data), $calendar_id);
 
 		if ($label !== '')
 		{
@@ -2608,9 +3140,22 @@ class pjJabbApi extends pjAppController
 			pjMultiLangModel::factory()->updateMultiLang($i18n, $calendar_id, 'pjPayment', 'data');
 		}
 
-		$state = self::paymentMethodState($calendar_id, $payment_method);
+		$state = self::paymentMethodState($calendar_id, $payment_method, $pro);
 		$state['active_gateways'] = class_exists('pjEntitlement') ? pjEntitlement::activeGateways($calendar_id) : array();
 		$this->respond(200, sprintf('%s settings saved.', $gateway['name']), $state);
+	}
+
+	/** Does a value match one of the gateway's secret fields? */
+	private static function looksLikeSecret($gateway, $value)
+	{
+		foreach ($gateway['fields'] as $f)
+		{
+			if (!empty($f['secret']) && isset($f['mode']) && preg_match($f['pattern'], $value))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**

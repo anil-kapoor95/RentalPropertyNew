@@ -2,8 +2,6 @@
 include dirname(__FILE__) . '/elements/common.php';
 $heading_title = 'sub_manage_title';
 $heading_desc = 'sub_manage_desc';
-$heading_tabs = array('pjActionIndex' => 'sub_tab_companies', 'pjActionPlans' => 'sub_tab_plans', 'pjActionBilling' => 'sub_tab_billing', 'pjActionSettings' => 'sub_tab_settings');
-$heading_active = 'pjActionIndex';
 include dirname(__FILE__) . '/elements/heading.php';
 $s = $tpl['state'];
 $sub = $s['subscription'];

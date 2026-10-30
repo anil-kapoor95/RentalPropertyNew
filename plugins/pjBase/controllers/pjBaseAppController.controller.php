@@ -141,10 +141,7 @@ class pjBaseAppController extends pjController
     /** Company whose label texts are used (0 = shared texts). */
     public function getLabelsCompanyId()
     {
-        if (class_exists('pjCompanyContext') && $this->isLoged())
-        {
-            return (int) pjCompanyContext::activeId($this->getRoleId(), $this->getUserId());
-        }
+        // Labels are platform labels (System Options > Languages of the administrator).
         return 0;
     }
 
@@ -479,8 +476,9 @@ class pjBaseAppController extends pjController
             pjRegistry::getInstance()->set('options_foreign_id', $options_fid);
             if ($options_fid != $this->getForeignId())
             {
-                // Company system options on top of the global ones.
-                $base_option_arr = array_merge($base_option_arr, $this->models['Option']->reset()->getPairs($options_fid));
+                // The company's own options (Company options > General) on top of the platform ones.
+                $base_option_arr = array_merge($base_option_arr, class_exists('pjCompanyContext')
+                    ? pjCompanyContext::companyPairs($options_fid) : $this->models['Option']->reset()->getPairs($options_fid));
             }
             $script_option_arr = pjOptionModel::factory()->getPairs($this->getForeignId());
             $this->option_arr = array_merge($base_option_arr, $script_option_arr);
@@ -514,6 +512,18 @@ class pjBaseAppController extends pjController
             $is_ip_blocked = pjBase::isBlockedIp(pjUtil::getClientIp(), $this->option_arr);
             if($is_ip_blocked == true && !in_array($this->_get->toString('controller'), array('pjFront', 'pjFrontEnd', 'pjFrontPublic')))
             {
+                $this->sendForbidden();
+                return false;
+            }
+
+            // Platform pages (System Options, Options, Display, Install...) are for administrators only.
+            if ($this->isLoged() && (int) $this->getRoleId() !== 1 && class_exists('pjCompanyContext')
+                && pjCompanyContext::isPlatformPage($this->_get->toString('controller'), $this->_get->toString('action')))
+            {
+                if ($this->isXHR())
+                {
+                    self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'Access denied.'));
+                }
                 $this->sendForbidden();
                 return false;
             }

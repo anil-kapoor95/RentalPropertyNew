@@ -15,7 +15,8 @@
 			<td><?php echo $subDate($t['created']); ?></td>
 			<?php if (!empty($show_company)) { ?><td><?php echo pjSanitize::html((string) $t['company_name']); ?></td><?php } ?>
 			<td><?php echo pjSanitize::html((string) $t['plan_name']); ?> <small class="text-muted"><?php __('sub_kind_' . $t['kind']); ?></small></td>
-			<td><?php echo $subMoney($t['amount'], $t['currency']); ?></td>
+			<td><?php echo $subMoney($t['amount'], $t['currency']); ?><?php if (isset($t['discount_amount']) && (float) $t['discount_amount'] > 0) { ?>
+				<br><small class="text-muted"><?php __('sub_discount'); ?>: <?php echo $subMoney($t['discount_amount'], $t['currency']); ?><?php echo !empty($t['coupon_code']) ? ' (' . pjSanitize::html($t['coupon_code']) . ')' : ''; ?></small><?php } ?></td>
 			<td><?php echo pjSanitize::html(pjSubscriptionBilling::methodName($t['provider'])); ?></td>
 			<td><span class="sub-badge sub-tx-<?php echo pjSanitize::html($t['status']); ?>"><?php __('sub_tx_' . $t['status']); ?></span><?php if (!empty($t['failure_reason'])) { ?><br><small class="text-muted"><?php echo pjSanitize::html($t['failure_reason']); ?></small><?php } ?></td>
 			<td><?php echo $t['period_start'] ? $subDate($t['period_start']) . ' &ndash; ' . $subDate($t['period_end']) : '&mdash;'; ?></td>

@@ -42,6 +42,12 @@ $bodies = __('error_bodies', true);
 							<input type="radio" id="recipient_admin" name="recipient" value="admin" checked="checked">
 							<label for="recipient_admin"><?php __('recipients_ARRAY_admin'); ?></label>
 						</div>
+						<?php if (!empty($tpl['show_signup'])): ?>
+						<div class="radio radio-primary">
+							<input type="radio" id="recipient_signup" name="recipient" value="<?php echo pjSignupMail::RECIPIENT; ?>">
+							<label for="recipient_signup"><?php __('recipients_ARRAY_signup'); ?></label>
+						</div>
+						<?php endif; ?>
 					</div>
 				</div>
 
@@ -65,6 +71,11 @@ $bodies = __('error_bodies', true);
 					<small><?php __('notifications_tokens_note'); ?></small>
 				</div>
 				<div class="ibox-content">
+					<?php if (!empty($tpl['show_signup'])): ?>
+					<div class="notifyTokens signupTokens" style="display: none">
+						<?php __('lblSignupTokens'); ?>
+					</div>
+					<?php endif; ?>
 					<div class="notifyTokens reservationTokens">
 						<?php __('lblAvailableTokens');?>
 					</div>

@@ -6,6 +6,7 @@
 			</div>
 		</div>
 		<p class="m-b-none"><i class="fa fa-info-circle"></i><?php __('plugin_base_infobox_general_desc'); ?></p>
+		<p class="m-b-none m-t-xs"><i class="fa fa-building"></i> <?php isset($tpl['next_action']) && $tpl['next_action'] === 'pjActionPlatformGeneral' ? __('lblGeneralPlatformNote') : __('lblGeneralCompanyNote'); ?></p>
 	</div>
 </div>
 <div class="wrapper wrapper-content animated fadeInRight">
@@ -48,7 +49,7 @@
                         ?>
                         <form action="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjBaseOptions&amp;action=pjActionOptionsUpdate" method="post" class="form-horizontal" id="frmGeneral">
                             <input type="hidden" name="options_update" value="1" />
-                            <input type="hidden" name="next_action" value="pjActionIndex" />
+                            <input type="hidden" name="next_action" value="<?php echo isset($tpl['next_action']) ? pjSanitize::html($tpl['next_action']) : 'pjActionIndex'; ?>" />
                             <?php
                             foreach ($tpl['arr'] as $i => $option)
                             {

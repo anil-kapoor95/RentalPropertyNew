@@ -603,6 +603,11 @@ $routes = array(
     'pjActionGetCountries'  => 'pjJabbApi',
     'pjActionGetThemes'     => 'pjJabbApi',
     'pjActionGetPlans'      => 'pjJabbApi',
+    'pjActionGetCurrencies' => 'pjJabbApi',
+    'pjActionCheckPropertyName' => 'pjJabbApi',
+    'pjActionCheckCompanyName' => 'pjJabbApi',
+    // Guest page of a published property
+    'pjActionGetPropertyPage' => 'pjJabbApi',
     // Airbnb listing import (duplicate check)
     'pjActionCheckAirbnbListing' => 'pjJabbApi',
     // Payment gateways (host)
@@ -705,6 +710,8 @@ foreach ($_FILES as $key => $file)
 // The controller is called from this server, so it sees this server's address: pass on the caller's
 // (used for log-in throttling; never taken from the request).
 $data['api_client_ip'] = isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : '';
+// Sign-up website that made the call (only an allowed origin): used for links in the sign-up emails
+$data['api_site_url'] = $origin !== '' && in_array($origin, $allowed_origins, true) ? $origin : '';
 
 $Http = new pjHttp();
 $Http->setMethod('POST');

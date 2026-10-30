@@ -140,7 +140,9 @@ class pjAdmin extends pjAppController
 			'pjAdminSubscriptions::pjActionPlans' => 'pjAdminSubscriptions::pjActionIndex',
 			'pjAdminSubscriptions::pjActionPlan' => 'pjAdminSubscriptions::pjActionIndex',
 			'pjAdminSubscriptions::pjActionBilling' => 'pjAdminSubscriptions::pjActionIndex',
-			'pjAdminSubscriptions::pjActionSettings' => 'pjAdminSubscriptions::pjActionIndex',
+			'pjAdminSubscriptions::pjActionPromos' => 'pjAdminSubscriptions::pjActionIndex',
+			'pjAdminSubscriptions::pjActionPromo' => 'pjAdminSubscriptions::pjActionIndex',
+			'pjAdminSubscriptions::pjActionCheckPromo' => 'pjAdminSubscriptions::pjActionMyPlan',
 
 			'pjAdminVouchers::pjActionGetVoucher' => 'pjAdminVouchers::pjActionIndex',
 			'pjAdminVouchers::pjActionSaveVoucher' => 'pjAdminVouchers::pjActionUpdate',

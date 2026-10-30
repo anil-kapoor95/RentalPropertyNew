@@ -1,6 +1,6 @@
 <?php
 // SMS settings of this company only (never the platform's account shown to a company)
-$smsOwn = pjBaseOptionModel::factory()->getPairs($controller->getOptionsForeignId());
+$smsOwn = pjBaseOptionModel::factory()->getPairs($controller->getForeignId());
 ?><div class="row wrapper border-bottom white-bg page-heading">
     <div class="col-sm-12">
         <div class="row">

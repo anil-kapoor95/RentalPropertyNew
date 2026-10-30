@@ -12,6 +12,10 @@ $method = $t['provider'];
 			<div class="col-md-6">
 				<table class="table sub-kv m-b-none">
 					<tr><th><?php __('sub_col_plan'); ?></th><td><?php echo $tpl['plan'] ? pjSanitize::html($tpl['plan']['name']) : ''; ?> <small class="text-muted"><?php __('sub_kind_' . $t['kind']); ?></small></td></tr>
+					<?php if (isset($t['discount_amount']) && (float) $t['discount_amount'] > 0) { ?>
+					<tr><th><?php __('sub_list_price'); ?></th><td><?php echo $subMoney($t['list_amount'], $t['currency']); ?></td></tr>
+					<tr><th><?php __('sub_discount'); ?></th><td>- <?php echo $subMoney($t['discount_amount'], $t['currency']); ?><?php echo !empty($t['coupon_code']) ? ' <small class="text-muted">(' . pjSanitize::html($t['coupon_code']) . ')</small>' : ''; ?></td></tr>
+					<?php } ?>
 					<tr><th><?php __('sub_col_amount'); ?></th><td><strong><?php echo $subMoney($t['amount'], $t['currency']); ?></strong></td></tr>
 					<tr><th><?php __('sub_col_method'); ?></th><td><?php echo pjSanitize::html(pjSubscriptionBilling::methodName($method)); ?></td></tr>
 					<tr><th><?php __('sub_pay_reference'); ?></th><td><code><?php echo pjSanitize::html(strtoupper(substr($t['uuid'], 0, 12))); ?></code></td></tr>

@@ -9,9 +9,9 @@ $cur = $s['plan'];
 $action = $_SERVER['PHP_SELF'] . '?controller=pjAdminSubscriptions&amp;action=pjActionMyPlan';
 $methods = $tpl['methods'];
 $btn = function ($do, $plan_id, $label, $class = 'btn-primary', $confirm = false) use ($action, $subCsrf, $methods) {
-	if ($do === 'pay' && !empty($methods))
+	if ($do === 'pay')
 	{
-		// choose the payment method in the popup first
+		// popup first: coupon code and (when switched on) the payment method
 		return '<button type="button" class="btn ' . $class . ' btn-sm sub-inline subPayBtn" data-plan="' . (int) $plan_id . '">' . __($label, true) . '</button>';
 	}
 	return '<form method="post" action="' . $action . '" class="sub-inline"' . ($confirm ? ' data-sub-confirm="' . pjSanitize::html(__('sub_confirm', true)) . '"' : '') . '>' . $subCsrf
@@ -72,7 +72,8 @@ $btn = function ($do, $plan_id, $label, $class = 'btn-primary', $confirm = false
 			<div class="ibox sub-plan<?php echo $is_cur ? ' current' : ''; ?>"><div class="ibox-content">
 				<?php if ($is_cur) { ?><span class="sub-badge sub-active pull-right"><?php __('sub_current'); ?></span><?php } ?>
 				<h3 class="m-t-none"><?php echo pjSanitize::html($p['name']); ?></h3>
-				<div class="sub-price"><?php echo $subMoney($p['price'], $p['currency']); ?><?php if ($p['price'] !== null) { ?> <small>/ <?php echo $subInterval($p); ?></small><?php } ?></div>
+				<?php $q = isset($tpl['quotes'][(int) $p['id']]) ? $tpl['quotes'][(int) $p['id']] : null; ?>
+				<div class="sub-price"><?php if ($q && $q['discount'] > 0) { ?><del class="sub-price-old"><?php echo $subMoney($q['list'], $p['currency']); ?></del> <?php echo $subMoney($q['amount'], $p['currency']); ?><?php } else { echo $subMoney($p['price'], $p['currency']); } ?><?php if ($p['price'] !== null) { ?> <small>/ <?php echo $subInterval($p); ?></small><?php } ?></div>
 				<p class="text-muted small"><?php echo pjSanitize::html((string) $p['description']); ?></p>
 				<ul class="sub-limits">
 					<li><?php __('sub_max_properties'); ?>: <?php echo $subLimit($p['max_properties']); ?></li>
@@ -100,16 +101,30 @@ $btn = function ($do, $plan_id, $label, $class = 'btn-primary', $confirm = false
 	</div>
 	<?php if (empty($methods)) { ?><p class="text-muted small"><?php __('sub_manual_note'); ?></p><?php } ?>
 
-	<?php if (!empty($methods)) { ?>
 	<div class="modal inmodal fade" id="subPayModal" tabindex="-1" role="dialog" aria-hidden="true" style="display: none;">
 		<div class="modal-dialog"><div class="modal-content">
-			<form method="post" action="<?php echo $action; ?>" id="frmSubPay">
+			<form method="post" action="<?php echo $action; ?>" id="frmSubPay" data-check="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminSubscriptions&amp;action=pjActionCheckPromo">
 				<?php echo $subCsrf; ?><input type="hidden" name="do" value="pay"><input type="hidden" name="plan_id" value="0">
 				<div class="modal-header">
 					<button type="button" class="close" data-dismiss="modal"><span aria-hidden="true">&times;</span></button>
 					<h4 class="modal-title"><?php __('sub_pay_choose'); ?></h4>
 				</div>
 				<div class="modal-body">
+					<div class="form-group sub-coupon">
+						<label><?php __('sub_coupon_code'); ?></label>
+						<div class="input-group">
+							<input type="text" class="form-control text-uppercase" name="coupon_code" maxlength="30" autocomplete="off" placeholder="<?php __('sub_coupon_hint', false, true); ?>">
+							<span class="input-group-btn"><button type="button" class="btn btn-white subCouponApply"><?php __('sub_coupon_apply'); ?></button></span>
+						</div>
+						<small class="subCouponMsg"></small>
+					</div>
+					<table class="table sub-kv sub-quote m-b-md">
+						<tr><th><?php __('sub_list_price'); ?></th><td class="subQuoteList"></td></tr>
+						<tr class="subQuoteDiscountRow"><th><?php __('sub_discount'); ?></th><td class="subQuoteDiscount"></td></tr>
+						<tr><th><?php __('sub_you_pay'); ?></th><td><strong class="subQuoteAmount"></strong></td></tr>
+					</table>
+					<?php if (!empty($methods)) { ?>
+					<label><?php __('sub_pay_choose'); ?></label>
 					<div class="sub-methods">
 					<?php $first = true; foreach ($methods as $m => $name) { ?>
 						<label class="sub-method">
@@ -119,6 +134,9 @@ $btn = function ($do, $plan_id, $label, $class = 'btn-primary', $confirm = false
 						</label>
 					<?php $first = false; } ?>
 					</div>
+					<?php } else { ?>
+					<p class="text-muted small m-b-none"><?php __('sub_manual_note'); ?></p>
+					<?php } ?>
 				</div>
 				<div class="modal-footer">
 					<button type="button" class="btn btn-white" data-dismiss="modal"><?php __('btnCancel'); ?></button>
@@ -127,7 +145,6 @@ $btn = function ($do, $plan_id, $label, $class = 'btn-primary', $confirm = false
 			</form>
 		</div></div>
 	</div>
-	<?php } ?>
 
 	<div class="ibox float-e-margins"><div class="ibox-content">
 		<h4><?php __('sub_tab_billing'); ?></h4>

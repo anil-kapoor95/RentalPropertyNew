@@ -42,7 +42,9 @@ class pjSmsApi extends pjBase
 		if (empty($this->apiUsername) || empty($this->apiKey)) {
             $reg = pjRegistry::getInstance();
             $fid = $reg->is('options_foreign_id') ? (int) $reg->get('options_foreign_id') : $this->getForeignId();
-            $base_option_arr = array_merge(pjBaseOptionModel::factory()->getPairs($this->getForeignId()), pjBaseOptionModel::factory()->getPairs($fid));
+            // SMS keys are platform settings (System Options > SMS); a company has only its General options.
+            $base_option_arr = array_merge(pjBaseOptionModel::factory()->getPairs($this->getForeignId()),
+                class_exists('pjCompanyContext') ? pjCompanyContext::companyPairs($fid) : pjBaseOptionModel::factory()->getPairs($fid));
             $this->apiUsername = $base_option_arr['plugin_sms_api_username'];
             $this->apiKey = $base_option_arr['plugin_sms_api_key'];            
 		}

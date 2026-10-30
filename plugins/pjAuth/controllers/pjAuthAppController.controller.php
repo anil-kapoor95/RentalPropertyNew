@@ -23,7 +23,8 @@ class pjAuthAppController extends pjPlugin
 			$this->optionsFid = pjCompanyContext::optionsForeignId($company_id);
 			if (!isset($pairs[$this->optionsFid]))
 			{
-				$pairs[$this->optionsFid] = pjBaseOptionModel::factory()->getPairs($this->optionsFid);
+				// only the company's General options; login & protection, captcha and email are platform settings
+				$pairs[$this->optionsFid] = pjCompanyContext::companyPairs($this->optionsFid);
 			}
 			$this->option_arr = array_merge((array) $this->option_arr, $pairs[$this->optionsFid]);
 		}

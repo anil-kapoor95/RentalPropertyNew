@@ -199,7 +199,10 @@ var jQuery = jQuery || $.noConflict();
 				}
 				
 				$('.notifyTokens').hide();
-				if($checked.val() == 'new_property')
+				if (String($checked.val()).indexOf('signup_') === 0)
+				{
+					$('.signupTokens').show();
+				}else if($checked.val() == 'new_property')
 				{
 					$('.propertyTokens').show();
 				}else if($checked.val() == 'new_user' || $checked.val() == 'password_reminder' || $checked.val() == 'welcome_msg'){

@@ -9,12 +9,22 @@ class pjBaseOptions extends pjBase
 	/** Option tabs saved by each System Options page (the form posts its page as next_action). */
 	private static $pageTabs = array(
 		'pjActionIndex' => array(1),
+		'pjActionPlatformGeneral' => array(1),
 		'pjActionVisual' => array(2),
 		'pjActionEmailSettings' => array(3),
 		'pjActionLoginProtection' => array(4, 5, 6, 7),
 		'pjActionCaptchaSpam' => array(8),
 		'pjActionApiKeys' => array(10),
 	);
+
+	/**
+	 * foreign_id of a System Options page: General (Company options > General) belongs to the active company,
+	 * every other page holds platform settings of the administrator (foreign_id 1).
+	 */
+	private function pageFid($page)
+	{
+		return $page === 'pjActionIndex' ? $this->getOptionsForeignId() : $this->getForeignId();
+	}
 
 	/** Stop an Ajax request unless the user may open the given System Options page. */
 	private function requirePageAccess($page)
@@ -38,8 +48,8 @@ class pjBaseOptions extends pjBase
 				return;
 			}
 			$pjBaseOptionModel = new pjBaseOptionModel();
-			// Options belong to the active company; only the admin login-screen keys stay shared.
-			$company_fid = $this->getOptionsForeignId();
+			// General belongs to the active company; the other pages are platform settings.
+			$company_fid = $this->pageFid($next_action);
 			$allowed_keys = pjBaseOptionModel::factory()
 				->whereIn('t1.foreign_id', array_unique(array((int) $company_fid, 1)))
 				->whereIn('t1.tab_id', self::$pageTabs[$next_action])
@@ -101,6 +111,7 @@ class pjBaseOptions extends pjBase
 			switch ($this->_post->toString('next_action'))
 			{
 				case 'pjActionIndex':
+				case 'pjActionPlatformGeneral':
 					$err = 'PBS01';
 					break;
 				case 'pjActionVisual':
@@ -142,6 +153,28 @@ class pjBaseOptions extends pjBase
 		$this->appendJs('pjBaseOptions.js', $this->getConst('PLUGIN_JS_PATH'));
 	}
 	
+	/**
+	 * System Options > General (administrators): the platform's General options (foreign_id 1), the defaults a
+	 * new company starts with. Company options > General (pjActionIndex) holds the active company's own values.
+	 */
+	public function pjActionPlatformGeneral()
+	{
+		if (!$this->isLoged() || (int) $this->getRoleId() !== 1)
+		{
+			$this->sendForbidden();
+			return;
+		}
+		$arr = pjBaseOptionModel::factory()
+			->where('t1.foreign_id', $this->getForeignId())
+			->where('t1.tab_id', 1)
+			->orderBy('t1.order ASC')
+			->findAll()
+			->getData();
+		$this->set('arr', $arr);
+		$this->set('next_action', 'pjActionPlatformGeneral');
+		$this->appendJs('pjBaseOptions.js', $this->getConst('PLUGIN_JS_PATH'));
+	}
+
 	public function pjActionLoginProtection()
 	{
 		if (!pjAuth::factory()->hasAccess())
@@ -150,7 +183,7 @@ class pjBaseOptions extends pjBase
 			return;
 		}
 
-		$company_fid = $this->getOptionsForeignId();
+		$company_fid = $this->getForeignId();
 		$arr = class_exists('pjCompanyContext')
 			? pjCompanyContext::optionRows(array(4, 5, 6, 7), $company_fid)
 			: pjBaseOptionModel::factory()->where('t1.foreign_id', $company_fid)->whereIn('t1.tab_id', array(4, 5, 6, 7))->orderBy('t1.tab_id ASC, t1.order ASC, t1.key ASC')->findAll()->getData();
@@ -187,7 +220,7 @@ class pjBaseOptions extends pjBase
 		}
 
 		$arr = pjBaseOptionModel::factory()
-			->where('t1.foreign_id', $this->getOptionsForeignId())
+			->where('t1.foreign_id', $this->getForeignId())
 			->where('t1.tab_id', 2)
 			->orderBy('t1.order ASC')
 			->findAll()
@@ -208,7 +241,7 @@ class pjBaseOptions extends pjBase
 
 		$pjBaseOptionModel = pjBaseOptionModel::factory();
 		
-		$company_fid = $this->getOptionsForeignId();
+		$company_fid = $this->getForeignId();
 		$rows = class_exists('pjCompanyContext')
 			? pjCompanyContext::optionRows(array(8), $company_fid)
 			: $pjBaseOptionModel->where('t1.foreign_id', $company_fid)->where('t1.tab_id', 8)->orderBy('t1.order ASC')->findAll()->getData();
@@ -253,7 +286,7 @@ class pjBaseOptions extends pjBase
 		}
 		
 		pjBaseOptionModel::factory()
-			->where('foreign_id', $this->getOptionsForeignId())
+			->where('foreign_id', $this->getForeignId())
 			->where('`key`', 'o_base_theme')
 			->limit(1)
 			->modifyAll(array('value' => 'theme1|theme2|theme3::' . $this->_post->toString('theme')));
@@ -270,7 +303,7 @@ class pjBaseOptions extends pjBase
 		}
 
 		$arr = pjBaseOptionModel::factory()
-			->where('t1.foreign_id', $this->getOptionsForeignId())
+			->where('t1.foreign_id', $this->getForeignId())
 			->where('t1.tab_id', 3)
 			->orderBy('t1.order ASC')
 			->findAll()
@@ -289,7 +322,7 @@ class pjBaseOptions extends pjBase
 		}
 
 		$arr = pjBaseOptionModel::factory()
-			->where('t1.foreign_id', $this->getOptionsForeignId())
+			->where('t1.foreign_id', $this->getForeignId())
 			->where('t1.tab_id', 10)
 			->orderBy('t1.order ASC')
 			->findAll()

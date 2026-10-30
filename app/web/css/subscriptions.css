@@ -31,3 +31,38 @@
 .sub-method:has(input:checked){border-color:#f97618;box-shadow:0 0 0 3px rgba(249,118,24,.12)}
 .sub-waiting{padding:8px 0;border-bottom:1px solid #f0f1f3}
 .sub-pay .sub-pay-form{min-height:40px}
+
+/* coupons & discounts on plan prices */
+.sub-price-old{font-size:16px;font-weight:600;color:#9ca3af;margin-right:4px}
+.sub-quote th{width:45%;font-weight:600;color:#6b7280}
+.subCouponMsg{display:block;margin-top:4px}
+/* Subscriptions > Coupons & Discounts list */
+.sub-promo-bar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+.sub-seg{display:inline-flex;gap:4px;padding:4px;background:#f3f4f6;border-radius:12px}
+.sub-seg-item,.sub-seg-item:focus{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:9px;color:#6b7280;font-weight:600;text-decoration:none}
+.sub-seg-item:hover{color:#e0640c}
+.sub-seg-item.active,.sub-seg-item.active:hover{background:#fff;color:#e0640c;box-shadow:0 1px 3px rgba(17,24,39,.12)}
+.sub-seg-count{min-width:22px;padding:1px 7px;border-radius:999px;background:#e5e7eb;color:#4b5563;font-size:11px;text-align:center}
+.sub-seg-item.active .sub-seg-count{background:#fff3ea;color:#e0640c}
+.sub-promo-hint{margin:14px 0 6px;color:#6b7280;font-size:12px}.sub-promo-hint i{color:#9ca3af;margin-right:4px}
+.sub-promo-table thead th{border-bottom:1px solid #e7eaec!important;color:#6b7280;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+.sub-promo-table tbody td{border-top:1px solid #f0f1f3!important;padding:14px 8px!important}
+.sub-promo-table tbody tr:hover{background:#fafafa}
+.sub-row-off td{opacity:.6}
+.sub-promo-name{font-weight:700;color:#111827}.sub-promo-name:hover{color:#e0640c}
+.sub-code{display:inline-block;margin-top:4px;padding:1px 8px;border:1px dashed #f3a56b;border-radius:6px;background:#fff8f2;color:#c2540a;font-family:SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;letter-spacing:.04em}
+.sub-off{display:inline-block;padding:3px 10px;border-radius:8px;background:#fff3ea;color:#e0640c;font-weight:800}
+.sub-tag{display:inline-block;margin:2px 4px 2px 0;padding:2px 9px;border-radius:999px;background:#f3f4f6;color:#374151;font-size:12px}
+.sub-tag-all{background:#eef6ff;color:#2563eb}
+.sub-usage-cell{min-width:90px}
+.sub-meter{height:5px;margin-top:6px;border-radius:999px;background:#f0f1f3;overflow:hidden;max-width:110px}.sub-meter span{display:block;height:100%;background:#f97618}
+.sub-icon-btn{border-radius:8px}
+.sub-empty{text-align:center;padding:40px 16px;color:#6b7280}
+.sub-empty-icon{width:56px;height:56px;margin:0 auto 12px;border-radius:50%;background:#fff3ea;color:#e0640c;display:flex;align-items:center;justify-content:center;font-size:22px}
+@media (max-width:767px){.sub-promo-bar{flex-direction:column;align-items:stretch}.sub-seg{justify-content:center}}
+/* Subscriptions > Coupons & Discounts form */
+.sub-promo-form label:not(.sub-chip){font-weight:600;color:#374151}
+.sub-chip{display:inline-flex;align-items:center;gap:7px;margin:0 6px 8px 0;padding:7px 14px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;font-weight:500;cursor:pointer;transition:all .15s}
+.sub-chip input{margin:0}
+.sub-chip:hover{border-color:#f3a56b}
+.sub-chip:has(input:checked){border-color:#f97618;background:#fff8f2;color:#c2540a}

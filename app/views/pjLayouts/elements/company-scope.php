@@ -7,7 +7,8 @@ if (class_exists('pjCompanyContext'))
 	$pjcsc = $controller->_get->toString('controller');
 	$pjcsa = $controller->_get->toString('action');
 	$pjcsPages = array('pjBaseOptions', 'pjBaseSms', 'pjBaseLocale', 'pjBaseCountries', 'pjBaseCron', 'pjBaseBackup');
-	if (in_array($pjcsc, $pjcsPages, true) && $pjcsa !== 'pjActionProfile')
+	// System Options are platform settings now: the company banner is only shown on Company options > General.
+	if ($pjcsc === 'pjBaseOptions' && $pjcsa === 'pjActionIndex')
 	{
 		$pjcsCompany = pjCompanyContext::activeCompany($controller->getRoleId(), $controller->getUserId());
 		$pjcsName = $pjcsCompany ? pjSanitize::html($pjcsCompany['name']) : '-';

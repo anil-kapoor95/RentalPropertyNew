@@ -426,6 +426,11 @@ class pjAppController extends pjBaseAppController
 	 */
 	public function requirePlanFeature($feature)
 	{
+		// Administrators always manage Coupons & Discounts of the active company (Company options).
+		if ($feature === 'coupons' && $this->isAdmin())
+		{
+			return true;
+		}
 		if (!class_exists('pjEntitlement') || pjEntitlement::allows($this->getCompanyId(), $feature))
 		{
 			return true;

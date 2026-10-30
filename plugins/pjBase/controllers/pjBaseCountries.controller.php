@@ -37,7 +37,8 @@ class pjBaseCountries extends pjBase
 	 */
 	private function cCompanyId()
 	{
-		return class_exists('pjCompanyContext') ? (int) pjCompanyContext::activeId($this->getRoleId(), $this->getUserId()) : 0;
+		// Countries are platform settings of the administrator (no company countries any more).
+		return 0;
 	}
 
 	/** 'own' (company's country), 'shared', or false (another company's country / not found). */

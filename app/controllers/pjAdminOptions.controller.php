@@ -114,7 +114,8 @@ class pjAdminOptions extends pjAdmin
 					pjAi::saveOption('o_' . $s . '_api_key', '');
 				} else {
 					$key = trim((string) $this->_post->raw('key_' . $s));
-					if ($key !== '')
+					// the field shows the saved key: unchanged means nothing to save
+					if ($key !== '' && $key !== pjAi::apiKey($s))
 					{
 						if (!preg_match('/^\S{10,300}$/', $key))
 						{
@@ -142,7 +143,9 @@ class pjAdminOptions extends pjAdmin
 	        $this->sendForbidden();
 	        return;
 	    }
-	    pjCompanyContext::ensureNotifications($this->getCompanyId());
+	    // Platform notifications of the administrator (company_id 0), used for every company.
+	    // "Sign-up (new hosts)" tab: welcome email to new hosts
+	    $this->set('show_signup', $this->isAdmin());
 	    $this->setLocalesData();
 	    
 	    $this->appendCss('awesome-bootstrap-checkbox.css', PJ_THIRD_PARTY_PATH . 'awesome_bootstrap_checkbox/');
@@ -169,14 +172,28 @@ class pjAdminOptions extends pjAdmin
 	    {
 	        self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Missing, empty or invalid parameters.'));
 	    }
+	    if ($this->query['recipient'] === pjSignupMail::RECIPIENT)
+	    {
+	        // Sign-up emails: platform notifications, administrators only
+	        if (!$this->isAdmin())
+	        {
+	            $this->sendForbidden();
+	            return;
+	        }
+	        $rows = pjSignupMail::rows();
+	        $arr = isset($rows['signup_host']) ? array($rows['signup_host']) : array();
+	    } else {
+	    // the administrator's messages include the "new sign-up" email (signup_admin)
 	    $arr = pjNotificationModel::factory()
 		    ->where('t1.recipient', $this->query['recipient'])
 		    ->where('t1.is_general', 1)
 		    ->where('t1.foreign_id', 0)
-		    ->where('t1.company_id', $this->getCompanyId())
+		    ->where('t1.company_id', 0)
+		    ->whereNotIn('t1.variant', array('signup_host'))
 		    ->orderBy('t1.id ASC')
 		    ->findAll()
 		    ->getData();
+	    }
 	    $this->set('arr', $arr);
 	}
 	
@@ -204,16 +221,23 @@ class pjAdminOptions extends pjAdmin
 	        self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Missing, empty or invalid parameters.'));
 	    }
 	    
+	    if ($this->_get->toString('recipient') === pjSignupMail::RECIPIENT)
+	    {
+	        $rows = $this->isAdmin() ? pjSignupMail::rows() : array();
+	        $arr = $this->_get->toString('variant') === 'signup_host' && isset($rows['signup_host']) ? $rows['signup_host'] : false;
+	    } else {
 	    $arr = pjNotificationModel::factory()
 		    ->where('t1.recipient', $this->_get->toString('recipient'))
 		    ->where('t1.variant', $this->_get->toString('variant'))
 		    ->where('t1.transport', $this->_get->toString('transport'))
 		    ->where('t1.is_general', 1)
 		    ->where('t1.foreign_id', 0)
-		    ->where('t1.company_id', $this->getCompanyId())
+		    ->where('t1.company_id', 0)
+		    ->whereNotIn('t1.variant', array('signup_host'))
 		    ->limit(1)
 		    ->findAll()
-		    ->getDataIndex(0);	    
+		    ->getDataIndex(0);
+	    }	    
 	    if (!$arr)
 	    {
 	        self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Message not found.'));
@@ -271,9 +295,9 @@ class pjAdminOptions extends pjAdmin
 	        self::jsonResponse(array('status' => 'ERR', 'code' => 103, 'text' => 'Data mismatch.'));
 	    }
 	    
-	    // The notification must be one of the active company's general notifications.
-	    $own = pjNotificationModel::factory()->where('t1.id', $this->_post->toInt('id'))->where('t1.company_id', $this->getCompanyId())->where('t1.is_general', 1)->findCount()->getData();
-	    if ((int) $own !== 1 || $this->getCompanyId() <= 0)
+	    // Platform notifications (company_id 0) of the administrator only.
+	    $row = pjNotificationModel::factory()->find($this->_post->toInt('id'))->getData();
+	    if (empty($row) || (int) $row['company_id'] !== 0 || (int) $row['is_general'] !== 1 || (int) $row['foreign_id'] !== 0 || !$this->isAdmin())
 	    {
 	        $this->denyCompanyAccess();
 	    }

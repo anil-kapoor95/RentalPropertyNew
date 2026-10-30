@@ -34,46 +34,14 @@ class pjCompanyContext
 
 	private static $adminWs = null;
 
-	/** Id of the admin workspace (created and provisioned on first use). 0 before the update ran. */
+	/**
+	 * The admin workspace ("Admin" company) was removed on 2026-10-30 (update_2026_10_30_12_00_00.sql): the
+	 * administrator's settings are the platform settings now, and only properties, reservations and the
+	 * Company options menu follow the active company. Kept so older callers keep working: always 0.
+	 */
 	public static function adminWorkspaceId($create = true)
 	{
-		if (self::$adminWs !== null && (self::$adminWs > 0 || !$create))
-		{
-			return self::$adminWs;
-		}
-		self::$adminWs = 0;
-		$m = pjCompanyModel::factory();
-		$has = false;
-		foreach ($m->prepare(sprintf("SHOW COLUMNS FROM `%s`", $m->getTable()))->exec()->getData() as $col)
-		{
-			if (isset($col['Field']) && $col['Field'] === 'is_admin_ws') { $has = true; break; }
-		}
-		if (!$has)
-		{
-			return 0;
-		}
-		$row = $m->reset()->select('t1.id')->where('t1.is_admin_ws', 1)->orderBy('t1.id ASC')->limit(1)->findAll()->getDataIndex(0);
-		if (!empty($row))
-		{
-			return self::$adminWs = (int) $row['id'];
-		}
-		if (!$create)
-		{
-			return 0;
-		}
-		$id = $m->reset()->setAttributes(array(
-			'name' => 'Admin', 'status' => 'T', 'is_admin_ws' => 1,
-			'hash' => bin2hex(function_exists('random_bytes') ? random_bytes(16) : md5(uniqid(mt_rand(), true), true)),
-		))->insert()->getInsertId();
-		if ($id !== false && (int) $id > 0)
-		{
-			self::$adminWs = (int) $id;
-			self::seedFeatures($id);
-			self::ensureNotifications($id);
-			self::ensureLocales($id); // all system languages, same default
-			self::optionsForeignId($id);
-		}
-		return self::$adminWs;
+		return 0;
 	}
 
 	public static function isAdminWorkspace($company_id)
@@ -324,11 +292,11 @@ class pjCompanyContext
 	const OPTIONS_OFFSET = 1000;
 
 	/**
-	 * Option tabs that are per company: 1 General, 2 Visual & Branding, 3 Email,
-	 * 4-7 Login & Protection, 8 Captcha & Spam, 10 API keys (+ SMS keys).
-	 * Backup on/off (9), cron and internal keys stay global.
+	 * Option tabs that are per company: only 1 General (Company options > General).
+	 * Every other System Options tab (Visual & Branding, Email, Login & Protection, Captcha & Spam,
+	 * API keys, SMS, backup, cron) is a platform setting of the administrator (foreign_id 1).
 	 */
-	public static $companyOptionTabs = array(1, 2, 3, 4, 5, 6, 7, 8, 10);
+	public static $companyOptionTabs = array(1);
 
 	/**
 	 * Keys that drive the admin LOGIN SCREEN itself (shown before anybody is identified),
@@ -362,7 +330,67 @@ class pjCompanyContext
 		{
 			return false;
 		}
-		return in_array((int) $tab_id, self::$companyOptionTabs, true) || strpos((string) $key, 'plugin_sms_') === 0;
+		return in_array((int) $tab_id, self::$companyOptionTabs, true);
+	}
+
+	/**
+	 * The company's own option values (General tab only) of a company options foreign_id. Older copies of
+	 * other tabs that may still be stored under that foreign_id are ignored: those are platform settings.
+	 */
+	public static function companyPairs($fid)
+	{
+		$fid = (int) $fid;
+		if ($fid <= 1)
+		{
+			return array();
+		}
+		static $cache = array();
+		if (!isset($cache[$fid]))
+		{
+			$m = pjBaseOptionModel::factory();
+			$keys = $m->where('t1.foreign_id', $fid)->whereIn('t1.tab_id', self::$companyOptionTabs)->findAll()->getDataPair('key', 'key');
+			$keys = array_diff_key($keys, array_flip(self::$globalOptionKeys));
+			$cache[$fid] = array_intersect_key($m->reset()->getPairs($fid), $keys);
+		}
+		return $cache[$fid];
+	}
+
+	/**
+	 * Back-office pages of the platform (administrator only). Everyone else works only in their company:
+	 * Dashboard, Properties, Reservations, Company options (Extras, Features, General, Coupons & Discounts),
+	 * My plan, My company and Users.
+	 */
+	public static function isPlatformPage($controller, $action)
+	{
+		$controller = (string) $controller;
+		$action = (string) $action;
+		switch ($controller)
+		{
+			case 'pjBaseOptions':
+				// General is "Company options > General"; its form posts next_action=pjActionIndex
+				if ($action === 'pjActionIndex')
+				{
+					return false;
+				}
+				if ($action === 'pjActionOptionsUpdate')
+				{
+					return !isset($_POST['next_action']) || $_POST['next_action'] !== 'pjActionIndex';
+				}
+				return true;
+			case 'pjBaseSms':
+			case 'pjBaseLocale':
+			case 'pjBaseCountries':
+			case 'pjBaseCron':
+			case 'pjBaseBackup':
+				// used inside company pages (language flags) or by the cron
+				return !in_array($action, array('pjActionIsFlagReady', 'pjActionSend', 'pjActionRun', 'pjActionExecute', 'pjActionAutoBackup'), true);
+			case 'pjAdminOptions':
+				// Options (Notifications, AI settings) and Display / Install
+				return true;
+			case 'pjAdminSubscriptions':
+				return !in_array($action, array('pjActionMyPlan', 'pjActionPay', 'pjActionCheckoutReturn', 'pjActionCheckPromo'), true);
+		}
+		return false;
 	}
 
 	/** foreign_id to store a given option key in, for the active company fid. */
@@ -427,10 +455,8 @@ class pjCompanyContext
 	/** key => text overrides of a company for a locale. */
 	public static function labelOverrides($company_id, $locale_id)
 	{
-		if ((int) $company_id <= 0)
-		{
-			return array();
-		}
+		// Labels are platform labels (System Options > Languages of the administrator): no company texts any more.
+		return array();
 		return pjMultiLangModel::factory()
 			->select('t1.content, t2.key')
 			->join('pjBaseField', 't2.id=t1.foreign_id', 'inner')
@@ -450,7 +476,7 @@ class pjCompanyContext
 	 */
 	public static function countryActiveSql($company_id, $alias = 't1')
 	{
-		$company_id = (int) $company_id;
+		$company_id = 0; // countries are platform settings (System Options > Countries of the administrator)
 		$cc = pjCompanyCountryModel::factory()->getTable();
 		return sprintf("((%1\$s.`company_id` IS NULL OR %1\$s.`company_id` = %2\$u) AND COALESCE((SELECT cc.`status` FROM `%3\$s` cc WHERE cc.`company_id` = %2\$u AND cc.`country_id` = %1\$s.`id` LIMIT 1), %1\$s.`status`) = 'T')", $alias, $company_id, $cc);
 	}
@@ -458,6 +484,7 @@ class pjCompanyContext
 	/** SQL expression: the company's status of country t1. */
 	public static function countryStatusExpr($company_id, $alias = 't1')
 	{
+		$company_id = 0; // platform countries
 		$cc = pjCompanyCountryModel::factory()->getTable();
 		return sprintf("COALESCE((SELECT cc.`status` FROM `%3\$s` cc WHERE cc.`company_id` = %2\$u AND cc.`country_id` = %1\$s.`id` LIMIT 1), %1\$s.`status`)", $alias, (int) $company_id, $cc);
 	}
@@ -524,7 +551,7 @@ class pjCompanyContext
 		if ((int) $company_id > 0)
 		{
 			$global = $pairs;
-			$pairs = array_merge($pairs, $m->reset()->getPairs(self::optionsForeignId($company_id)));
+			$pairs = array_merge($pairs, self::companyPairs(self::optionsForeignId($company_id)));
 			foreach (self::$secretOptionKeys as $secret => $pair)
 			{
 				if (isset($pairs[$secret], $global[$secret], $pairs[$pair], $global[$pair]) && $pairs[$secret] === ''
@@ -555,6 +582,7 @@ class pjCompanyContext
 		$pjNotificationModel = pjNotificationModel::factory();
 		$templates = $pjNotificationModel->reset()
 			->where('t1.company_id', 0)->where('t1.foreign_id', 0)->where('t1.is_general', 1)
+			->whereNotIn('t1.variant', array_keys(pjSignupMail::$variants))
 			->orderBy('t1.id ASC')->findAll()->getData();
 		if (empty($templates))
 		{
@@ -607,7 +635,7 @@ class pjCompanyContext
 	 */
 	public static function getGeneralNotification($company_id, $recipient, $transport, $variant)
 	{
-		$company_id = (int) $company_id;
+		$company_id = 0; // Options > Notifications of the administrator are used for every company
 		if ($company_id > 0)
 		{
 			self::ensureNotifications($company_id);
@@ -716,6 +744,8 @@ class pjCompanyContext
 	/** 0 = no company (installer, login screen, cron): the system language list is used. */
 	public static function localeScopeId()
 	{
+		// Languages are platform languages: the system language list is used everywhere.
+		return 0;
 		self::ensureLocaleTable();
 		if (self::$localeScope !== null)
 		{

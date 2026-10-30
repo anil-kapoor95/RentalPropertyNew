@@ -140,7 +140,7 @@ class pjAi
 		return $m !== '' ? $m : self::$services[$service]['default_model'];
 	}
 
-	/** Settings for the admin page (keys are never returned, only whether one is saved). */
+	/** Settings for the admin page (administrators only): the saved key is shown in its field, hidden until "Show". */
 	public static function settings()
 	{
 		$out = array('provider' => self::provider(), 'services' => array());
@@ -153,6 +153,7 @@ class pjAi
 				'model'   => self::model($s),
 				'has_key' => self::apiKey($s) !== '',
 				'key_hint'=> self::maskedKey($s),
+				'key'     => self::apiKey($s),
 				'loaded'  => $loaded,
 				'custom'  => $custom,
 			);
@@ -396,7 +397,7 @@ class pjAi
 			{
 				$id = isset($m['name']) ? preg_replace('~^models/~', '', $m['name']) : '';
 				$methods = isset($m['supportedGenerationMethods']) ? (array) $m['supportedGenerationMethods'] : array();
-				if ($id !== '' && in_array('generateContent', $methods, true) && !preg_match('/(image|tts|audio|live|embed|veo|imagen|robotics|computer-use)/i', $id))
+				if ($id !== '' && in_array('generateContent', $methods, true) && !preg_match('/(image|tts|audio|live|embed|veo|imagen|robotics|computer-use|nano-banana|lyria|transcribe|deep-research|antigravity)/i', $id))
 				{
 					$ids[] = $id;
 				}

@@ -10,7 +10,7 @@ $isPermissionController = ($controller_name == 'pjBasePermissions');
 $isSmsController = ($controller_name == 'pjBaseSms');
 $isCronController = ($controller_name == 'pjBaseCron');
 $isCountriesController = ($controller_name == 'pjBaseCountries');
-$isGeneralOptions = $isOptionsController && $action_name == 'pjActionIndex';
+$isGeneralOptions = $isOptionsController && $action_name == 'pjActionPlatformGeneral';
 $isLoginProtection = $isOptionsController && $action_name == 'pjActionLoginProtection';
 $isCaptchaSpam = $isOptionsController && $action_name == 'pjActionCaptchaSpam';
 $isBackup = $isBackupController && $action_name == 'pjActionIndex';
@@ -75,7 +75,8 @@ $isSystemOptions = $isGeneralOptions || $isBackup || $isLocale || $isSms || $isV
                 $apiKeyOptions = true;
             }
             
-            $hasAccessSystemOptions    = pjAuth::factory('pjBaseOptions')->hasAccess();
+            // System Options are platform settings: administrators only (General is under Company options).
+            $hasAccessSystemOptions    = (int) $controller->getRoleId() === 1 && pjAuth::factory('pjBaseOptions')->hasAccess();
             $hasAccessGeneralOptions    = pjAuth::factory('pjBaseOptions', 'pjActionIndex')->hasAccess();
             $hasAccessApiKeys           = pjAuth::factory('pjBaseOptions', 'pjActionApiKeys')->hasAccess() && $apiKeyOptions;
             $hasAccessEmailSettings     = pjAuth::factory('pjBaseOptions', 'pjActionEmailSettings')->hasAccess();
@@ -93,9 +94,8 @@ $isSystemOptions = $isGeneralOptions || $isBackup || $isLocale || $isSms || $isV
                 <li<?php echo $isSystemOptions ? ' class="active"' : NULL; ?>>
                     <a href="#"><i class="fa fa-wrench"></i> <span class="nav-label"><?php __('plugin_base_menu_system_options'); ?></span><span class="fa arrow"></span></a>
                     <ul class="nav nav-second-level collapse">
-                        <?php if ($hasAccessGeneralOptions): ?>
-                            <li<?php echo $isGeneralOptions ? ' class="active"' : NULL; ?>><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjBaseOptions&amp;action=pjActionIndex"><?php __('plugin_base_menu_general'); ?></a></li>
-                        <?php endif; ?>
+
+                        <li<?php echo $isGeneralOptions ? ' class="active"' : NULL; ?>><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjBaseOptions&amp;action=pjActionPlatformGeneral"><?php __('plugin_base_menu_general'); ?></a></li>
 
                         <?php if ($hasAccessApiKeys): ?>
                             <li<?php echo $isAPIKeys ? ' class="active"' : NULL; ?>><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjBaseOptions&amp;action=pjActionApiKeys"><?php __('plugin_base_menu_api_keys'); ?></a></li>

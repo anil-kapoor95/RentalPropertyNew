@@ -30,6 +30,14 @@
 
 		$form.on('change', '.ai-model-select', function () { toggleCustom(panel(this)); });
 
+		/* API key field: hidden as dots, the eye shows / hides it */
+		$form.on('click', '.ai-key-toggle', function () {
+			var $p = panel(this), $key = $p.find('.ai-key'), shown = $key.hasClass('ai-key-masked');
+			$key.toggleClass('ai-key-masked', !shown);
+			$(this).attr({ 'aria-pressed': shown ? 'true' : 'false', 'aria-label': shown ? 'Hide the key' : 'Show the key' })
+				.find('i').toggleClass('fa-eye', !shown).toggleClass('fa-eye-slash', shown);
+		});
+
 		$form.on('click', '.ai-load-models', function () {
 			var $p = panel(this), $btn = $(this), $sel = $p.find('.ai-model-select');
 			show($p, null, $form.data('txt-loading'));

@@ -2,8 +2,6 @@
 include dirname(__FILE__) . '/elements/common.php';
 $heading_title = $tpl['plan'] ? 'sub_plan_edit' : 'sub_plan_add';
 $heading_desc = 'sub_plan_desc';
-$heading_tabs = array('pjActionIndex' => 'sub_tab_companies', 'pjActionPlans' => 'sub_tab_plans', 'pjActionBilling' => 'sub_tab_billing', 'pjActionSettings' => 'sub_tab_settings');
-$heading_active = 'pjActionPlans';
 include dirname(__FILE__) . '/elements/heading.php';
 $p = $tpl['plan'] ? $tpl['plan'] : array('id' => 0, 'code' => '', 'name' => '', 'description' => '', 'price' => null, 'currency' => '', 'billing_interval' => 'month',
 	'interval_count' => 1, 'trial_days' => 0, 'max_properties' => null, 'max_users' => null, 'max_payment_gateways' => null, 'ai_monthly_messages' => null,

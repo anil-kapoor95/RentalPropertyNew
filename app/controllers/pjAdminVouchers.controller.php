@@ -18,6 +18,17 @@ class pjAdminVouchers extends pjAdmin
 		return $res;
 	}
 
+	/** Properties of the active company for the form (name in the admin language, otherwise any saved language). */
+	private function couponCalendars()
+	{
+		return pjCalendarModel::factory()->where('t1.company_id', $this->getCompanyId())
+			->select(sprintf("t1.*, COALESCE(NULLIF(t2.content, ''), (SELECT `ml`.`content` FROM `%s` AS `ml` WHERE `ml`.`model` = 'pjCalendar' AND `ml`.`foreign_id` = t1.id AND `ml`.`field` = 'name' AND `ml`.`content` <> '' ORDER BY `ml`.`locale` LIMIT 1)) AS name", pjMultiLangModel::factory()->getTable()))
+			->join('pjMultiLang', "t2.model='pjCalendar' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left outer')
+			->orderBy('name ASC')
+			->findAll()
+			->getData();
+	}
+
 	public function pjActionCheckCode()
 	{
 		$this->setAjax(true);
@@ -92,12 +103,7 @@ class pjAdminVouchers extends pjAdmin
 				}
 				pjAppController::jsonResponse(array('status' => 'OK'));
 			} else {				
-				$this->set('calendar_arr', pjCalendarModel::factory()->where('t1.company_id', $this->getCompanyId())
-					->select('t1.*, t2.content AS name')
-					->join('pjMultiLang', "t2.model='pjCalendar' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left outer')
-					->orderBy('name ASC')
-					->findAll()
-					->getData());
+				$this->set('calendar_arr', $this->couponCalendars());
 			}
 		}
 	}
@@ -362,12 +368,7 @@ class pjAdminVouchers extends pjAdmin
 				$arr = pjVoucherModel::factory()->find($this->_get->toInt('id'))->getData();
 				$this->set('arr', $arr);
 				
-				$this->set('calendar_arr', pjCalendarModel::factory()->where('t1.company_id', $this->getCompanyId())
-					->select('t1.*, t2.content AS name')
-					->join('pjMultiLang', "t2.model='pjCalendar' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left outer')
-					->orderBy('name ASC')
-					->findAll()
-					->getData());
+				$this->set('calendar_arr', $this->couponCalendars());
 			
 				$this->set('calendar_id_arr', pjCalendarVoucherModel::factory()
 					->where("voucher_id", $this->_get->toInt('id'))

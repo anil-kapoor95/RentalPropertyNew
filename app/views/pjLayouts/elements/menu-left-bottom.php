@@ -6,10 +6,12 @@ $isScriptPreview = $controller_name == 'pjAdminOptions' && $action_name == 'pjAc
 $isScriptColors  = $controller_name == 'pjAdminOptions' && $action_name == 'pjActionColors';
 $isScriptInstall = $controller_name == 'pjAdminOptions' && $action_name == 'pjActionInstall';
 
-$hasAccessScriptPreview = pjAuth::factory('pjAdminOptions', 'pjActionPreview')->hasAccess();
-$hasAccessScriptColors  = pjAuth::factory('pjAdminOptions', 'pjActionColors')->hasAccess()
+// Display and Install: administrators only (for the active company)
+$pjIsAdminRole = (int) $controller->getRoleId() === 1;
+$hasAccessScriptPreview = $pjIsAdminRole && pjAuth::factory('pjAdminOptions', 'pjActionPreview')->hasAccess();
+$hasAccessScriptColors  = $pjIsAdminRole && pjAuth::factory('pjAdminOptions', 'pjActionColors')->hasAccess()
 	&& (!class_exists('pjEntitlement') || pjEntitlement::allows(pjCompanyContext::activeId($controller->getRoleId(), $controller->getUserId()), 'themes'));
-$hasAccessScriptInstall = pjAuth::factory('pjAdminOptions', 'pjActionInstall')->hasAccess();
+$hasAccessScriptInstall = $pjIsAdminRole && pjAuth::factory('pjAdminOptions', 'pjActionInstall')->hasAccess();
 ?>
 <?php if ($hasAccessScriptPreview || $hasAccessScriptColors): ?>
     <li<?php echo ($isScriptPreview || $isScriptColors) ? ' class="active"' : NULL; ?>>

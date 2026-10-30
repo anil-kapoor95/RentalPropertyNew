@@ -7,6 +7,8 @@
 				__('notifications_msg_to_owner');
 			} elseif ($tpl['query']['recipient'] == 'admin') {
 				__('notifications_msg_to_admin');
+			} elseif ($tpl['query']['recipient'] == pjSignupMail::RECIPIENT) {
+				__('notifications_msg_to_signup');
 			} else {
 				__('notifications_msg_to_default');
 			}
