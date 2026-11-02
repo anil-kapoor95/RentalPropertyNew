@@ -66,3 +66,91 @@
 .sub-chip input{margin:0}
 .sub-chip:hover{border-color:#f3a56b}
 .sub-chip:has(input:checked){border-color:#f97618;background:#fff8f2;color:#c2540a}
+
+/* Subscriptions > Plans: list (cards + compare) */
+.sub-plans-bar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:16px}
+.sub-plans-count{margin:0;color:#6b7280;font-weight:600}
+.sub-plan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:18px;margin-bottom:22px}
+.sub-pc{display:flex;flex-direction:column;background:#fff;border:1px solid #e7eaec;border-radius:16px;padding:20px;transition:box-shadow .15s,border-color .15s}
+.sub-pc:hover{box-shadow:0 6px 20px rgba(17,24,39,.07)}
+.sub-pc-default{border-color:#f97618;box-shadow:0 0 0 3px rgba(249,118,24,.10)}
+.sub-pc-off{background:#fafafa}.sub-pc-off .sub-pc-head,.sub-pc-off .sub-pc-limits,.sub-pc-off .sub-pc-features{opacity:.65}
+.sub-pc-badges{display:flex;flex-wrap:wrap;gap:6px;min-height:22px;margin-bottom:10px}
+.sub-pc-name{margin:0 0 4px;font-size:19px;font-weight:800;line-height:1.25;word-break:break-word}
+.sub-pc-name a{color:#111827}.sub-pc-name a:hover{color:#e0640c}
+.sub-pc-pricing{margin:14px 0 4px;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px}
+.sub-pc-price{font-size:28px;font-weight:800;color:#111827;line-height:1}.sub-pc-price small{font-size:14px;font-weight:600;color:#6b7280}
+.sub-pc-price-none{font-size:16px;font-weight:600;color:#9ca3af}
+.sub-pc-per{color:#6b7280;font-size:13px}
+.sub-pc-trial{margin:6px 0 0;color:#2563eb;font-size:13px;font-weight:600}
+.sub-pc-note{margin:6px 0 0;color:#9ca3af;font-size:12px}
+.sub-pc-limits{list-style:none;margin:16px 0 0;padding:12px 0 0;border-top:1px solid #f0f1f3}
+.sub-pc-limits li{display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:13px}
+.sub-pc-limits li span{color:#6b7280}.sub-pc-limits li i{width:18px;color:#9ca3af}
+.sub-pc-limits li strong{color:#111827;text-align:right}
+.sub-pc-features{flex:1;margin-top:12px;padding-top:12px;border-top:1px solid #f0f1f3}
+.sub-pc-label{margin:0 0 8px;color:#6b7280;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.sub-pc-base{margin:0 0 4px;font-weight:600;font-size:13px}
+.sub-pc-features ul{list-style:none;margin:0;padding:0}
+.sub-pc-features li{padding:3px 0;font-size:13px}
+.sub-pc-features i.fa-check,.sub-pc-base i{width:18px;color:#16a34a}
+.sub-pc-more{display:inline-block;margin-top:4px;font-size:12px;font-weight:600;color:#e0640c}
+.sub-pc-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:16px;padding-top:14px;border-top:1px solid #f0f1f3}
+.sub-pc-companies{color:#6b7280;font-size:12px}
+.sub-pc-add{align-items:center;justify-content:center;gap:10px;min-height:220px;border:2px dashed #e5e7eb;background:transparent;color:#6b7280;text-decoration:none}
+.sub-pc-add:hover,.sub-pc-add:focus{border-color:#f97618;color:#e0640c;box-shadow:none}
+.sub-pc-add .sub-empty-icon{margin:0}
+.sub-compare{border-radius:14px;overflow:hidden}
+.sub-compare>summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+.sub-compare>summary::-webkit-details-marker{display:none}
+.sub-compare>summary h5{float:none;margin:0}
+.sub-compare-caret{color:#9ca3af;transition:transform .15s}.sub-compare[open] .sub-compare-caret{transform:rotate(180deg)}
+.sub-compare-table{margin:0}.sub-compare-table thead th{border-bottom:1px solid #e7eaec!important;font-weight:700;white-space:nowrap}
+.sub-compare-table td{border-top:1px solid #f0f1f3!important;vertical-align:middle!important}
+.sub-compare-table td:first-child{color:#374151;min-width:180px}
+.sub-compare-group td{background:#fafafa;color:#6b7280!important;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.sub-yes{color:#16a34a}.sub-no{color:#d1d5db}
+
+/* Subscriptions > Plans: add / edit form */
+.sub-plan-layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:22px;align-items:start}
+.sub-sec{margin-bottom:18px}.sub-sec .ibox-content{border-radius:14px;padding:22px 24px}
+.sub-sec-title{display:flex;align-items:center;gap:10px;margin:0 0 18px;font-size:16px;font-weight:700}
+.sub-sec-title span{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#fff3ea;color:#e0640c;font-size:13px}
+.sub-sec-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:flex-start}
+.sub-sec-actions{display:flex;gap:6px}
+.sub-sec-hint{margin:12px 0 0;color:#6b7280;font-size:12px}.sub-sec-hint i{margin-right:6px;color:#9ca3af}
+.sub-plan-form label:not(.sub-chip):not(.sub-opt):not(.sub-limit){font-weight:600;color:#374151}
+.sub-every{display:flex;gap:6px}.sub-every input{max-width:76px}
+.sub-limit-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
+.sub-limit{display:block;margin:0;padding:12px;border:1px solid #e7eaec;border-radius:12px;font-weight:400}
+.sub-limit-label{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;font-weight:600;color:#374151}
+.sub-limit-label i{color:#9ca3af}
+.sub-feature-chips{display:flex;flex-wrap:wrap}
+.sub-chip-base{background:#fafafa}
+.sub-opts{display:grid;gap:10px}
+.sub-opt{display:flex;gap:14px;align-items:flex-start;margin:0;padding:14px;border:1px solid #e7eaec;border-radius:12px;font-weight:400;cursor:pointer}
+.sub-opt:has(input:checked){border-color:#f3c9a6;background:#fffaf6}
+.sub-opt strong{display:block;color:#111827}.sub-opt small{display:block;margin-top:2px;color:#6b7280;font-size:12px;line-height:1.45}
+.sub-switch{position:relative;flex:0 0 auto;width:38px;height:22px;margin-top:1px}
+.sub-switch input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+.sub-switch i{position:absolute;inset:0;border-radius:999px;background:#d1d5db;transition:background .15s;pointer-events:none}
+.sub-switch i:after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:transform .15s}
+.sub-switch input:checked+i{background:#f97618}.sub-switch input:checked+i:after{transform:translateX(16px)}
+.sub-switch input:focus-visible+i{box-shadow:0 0 0 3px rgba(249,118,24,.3)}
+.sub-order{max-width:220px}
+.sub-plan-side{display:grid;gap:12px}
+.sub-preview{background:#fff;border:1px solid #e7eaec;border-radius:16px;padding:20px}
+.sub-preview .sub-pc-pricing{margin-top:8px}
+.sub-pv-badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.sub-danger{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-top:4px;padding:16px 20px;border:1px solid #fde2e2;border-radius:14px;background:#fff}
+.sub-danger strong{display:block;color:#b91c1c}.sub-danger small{color:#6b7280}
+/* the page's slide-in animation leaves a transform that would pin the fixed Save bar to the page instead of the screen */
+.wrapper-content:has(.sub-plan-form){animation:none!important;transform:none!important}
+/* Save / Cancel under the sections (the summary column has them too); fixed to the bottom on small screens */
+.sub-plan-actions-bar{display:flex;justify-content:flex-end;gap:8px;margin:0 322px 22px 0}
+.sub-plan-actions-bar .btn{min-width:140px}
+@media (max-width:991px){.sub-plan-layout{grid-template-columns:1fr}.sub-plan-actions{display:none}
+	.sub-plan-form{padding-bottom:72px}
+	.sub-plan-actions-bar{position:fixed;left:0;right:0;bottom:0;z-index:30;margin:0;padding:10px 16px;background:#fff;border-top:1px solid #e7eaec;box-shadow:0 -4px 12px rgba(17,24,39,.06)}
+	.sub-plan-actions-bar .btn{flex:1;min-width:0}}
+@media (max-width:767px){.sub-sec .ibox-content{padding:18px 16px}.sub-pc-price{font-size:24px}}

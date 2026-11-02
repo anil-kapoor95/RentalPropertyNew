@@ -45,6 +45,11 @@
 			        }).then(function(res) {
 			            return res.json();
 			        }).then(function(res) {
+			            // PayPal did not create the order (e.g. a currency it does not take): show its reason
+			            if (!res || !res.id) {
+			                var d = res && res.details && res.details[0];
+			                throw new Error(d && d.description ? d.description : (res && res.message ? res.message : 'PayPal could not create the payment.'));
+			            }
 			            return res.id;
 			        });
 			    },

@@ -171,6 +171,7 @@ class pjJabbApi extends pjAppController
 		'login_email' => array(8, 900),   // failed log-ins for one e-mail address
 		'check_email' => array(60, 900),  // live e-mail checks from one IP address
 		'airbnb'      => array(30, 3600), // Airbnb listing checks of one sign-up
+		'booking'     => array(10, 900),  // bookings made on the websites from one IP address
 	);
 
 	/**
@@ -2908,6 +2909,20 @@ class pjJabbApi extends pjAppController
 			'branding'      => self::showBranding($company_id),
 			'booked'        => $booked,
 			'booking_url'   => PJ_INSTALL_URL . 'preview.php?cid=' . (int) $cal['id'],
+			// booking card texts (back office > Languages)
+			'labels'        => array(
+				'book_now'     => self::lbl('book_book_now'),
+				'check_in'     => self::lbl('book_check_in'),
+				'check_out'    => self::lbl('book_check_out'),
+				'choose_dates' => self::lbl('book_choose_dates'),
+				'adults'       => self::lbl('bf_adults'),
+				'children'     => self::lbl('bf_children'),
+			),
+			// Adults / children of the property's booking form (Booking options > Booking form)
+			'guests'        => array(
+				'adults'   => array('show' => (int) $opt['o_bf_adults'] !== 1, 'max' => max(1, (int) $opt['o_bf_adults_max'])),
+				'children' => array('show' => (int) $opt['o_bf_children'] !== 1, 'max' => max(0, (int) $opt['o_bf_children_max'])),
+			),
 		);
 		$this->respond(200, 'OK', $out);
 	}
@@ -3362,10 +3377,10 @@ class pjJabbApi extends pjAppController
 		}
 
 		// Subscription plan: number of online gateways switched on per property (same rule as Properties > Payments).
-		if ($is_active && !$offline && class_exists('pjEntitlement'))
+		if ($is_active && !$offline && class_exists('pjEntitlement') && pjEntitlement::countsAsGateway($company_id, $payment_method))
 		{
 			$max = pjEntitlement::limit($company_id, 'max_payment_gateways');
-			$active = pjEntitlement::activeGateways($calendar_id);
+			$active = pjEntitlement::countedGateways($company_id, $calendar_id);
 			if ($max !== null && !in_array($payment_method, $active, true) && count($active) >= $max)
 			{
 				$this->respond(402, __('subGatewayLimit', true), array('active_gateways' => $active));
@@ -3786,6 +3801,585 @@ class pjJabbApi extends pjAppController
 			$countries[$i]['timezones'] = $zones;
 		}
 		$this->respond(200, 'OK', array('countries' => $countries));
+	}
+
+	/* ------------------------------------------------------------------
+	 * Booking on the host's website (localhost:3000/property/<slug>/book)
+	 * Everything comes from the property's settings in the back office: guests (Booking options), booking form
+	 * fields (o_bf_*: 1 hidden, 2 optional, 3 required), extras, coupons and discounts, prices, tax, deposit,
+	 * security, terms, payment methods (Properties > Payments, allowed by the plan) and the texts (back office
+	 * language labels). Prices come from the back office's own calculation (pjActionCalcPrices) and the
+	 * booking is saved like the old booking form (pjFront::pjActionBookingSave).
+	 * ------------------------------------------------------------------ */
+
+	/** Language of the website texts: English, otherwise the company's default language. */
+	private static function websiteLocale($company_id)
+	{
+		static $cache = array();
+		$company_id = (int) $company_id;
+		if (!isset($cache[$company_id]))
+		{
+			$en = pjBaseLocaleModel::factory()->unscoped()->where('t1.language_iso LIKE', 'en%')->orderBy('t1.id ASC')->limit(1)->findAll()->getDataIndex(0);
+			$lid = !empty($en) ? (int) $en['id'] : pjCompanyContext::companyDefaultLocale($company_id);
+			$cache[$company_id] = $lid > 0 ? $lid : 1;
+		}
+		return $cache[$company_id];
+	}
+
+	/** Public property of the link, its company and options: array(cal, texts, company_id, options, slug) or a 404. */
+	private function bookingProperty()
+	{
+		$slug = strtolower($this->param('slug'));
+		$found = ($slug !== '' && preg_match('/^[a-z0-9-]{1,60}$/', $slug)) ? self::publicCalendarBySlug($slug) : null;
+		if ($found === null)
+		{
+			$this->respond(404, self::lbl('book_not_found'));
+		}
+		list($cal, $t) = $found;
+		$cid = (int) $cal['company_id'];
+		$opt = self::calendarOptions($cal['id'], $cid);
+		// the price calculation also reads options from the controller
+		$this->option_arr = $opt;
+		return array($cal, $t, $cid, $opt, $slug);
+	}
+
+	/** Text of the back office language (the key itself when it has none). */
+	private static function lbl($key)
+	{
+		$v = __($key, true);
+		return is_string($v) && $v !== '' ? $v : $key;
+	}
+
+	/** Booking form fields (Booking options > Booking form): name => array(option, label, input type). */
+	private static $bookingFields = array(
+		'c_name'    => array('o_bf_name', 'bf_name', 'text'),
+		'c_email'   => array('o_bf_email', 'bf_email', 'email'),
+		'c_phone'   => array('o_bf_phone', 'bf_phone', 'tel'),
+		'c_country' => array('o_bf_country', 'bf_country', 'country'),
+		'c_address' => array('o_bf_address', 'bf_address', 'text'),
+		'c_city'    => array('o_bf_city', 'bf_city', 'text'),
+		'c_state'   => array('o_bf_state', 'bf_state', 'text'),
+		'c_zip'     => array('o_bf_zip', 'bf_zip', 'text'),
+		'c_notes'   => array('o_bf_notes', 'bf_notes', 'textarea'),
+	);
+
+	/** Payment methods of the property that are switched on and allowed by the company's plan: id => {id, title, online}. */
+	/** Currencies PayPal takes (INR only works for PayPal accounts registered in India, so it is not offered). */
+	private static $paypalCurrencies = array('AUD', 'BRL', 'CAD', 'CNY', 'CZK', 'DKK', 'EUR', 'HKD', 'HUF', 'ILS', 'JPY', 'MYR', 'MXN',
+		'TWD', 'NZD', 'NOK', 'PHP', 'PLN', 'GBP', 'SGD', 'SEK', 'CHF', 'THB', 'USD');
+
+	/** Can this gateway take payments in this currency? (only PayPal has a fixed list; the others check on their own page) */
+	private static function gatewayTakesCurrency($method, $currency)
+	{
+		$currency = strtoupper(trim((string) $currency));
+		if ($currency !== '' && in_array($method, array('paypal', 'paypal_express'), true))
+		{
+			return in_array($currency, self::$paypalCurrencies, true);
+		}
+		return true;
+	}
+
+	private static function bookingPaymentMethods($calendar_id, $company_id, $locale_id, $currency = '')
+	{
+		if (pjObject::getPlugin('pjPayments') === NULL)
+		{
+			return array();
+		}
+		$options = pjPaymentOptionModel::factory()->getOptions($calendar_id);
+		$titles = pjPayments::getPaymentTitles($calendar_id, $locale_id);
+		$names = __('payment_methods', true);
+		$order = array('paypal', 'authorize', 'paypal_express', '2checkout', 'stripe', 'razorpay', 'mollie', 'skrill', 'world_pay', 'braintree', 'bank', 'cash');
+		$out = array();
+		foreach ($order as $method)
+		{
+			$o = isset($options[$method]) ? $options[$method] : null;
+			if (!is_array($o) || !isset($o['is_active']) || (int) $o['is_active'] !== 1)
+			{
+				continue;
+			}
+			$offline = in_array($method, array('cash', 'bank'), true);
+			if (!$offline && pjObject::getPlugin(pjPayments::getPluginName($method)) === NULL)
+			{
+				continue;
+			}
+			if (class_exists('pjEntitlement') && !pjEntitlement::allowsPaymentMethod($company_id, $method))
+			{
+				continue;
+			}
+			if (!$offline && !self::gatewayTakesCurrency($method, $currency))
+			{
+				continue;
+			}
+			$title = !empty($titles[$method]) ? $titles[$method] : (isset($names[$method]) ? $names[$method] : ucfirst($method));
+			$out[$method] = array('id' => $method, 'title' => (string) $title, 'online' => !$offline);
+		}
+		return $out;
+	}
+
+	/** Bank account text of the property (bank transfer). */
+	private static function bankAccount($calendar_id, $locale_id)
+	{
+		$row = pjMultiLangModel::factory()->select('t1.content')->where('t1.model', 'pjOption')->where('t1.locale', (int) $locale_id)
+			->where('t1.foreign_id', (int) $calendar_id)->where('t1.field', 'o_bank_account')->limit(1)->findAll()->getDataIndex(0);
+		return $row ? trim((string) $row['content']) : '';
+	}
+
+	/** Extras of the property (active ones), in the website language. */
+	private static function bookingExtras($calendar_id, $locale_id)
+	{
+		$rows = pjExtraModel::factory()
+			->select('t1.*, t2.content AS name')
+			->join('pjMultiLang', sprintf("t2.model='pjExtra' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='%u'", (int) $locale_id), 'left outer')
+			->where('t1.status', 'T')
+			->where(sprintf("t1.id IN (SELECT `extra_id` FROM `%s` WHERE `calendar_id` = %u)", pjCalendarExtraModel::factory()->getTable(), (int) $calendar_id))
+			->orderBy('`name` ASC')->findAll()->getData();
+		$out = array();
+		foreach ($rows as $r)
+		{
+			$max = ($r['multi'] == 'T' || in_array($r['price_type'], array('count', 'count_night'), true)) ? max(1, (int) $r['max_count']) : 1;
+			$out[] = array('id' => (int) $r['id'], 'name' => (string) $r['name'], 'price' => round((float) $r['price'], 2),
+				'price_type' => (string) $r['price_type'], 'required' => $r['required'] == 'T', 'max' => $max);
+		}
+		return $out;
+	}
+
+	/** Min / max stay of the period the check-in falls in (Properties > Limits): array(min, max), null = no rule. */
+	private static function stayLimits($calendar_id, $date_from)
+	{
+		$row = pjLimitModel::factory()->where('t1.calendar_id', (int) $calendar_id)->where('t1.date_from <=', $date_from)->where('t1.date_to >=', $date_from)
+			->where("(t1.blocked IS NULL OR t1.blocked <> 'T')")->orderBy('t1.id DESC')->limit(1)->findAll()->getDataIndex(0);
+		return array(!empty($row['min_nights']) ? (int) $row['min_nights'] : null, !empty($row['max_nights']) ? (int) $row['max_nights'] : null);
+	}
+
+	/** Dates, guests, extras and coupon of the request, checked against the property: array(values, error text or ''). */
+	private function bookingRequest($cal, $opt)
+	{
+		$from = $this->param('date_from');
+		$to = $this->param('date_to');
+		$v = array('date_from' => $from, 'date_to' => $to,
+			'adults' => (int) $opt['o_bf_adults'] !== 1 ? (int) $this->param('adults') : 0,
+			'children' => (int) $opt['o_bf_children'] !== 1 ? (int) $this->param('children') : 0,
+			'extras' => array(), 'qty' => array(), 'promo_code' => trim((string) $this->param('promo_code')));
+		if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $to) || !strtotime($from) || !strtotime($to))
+		{
+			return array($v, self::lbl('book_choose_dates'));
+		}
+		if ($from < date('Y-m-d'))
+		{
+			return array($v, self::lbl('book_err_past'));
+		}
+		if ($to < $from || ($opt['o_price_based_on'] !== 'days' && $to === $from))
+		{
+			return array($v, self::lbl('book_err_dates'));
+		}
+		$nights = (int) round((strtotime($to) - strtotime($from)) / 86400) + ($opt['o_price_based_on'] === 'days' ? 1 : 0);
+		list($min, $max) = self::stayLimits($cal['id'], $from);
+		if ($min !== null && $nights < $min)
+		{
+			return array($v, str_replace('{N}', $min, self::lbl('book_err_min_nights')));
+		}
+		if ($max !== null && $nights > $max)
+		{
+			return array($v, str_replace('{N}', $max, self::lbl('book_err_max_nights')));
+		}
+		if ((int) $opt['o_bf_adults'] === 3 && $v['adults'] < 1)
+		{
+			return array($v, self::lbl('book_err_guests'));
+		}
+		if ($v['adults'] < 0 || $v['adults'] > max(1, (int) $opt['o_bf_adults_max']) || $v['children'] < 0 || $v['children'] > max(0, (int) $opt['o_bf_children_max']))
+		{
+			return array($v, self::lbl('book_err_guests'));
+		}
+		$people = $v['adults'] + $v['children'];
+		if (!empty($opt['o_max_people']) && (int) $opt['o_max_people'] > 0 && $people > (int) $opt['o_max_people'])
+		{
+			return array($v, str_replace('{MAX}', (int) $opt['o_max_people'], self::lbl('front_max_people_msg')));
+		}
+		if (!empty($opt['o_min_people']) && (int) $opt['o_min_people'] > 0 && $people < (int) $opt['o_min_people'])
+		{
+			return array($v, str_replace('{MIN}', (int) $opt['o_min_people'], self::lbl('front_min_people_msg')));
+		}
+		// extras {id: qty}; the required ones are always included
+		$wanted = json_decode((string) $this->param('extras'), true);
+		$extras = array();
+		$qty = array();
+		foreach ((is_array($wanted) ? $wanted : array()) as $id => $q)
+		{
+			if ((int) $q > 0)
+			{
+				$extras[(int) $id] = 'on';
+				$qty[(int) $id] = (int) $q;
+			}
+		}
+		foreach (self::bookingExtras($cal['id'], self::websiteLocale($cal['company_id'])) as $e)
+		{
+			if ($e['required'] && !isset($extras[$e['id']]))
+			{
+				$extras[$e['id']] = 'on';
+				$qty[$e['id']] = 1;
+			}
+		}
+		list($v['extras'], $v['qty']) = pjAppController::sanitizeExtras($cal['id'], $extras, $qty);
+		// free dates: bookings, blocked periods, bookings per day
+		$check = $this->pjActionCheckDt($from, $to, (int) $cal['id'], NULL, TRUE);
+		if ($check['status'] !== 'OK')
+		{
+			return array($v, !empty($check['text']) ? $check['text'] : self::lbl('book_err_taken'));
+		}
+		return array($v, '');
+	}
+
+	/** Price of a request (the back office's calculation). */
+	private function bookingPrice($cal, $opt, $v, $company_id)
+	{
+		$p = $this->pjActionCalcPrices((int) $cal['id'], strtotime($v['date_from']), strtotime($v['date_to']), $v['adults'], $v['children'],
+			$v['extras'], $v['qty'], $v['promo_code'], $opt, self::websiteLocale($company_id));
+		$f = function ($k) use ($p) { return isset($p[$k]) && is_numeric($p[$k]) ? round((float) $p[$k], 2) : 0.0; };
+		$promo = (int) $p['promo_valid'] === 1;
+		$discount = (int) $p['discount_valid'] === 1;
+		return array(
+			'nights'          => (int) $p['nights'],
+			'amount'          => $f('amount'),
+			'extra_price'     => $f('extra_price'),
+			'promo_valid'     => $promo,
+			'promo_amount'    => $promo ? $f('promo_amount') : 0.0,
+			'discount_valid'  => $discount,
+			'discount_amount' => $discount ? $f('discount_amount') : 0.0,
+			'discount_name'   => (string) $p['discount_name'],
+			'tax'             => $f('tax'),
+			'tourist_tax'     => $f('tourist_tax'),
+			'security'        => $f('security'),
+			'total'           => $f('total'),
+			'deposit'         => $f('deposit'),
+			// left after the payment now (the security deposit too when it is not part of the payment now)
+			'on_arrival'      => round(max(0, $f('total') + $f('security') - $f('deposit')), 2),
+			'raw'             => $p,
+		);
+	}
+
+	/**
+	 * Booking page: property, guests, booking form fields, extras, payment methods, terms, taken dates and the
+	 * texts of the page (back office language). slug*
+	 */
+	public function pjActionBookingSetup()
+	{
+		$this->setAjax(true);
+		list($cal, $t, $cid, $opt, $slug) = $this->bookingProperty();
+		$lid = self::websiteLocale($cid);
+		$price = self::propertyPrice($cal['id'], $cid);
+		$photos = self::photoList($cal['id']);
+		$company = pjCompanyModel::factory()->find($cid)->getData();
+
+		$fields = array();
+		foreach (self::$bookingFields as $name => $f)
+		{
+			$mode = isset($opt[$f[0]]) ? (int) $opt[$f[0]] : 1;
+			if ($mode === 2 || $mode === 3)
+			{
+				$fields[] = array('name' => $name, 'label' => self::lbl($f[1]), 'type' => $f[2], 'required' => $mode === 3);
+			}
+		}
+		$countries = array();
+		if ((int) $opt['o_bf_country'] !== 1)
+		{
+			$countries = pjBaseCountryModel::factory()->select('t1.id, t2.content AS name')
+				->join('pjMultiLang', sprintf("t2.model='pjBaseCountry' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='%u'", $lid), 'left outer')
+				->where(pjCompanyContext::countryActiveSql($cid))->orderBy('`name` ASC')->findAll()->getData();
+		}
+		$terms = null;
+		if ((int) $opt['o_bf_terms'] !== 1)
+		{
+			$tt = pjMultiLangModel::factory()->select('t1.field, t1.content')->where('t1.model', 'pjCalendar')->where('t1.foreign_id', (int) $cal['id'])
+				->where('t1.locale', $lid)->whereIn('t1.field', array('terms_url', 'terms_body'))->findAll()->getDataPair('field', 'content');
+			$terms = array(
+				'required' => (int) $opt['o_bf_terms'] === 3,
+				'label'    => self::lbl('bf_terms'),
+				'url'      => isset($tt['terms_url']) && preg_match('~^https?://~', (string) $tt['terms_url']) ? (string) $tt['terms_url'] : '',
+				'body'     => isset($tt['terms_body']) ? self::htmlToText($tt['terms_body']) : '',
+			);
+		}
+		// taken dates: bookings and blocked periods, next 12 months ("to" = check-out day)
+		$booked = array();
+		// status: pending (waiting for the host / payment) or booked (confirmed bookings and blocked periods)
+		foreach (pjReservationModel::factory()->select('t1.date_from, t1.date_to, t1.status')->where('t1.calendar_id', (int) $cal['id'])
+			->where('t1.status <>', 'Cancelled')->where('t1.date_to >=', date('Y-m-d'))
+			->where('t1.date_from <=', date('Y-m-d', strtotime('+12 months')))->orderBy('t1.date_from ASC')->findAll()->getData() as $r)
+		{
+			$booked[] = array('from' => $r['date_from'], 'to' => $r['date_to'], 'status' => $r['status'] === 'Pending' ? 'pending' : 'booked');
+		}
+		foreach (pjLimitModel::factory()->select('t1.date_from, t1.date_to')->where('t1.calendar_id', (int) $cal['id'])->where('t1.blocked', 'T')
+			->where('t1.date_to >=', date('Y-m-d'))->findAll()->getData() as $r)
+		{
+			$booked[] = array('from' => $r['date_from'], 'to' => date('Y-m-d', strtotime($r['date_to'] . ' +1 day')), 'status' => 'booked');
+		}
+		// first day of the week of the calendar (Company options > General: 0 = Sunday, 1 = Monday ...)
+		$settings = self::companySettings($cid);
+		$week_start = (string) $settings['week_start'];
+		if (strpos($week_start, '::') !== false)
+		{
+			$week_start = substr($week_start, strrpos($week_start, '::') + 2);
+		}
+		$week_start = max(0, min(6, (int) $week_start));
+		$labels = array();
+		foreach (self::$bookingLabels as $k)
+		{
+			$labels[$k] = self::lbl($k);
+		}
+		$price_types = __($opt['o_price_based_on'] === 'days' ? 'day_price_types' : 'price_types', true);
+		$this->respond(200, 'OK', array(
+			'slug' => $slug,
+			'property' => array(
+				'name'           => (string) $t['name'],
+				'photo'          => !empty($photos) ? $photos[0]['url'] : null,
+				'city'           => isset($t['address_city']) ? (string) $t['address_city'] : '',
+				'state'          => (string) $cal['address_state'],
+				'country'        => self::countryNameEn($cal['address_country'], $cid),
+				'price'          => $price['price'],
+				'price_based_on' => $opt['o_price_based_on'] === 'days' ? 'days' : 'nights',
+				'currency'       => $price['currency'],
+				'currency_sign'  => self::currencySign($price['currency']),
+				'price_format'   => self::priceFormat($cid),
+				'theme'          => self::companyTheme($cid),
+				'branding'       => self::showBranding($cid),
+				'host'           => array('name' => (string) $company['name'], 'phone' => !empty($company['phone']) ? (string) $company['phone'] : '',
+					'logo' => !empty($company['logo']) ? PJ_INSTALL_URL . ltrim($company['logo'], '/') : null),
+			),
+			'guests' => array(
+				'adults'     => array('show' => (int) $opt['o_bf_adults'] !== 1, 'required' => (int) $opt['o_bf_adults'] === 3, 'max' => max(1, (int) $opt['o_bf_adults_max'])),
+				'children'   => array('show' => (int) $opt['o_bf_children'] !== 1, 'required' => (int) $opt['o_bf_children'] === 3, 'max' => max(0, (int) $opt['o_bf_children_max'])),
+				'min_people' => !empty($opt['o_min_people']) ? (int) $opt['o_min_people'] : null,
+				'max_people' => !empty($opt['o_max_people']) ? (int) $opt['o_max_people'] : null,
+			),
+			'fields'            => $fields,
+			'countries'         => $countries,
+			'extras'            => self::bookingExtras($cal['id'], $lid),
+			'extra_price_types' => is_array($price_types) ? $price_types : new stdClass(),
+			'coupons'           => !class_exists('pjEntitlement') || pjEntitlement::allows($cid, 'coupons'),
+			'payment_methods'   => array_values(self::bookingPaymentMethods($cal['id'], $cid, $lid, isset($opt['o_currency']) ? $opt['o_currency'] : '')),
+			'terms'             => $terms,
+			'booked'            => $booked,
+			'week_start'        => $week_start,
+			'labels'            => $labels,
+		));
+	}
+
+	/** Texts of the booking pages (back office > Languages); the update adds the ones the old booking form had not. */
+	private static $bookingLabels = array(
+		'bf_adults', 'bf_children', 'bf_start_date', 'bf_end_date', 'bf_night', 'bf_nights', 'bf_day', 'bf_days', 'bf_price',
+		'bf_extra_price', 'bf_discount_amount', 'bf_tax', 'bf_tourist_tax', 'bf_security', 'bf_total', 'bf_deposit', 'bf_payment',
+		'bf_booking_summary', 'bf_bank_account', 'front_extras', 'front_apply_promo_code', 'front_enter_promo_code', 'front_invalid_promo_code',
+		'front_discount', 'front_paid_on_arrival',
+		'book_step_stay', 'book_step_extras', 'book_step_details', 'book_step_payment',
+		'book_title_stay', 'book_desc_stay', 'book_title_extras', 'book_desc_extras', 'book_title_details', 'book_desc_details',
+		'book_title_payment', 'book_desc_payment', 'book_continue', 'book_continue_payment', 'book_back', 'book_back_to_property',
+		'book_available', 'book_checking', 'book_confirm_pay', 'book_confirm', 'book_pay_now', 'book_total', 'book_coupon',
+		'book_coupon_applied', 'book_add', 'book_remove', 'book_included', 'book_err_required', 'book_err_email', 'book_err_terms',
+		'book_err_payment', 'book_choose_dates', 'book_confirmed_title', 'book_pending_title', 'book_confirmed_desc', 'book_pending_desc',
+		'book_reference', 'book_paid_now', 'book_message_host', 'book_payment_failed', 'book_redirecting', 'book_guests',
+		'book_no_payment_needed', 'book_adults_hint', 'book_children_hint', 'book_extras_none', 'book_dates', 'book_extras_summary',
+		'book_payment_method', 'book_secure', 'book_book_now', 'book_add_date', 'book_check_in', 'book_check_out', 'book_not_found',
+		'book_bank_transfer_info', 'book_pay_on_arrival', 'book_security_refundable', 'book_on_arrival',
+		'book_cal_available', 'book_cal_pending', 'book_cal_booked', 'book_cal_past', 'book_cal_selected', 'book_cal_pick_in',
+		'book_cal_pick_out', 'book_cal_taken', 'book_cal_prev', 'book_cal_next', 'book_cal_clear',
+	);
+
+	/** Price of dates, guests, extras and coupon. slug*, date_from*, date_to*, adults, children, extras (JSON {id: qty}), promo_code */
+	public function pjActionBookingQuote()
+	{
+		$this->setAjax(true);
+		list($cal, $t, $cid, $opt) = $this->bookingProperty();
+		list($v, $error) = $this->bookingRequest($cal, $opt);
+		if ($error !== '')
+		{
+			$this->respond(422, $error, array('available' => false), array('dates' => $error));
+		}
+		$p = $this->bookingPrice($cal, $opt, $v, $cid);
+		unset($p['raw']);
+		$p['available'] = true;
+		$p['promo_code'] = $v['promo_code'];
+		$p['promo_error'] = $v['promo_code'] !== '' && !$p['promo_valid'] ? self::lbl('front_invalid_promo_code') : '';
+		$p['extras'] = (object) $v['qty'];
+		$this->respond(200, 'OK', $p);
+	}
+
+	/**
+	 * Saves the booking: the quote fields + the booking form fields (c_*), payment_method, terms (1).
+	 * Data: reference, status, payment {method, online, pay_url, bank_account}, price
+	 */
+	public function pjActionBookingCreate()
+	{
+		$this->setAjax(true);
+		$this->requirePost();
+		list($cal, $t, $cid, $opt, $slug) = $this->bookingProperty();
+		$ip = $this->throttleIp();
+		$this->throttleCheck('booking', $ip, self::lbl('book_err_too_many'));
+		if (pjBase::isBlockedIp($ip, $opt))
+		{
+			$this->respond(403, self::lbl('front_ip_address_blocked'));
+		}
+		if (class_exists('pjEntitlement') && pjEntitlement::frontSuspended($cid))
+		{
+			$this->respond(402, self::lbl('subFrontSuspended'));
+		}
+		list($v, $error) = $this->bookingRequest($cal, $opt);
+		if ($error !== '')
+		{
+			$this->respond(422, $error, array(), array('dates' => $error));
+		}
+		$errors = array();
+		$data = array();
+		foreach (self::$bookingFields as $name => $f)
+		{
+			$mode = isset($opt[$f[0]]) ? (int) $opt[$f[0]] : 1;
+			if ($mode !== 2 && $mode !== 3)
+			{
+				continue;
+			}
+			$value = trim((string) $this->param($name));
+			if ($value === '')
+			{
+				if ($mode === 3)
+				{
+					$errors[$name] = self::lbl('book_err_required');
+				}
+				continue;
+			}
+			if ($name === 'c_email' && !pjValidation::pjActionEmail($value))
+			{
+				$errors[$name] = self::lbl('book_err_email');
+				continue;
+			}
+			if ($name === 'c_country' && (int) pjBaseCountryModel::factory()->where('t1.id', (int) $value)->findCount()->getData() === 0)
+			{
+				$errors[$name] = self::lbl('book_err_required');
+				continue;
+			}
+			$data[$name] = $name === 'c_country' ? (int) $value : self::cut($value, $name === 'c_notes' ? 2000 : 255);
+		}
+		if ((int) $opt['o_bf_terms'] === 3 && $this->param('terms') !== '1')
+		{
+			$errors['terms'] = self::lbl('book_err_terms');
+		}
+		$lid = self::websiteLocale($cid);
+		$price = $this->bookingPrice($cal, $opt, $v, $cid);
+		$methods = self::bookingPaymentMethods($cal['id'], $cid, $lid, isset($opt['o_currency']) ? $opt['o_currency'] : '');
+		$method = (string) $this->param('payment_method');
+		if ($price['deposit'] > 0 && !isset($methods[$method]))
+		{
+			$errors['payment_method'] = self::lbl('book_err_payment');
+		} elseif (!isset($methods[$method])) {
+			$method = '';
+		}
+		if (!empty($errors))
+		{
+			$this->respond(422, 'Validation failed', array(), $errors);
+		}
+		$p = $price['raw'];
+		$data = array_merge($data, array(
+			'calendar_id'     => (int) $cal['id'],
+			'uuid'            => pjUtil::uuid(),
+			'status'          => ucfirst((string) $opt['o_status_if_not_paid']),
+			'locale_id'       => $lid,
+			'ip'              => $ip,
+			'date_from'       => $v['date_from'],
+			'date_to'         => $v['date_to'],
+			'price_based_on'  => $opt['o_price_based_on'],
+			'c_adults'        => $v['adults'],
+			'c_children'      => $v['children'],
+			'payment_method'  => $method !== '' ? $method : ':NULL',
+			'amount'          => $p['amount'],
+			'extra_price'     => $p['extra_price'],
+			'deposit'         => $p['deposit'],
+			'tax'             => $p['tax'],
+			'tourist_tax'     => $p['tourist_tax'],
+			'security'        => $p['security'],
+			'promo_amount'    => (int) $p['promo_valid'] === 1 ? $p['promo_amount'] : ':NULL',
+			'promo_code'      => (int) $p['promo_valid'] === 1 ? $p['promo_code'] : ':NULL',
+			'promo_type'      => (int) $p['promo_valid'] === 1 ? $p['promo_type'] : ':NULL',
+			'discount_amount' => (int) $p['discount_valid'] === 1 ? $p['discount_amount'] : ':NULL',
+		));
+		$m = pjReservationModel::factory();
+		if (!$m->validates($data))
+		{
+			$this->respond(422, self::lbl('book_err_dates'));
+		}
+		$id = (int) $m->setAttributes($data)->insert()->getInsertId();
+		if ($id <= 0)
+		{
+			$this->respond(500, self::lbl('book_err_not_saved'));
+		}
+		$data['id'] = $id;
+		self::throttleHit('booking', $ip);
+		pjAppController::saveReservationIcal($data);
+		foreach ($v['extras'] as $extra_id => $on)
+		{
+			pjReservationExtraModel::factory()->setAttributes(array('reservation_id' => $id, 'extra_id' => (int) $extra_id, 'qty' => (int) $v['qty'][$extra_id]))->insert();
+		}
+		// the booking e-mails / SMS of the property and the company, as with the old booking form
+		if (!class_exists('pjFront'))
+		{
+			require_once dirname(__FILE__) . '/pjFront.controller.php';
+		}
+		pjFront::pjActionConfirmSend($id, $opt, $lid, 'confirmation');
+
+		$booking = pjReservationModel::factory()->find($id)->getData();
+		$payment = array('method' => $method, 'online' => $method !== '' && !empty($methods[$method]['online']), 'pay_url' => null, 'bank_account' => '');
+		if ($payment['online'])
+		{
+			$site = $this->signupSiteUrl();
+			$return = ($site !== '' ? $site : rtrim(PJ_INSTALL_URL, '/')) . '/property/' . $slug . '/book/confirmed?ref=' . $booking['uuid'];
+			$payment['pay_url'] = PJ_INSTALL_URL . 'index.php?controller=pjFront&action=pjActionPayBooking&cid=' . (int) $cal['id']
+				. '&ref=' . rawurlencode($booking['uuid']) . '&return=' . rawurlencode($return)
+				. '&hash=' . sha1($booking['uuid'] . strtotime($booking['created']) . $return . PJ_SALT);
+		} elseif ($method === 'bank') {
+			$payment['bank_account'] = self::bankAccount($cal['id'], $lid);
+		}
+		unset($price['raw']);
+		$this->respond(200, 'OK', array('reference' => $booking['uuid'], 'status' => $booking['status'], 'payment' => $payment, 'price' => $price));
+	}
+
+	/** A booking made on the website (confirmation page). slug*, ref* (booking reference) */
+	public function pjActionBookingStatus()
+	{
+		$this->setAjax(true);
+		list($cal, $t, $cid, $opt) = $this->bookingProperty();
+		$ref = (string) $this->param('ref');
+		$b = preg_match('/^[A-Za-z0-9-]{6,64}$/', $ref)
+			? pjReservationModel::factory()->where('t1.uuid', $ref)->where('t1.calendar_id', (int) $cal['id'])->limit(1)->findAll()->getDataIndex(0)
+			: array();
+		if (empty($b))
+		{
+			$this->respond(404, self::lbl('book_not_found'));
+		}
+		$lid = self::websiteLocale($cid);
+		$extras = array();
+		foreach (pjReservationExtraModel::factory()->select('t1.qty, t2.content AS name')
+			->join('pjMultiLang', sprintf("t2.model='pjExtra' AND t2.foreign_id=t1.extra_id AND t2.field='name' AND t2.locale='%u'", $lid), 'left outer')
+			->where('t1.reservation_id', (int) $b['id'])->findAll()->getData() as $e)
+		{
+			$extras[] = array('name' => (string) $e['name'], 'qty' => (int) $e['qty']);
+		}
+		$names = __('payment_methods', true);
+		$titles = pjObject::getPlugin('pjPayments') !== NULL ? pjPayments::getPaymentTitles($cal['id'], $lid) : array();
+		$method = (string) $b['payment_method'];
+		$total = (float) $b['amount'] + (float) $b['extra_price'] - (float) $b['promo_amount'] - (float) $b['discount_amount'] + (float) $b['tax'] + (float) $b['tourist_tax'];
+		$this->respond(200, 'OK', array(
+			'reference'      => $b['uuid'],
+			'status'         => $b['status'],
+			'paid'           => !empty($b['txn_id']),
+			'date_from'      => $b['date_from'],
+			'date_to'        => $b['date_to'],
+			'adults'         => (int) $b['c_adults'],
+			'children'       => (int) $b['c_children'],
+			'email'          => (string) $b['c_email'],
+			'extras'         => $extras,
+			'payment_method' => $method,
+			'payment_title'  => !empty($titles[$method]) ? $titles[$method] : (isset($names[$method]) ? $names[$method] : $method),
+			'bank_account'   => $method === 'bank' ? self::bankAccount($cal['id'], $lid) : '',
+			'total'          => round(max(0, $total), 2),
+			'deposit'        => round((float) $b['deposit'], 2),
+			'security'       => round((float) $b['security'], 2),
+		));
 	}
 }
 ?>

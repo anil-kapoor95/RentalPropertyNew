@@ -1164,7 +1164,9 @@ class pjAdminCalendars extends pjAdmin
         $method_allowed = function ($method) {
             return $this->isAdmin() || !class_exists('pjEntitlement') || pjEntitlement::allowsPaymentMethod($this->getCompanyId(), $method);
         };
-        if ($foreign_id !== NULL && !$this->_post->check('options_update') && $this->_get->check('payment_method') && !$method_allowed($this->_get->toString('payment_method')))
+        // A gateway that is already switched on can still be opened (to switch it off), even when the plan no longer allows it.
+        if ($foreign_id !== NULL && !$this->_post->check('options_update') && $this->_get->check('payment_method') && !$method_allowed($this->_get->toString('payment_method'))
+            && !in_array($this->_get->toString('payment_method'), class_exists('pjEntitlement') ? pjEntitlement::activeGateways($foreign_id) : array(), true))
         {
             echo '<div class="modal-body"><div class="alert alert-warning m-b-none"><i class="fa fa-lock m-r-xs"></i> ' . __('subPaymentMethodLocked', true) . '</div></div>'
                 . '<div class="modal-footer"><button type="button" class="btn btn-white" data-dismiss="modal">' . __('btnCancel', true) . '</button></div>';
@@ -1200,13 +1202,15 @@ class pjAdminCalendars extends pjAdmin
             $max = pjEntitlement::limit($this->getCompanyId(), 'max_payment_gateways');
             if ($max !== null)
             {
-                $active = array_flip(pjEntitlement::activeGateways($foreign_id));
+                // PayPal, cash / bank and gateways the plan no longer allows are not counted
+                $cid = $this->getCompanyId();
+                $active = array_flip(pjEntitlement::countedGateways($cid, $foreign_id));
                 foreach ((array) $this->_post->toArray('plugin_payment_options') as $method => $opts)
                 {
-                    if (in_array($method, pjEntitlement::$offlineMethods, true) || !is_array($opts) || !isset($opts['is_active'])) { continue; }
+                    if (!pjEntitlement::countsAsGateway($cid, $method) || !is_array($opts) || !isset($opts['is_active'])) { continue; }
                     if ((int) $opts['is_active'] === 1) { $active[$method] = true; } else { unset($active[$method]); }
                 }
-                $before = pjEntitlement::activeGateways($foreign_id);
+                $before = pjEntitlement::countedGateways($cid, $foreign_id);
                 if (count($active) > $max && count($active) > count($before))
                 {
                     self::jsonResponse(array('status' => 'ERR', 'code' => 402, 'text' => __('subGatewayLimit', true)));

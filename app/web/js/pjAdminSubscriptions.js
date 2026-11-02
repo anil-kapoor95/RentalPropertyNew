@@ -107,5 +107,63 @@
 				$(this).find('button[type="submit"]').prop('disabled', true);
 			});
 		}
+		/* ---- Subscriptions > Plans list: "+N more" opens the comparison ---- */
+		$doc.on('click', '.sub-pc-more', function () {
+			var c = document.getElementById('subCompare');
+			if (c) { c.open = true; }
+		});
+
+		/* ---- Subscriptions > Plans: add / edit form (live summary, feature shortcuts) ---- */
+		var $plan = $('#subPlanForm');
+		if ($plan.length) {
+			var d = $plan.data();
+			var base = $plan.find('.sub-chip-base input').map(function () { return this.value; }).get();
+			var esc = function (s) { return $('<div>').text(s).html(); };
+			var refresh = function () {
+				var name = $.trim($plan.find('[name="name"]').val());
+				$plan.find('[data-pv="name"]').text(name || '—');
+				var price = $.trim($plan.find('[name="price"]').val());
+				var n = parseInt($plan.find('[name="interval_count"]').val(), 10) || 1;
+				var unit = $plan.find('[name="billing_interval"]').val() === 'year' ? d.year : d.month;
+				var html;
+				if (price === '') {
+					html = '<span class="sub-pc-price sub-pc-price-none">' + esc(d.notSet) + '</span>';
+				} else if (parseFloat(price) <= 0) {
+					html = '<span class="sub-pc-price">' + esc(d.free) + '</span>';
+				} else {
+					html = '<span class="sub-pc-price">' + esc(parseFloat(price).toFixed(2)) + ' <small>' + esc($plan.find('[name="currency"]').val()) + '</small></span>'
+						+ '<span class="sub-pc-per">/ ' + (n > 1 ? n + ' × ' : '') + esc(unit) + '</span>';
+				}
+				$plan.find('[data-pv="price"]').html(html);
+				var trial = parseInt($plan.find('[name="trial_days"]').val(), 10) || 0;
+				$plan.find('[data-pv="trial"]').prop('hidden', trial <= 0).html('<i class="fa fa-gift m-r-xs"></i>' + esc(String(d.trial).replace('{N}', trial)));
+				$plan.find('[data-limit]').each(function () {
+					var v = $.trim(this.value);
+					$plan.find('[data-pv-limit="' + $(this).attr('data-limit') + '"]').text(v === '' ? d.unlimited : v);
+				});
+				var $f = $plan.find('input[name="features[]"]');
+				$plan.find('[data-pv="count"]').text(String(d.count).replace('{N}', $f.filter(':checked').length).replace('{T}', $f.length));
+				var on = function (name) { return $plan.find('input[name="' + name + '"]').is(':checked'); };
+				$plan.find('[data-pv-flag]').each(function () {
+					var flag = $(this).attr('data-pv-flag'), not = flag.charAt(0) === '!';
+					$(this).toggle(not ? !on(flag.slice(1)) : on(flag));
+				});
+			};
+			$plan.on('input change', 'input, select, textarea', refresh);
+			$plan.on('click', '[data-sub-features]', function () {
+				var all = $(this).attr('data-sub-features') === 'all';
+				$plan.find('input[name="features[]"]').each(function () {
+					this.checked = all || base.indexOf(this.value) !== -1;
+				});
+				refresh();
+			});
+			// "Plan for new companies" needs an active plan
+			$plan.on('change', 'input[name="is_default"]', function () {
+				if (this.checked) { $plan.find('input[name="status"]').prop('checked', true); refresh(); }
+			}).on('change', 'input[name="status"]', function () {
+				if (!this.checked) { $plan.find('input[name="is_default"]').prop('checked', false); refresh(); }
+			});
+			refresh();
+		}
 	});
 })(window.jQuery);

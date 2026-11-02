@@ -370,7 +370,8 @@ class pjFront extends pjAppController
 		exit;
 	}
 	
-	private static function pjActionConfirmSend($reservation_id, $option_arr, $locale_id, $variant)
+	/** Booking e-mails / SMS (also used by the website booking API, pjJabbApi::pjActionBookingCreate). */
+	public static function pjActionConfirmSend($reservation_id, $option_arr, $locale_id, $variant)
 	{
 		$Email = self::getMailer($option_arr);
         
@@ -785,6 +786,48 @@ class pjFront extends pjAppController
 		}
 	}
 	
+	/**
+	 * Payment page of a booking made on the host's website (pjJabbApi::pjActionBookingCreate gives the link):
+	 * shows the payment form of the gateway (PayPal, Stripe...) and returns to the website afterwards.
+	 *   cid, ref (booking reference), return (website confirmation page), hash (signed by the API)
+	 */
+	public function pjActionPayBooking()
+	{
+		$this->setAjax(true);
+		$ref = (string) $this->_get->toString('ref');
+		$return = (string) $this->_get->toString('return');
+		$booking = preg_match('/^[A-Za-z0-9-]{6,64}$/', $ref)
+			? pjReservationModel::factory()->where('t1.uuid', $ref)->where('t1.calendar_id', $this->_get->toInt('cid'))->limit(1)->findAll()->getDataIndex(0)
+			: array();
+		if (empty($booking) || !preg_match('~^https?://~i', $return)
+			|| !hash_equals(sha1($booking['uuid'] . strtotime($booking['created']) . $return . PJ_SALT), (string) $this->_get->toString('hash')))
+		{
+			$this->set('error', __('book_not_found', true));
+			return;
+		}
+		$this->set('return_url', $return);
+		$paid = !empty($booking['txn_id']) || $booking['status'] === ucfirst((string) $this->option_arr['o_status_if_paid']) || $booking['status'] === 'Cancelled';
+		$pjPlugin = pjObject::getPlugin('pjPayments') !== NULL ? pjPayments::getPluginName($booking['payment_method']) : null;
+		if ($paid || !$pjPlugin || pjObject::getPlugin($pjPlugin) === NULL || in_array($booking['payment_method'], array('cash', 'bank'), true))
+		{
+			pjUtil::redirect($return);
+		}
+		$this->set('params', $pjPlugin::getFormParams(array('payment_method' => $booking['payment_method']), array(
+			'locale_id'     => $this->getLocaleId(),
+			'return_url'    => $return,
+			'id'            => $booking['id'],
+			'foreign_id'    => $booking['calendar_id'],
+			'uuid'          => $booking['uuid'],
+			'name'          => $booking['c_name'],
+			'email'         => $booking['c_email'],
+			'phone'         => $booking['c_phone'],
+			'amount'        => $booking['deposit'],
+			'cancel_hash'   => sha1($booking['uuid'] . strtotime($booking['created']) . PJ_SALT),
+			'currency_code' => $this->option_arr['o_currency'],
+		)));
+		$this->set('booking', $booking);
+	}
+
 	public function pjActionGetSummaryForm()
 	{
 		$this->setAjax(true);

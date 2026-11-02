@@ -358,6 +358,27 @@ class pjEntitlement
 		return self::allows($company_id, 'payment_gateway_choice');
 	}
 
+	/** Does this switched-on method count against "max_payment_gateways"? Not cash / bank, not PayPal (always free)
+	 * and not a gateway the plan no longer allows (it cannot take payments, the company can only switch it off). */
+	public static function countsAsGateway($company_id, $method)
+	{
+		$method = (string) $method;
+		return !in_array($method, self::$offlineMethods, true)
+			&& !in_array($method, self::$freePaymentMethods, true)
+			&& self::allowsPaymentMethod($company_id, $method);
+	}
+
+	/** Switched-on gateways of a property that count against the plan's limit. */
+	public static function countedGateways($company_id, $calendar_id)
+	{
+		$out = array();
+		foreach (self::activeGateways($calendar_id) as $m)
+		{
+			if (self::countsAsGateway($company_id, $m)) { $out[] = $m; }
+		}
+		return $out;
+	}
+
 	public static function canAddUser($company_id)
 	{
 		$max = self::limit($company_id, 'max_users');
