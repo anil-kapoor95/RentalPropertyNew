@@ -196,7 +196,11 @@ class pjCompanyContext
 	public static function clearCache()
 	{
 		self::$cache = array();
+		self::$pairsCache = array();
 	}
+
+	/** companyPairs() per options foreign id (cleared with clearCache, e.g. after options were saved). */
+	private static $pairsCache = array();
 
 	/* ------------------------------------------------------------------
 	 * Public company reference (hash) - the numeric id is never shown
@@ -344,15 +348,14 @@ class pjCompanyContext
 		{
 			return array();
 		}
-		static $cache = array();
-		if (!isset($cache[$fid]))
+		if (!isset(self::$pairsCache[$fid]))
 		{
 			$m = pjBaseOptionModel::factory();
 			$keys = $m->where('t1.foreign_id', $fid)->whereIn('t1.tab_id', self::$companyOptionTabs)->findAll()->getDataPair('key', 'key');
 			$keys = array_diff_key($keys, array_flip(self::$globalOptionKeys));
-			$cache[$fid] = array_intersect_key($m->reset()->getPairs($fid), $keys);
+			self::$pairsCache[$fid] = array_intersect_key($m->reset()->getPairs($fid), $keys);
 		}
-		return $cache[$fid];
+		return self::$pairsCache[$fid];
 	}
 
 	/**

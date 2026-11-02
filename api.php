@@ -608,6 +608,7 @@ $routes = array(
     'pjActionCheckCompanyName' => 'pjJabbApi',
     // Guest page of a published property
     'pjActionGetPropertyPage' => 'pjJabbApi',
+    'pjActionGetCompanyPage' => 'pjJabbApi',
     // Airbnb listing import (duplicate check)
     'pjActionCheckAirbnbListing' => 'pjJabbApi',
     // Payment gateways (host)

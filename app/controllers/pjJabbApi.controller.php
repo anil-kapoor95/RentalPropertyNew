@@ -671,6 +671,8 @@ class pjJabbApi extends pjAppController
 					$company[$f] = isset($c[$f]) ? $c[$f] : null;
 				}
 				$company['logo'] = !empty($c['logo']) ? PJ_INSTALL_URL . ltrim($c['logo'], '/') : null;
+				// link of the company page on the website (/stays/<slug>)
+				$company['slug'] = self::slugOf($c['name']);
 			}
 		}
 
@@ -750,6 +752,8 @@ class pjJabbApi extends pjAppController
 			// System options > Price format and currency position (for showing prices like the back office)
 			'price_format' => self::priceFormat(!empty($signup['company_id']) ? (int) $signup['company_id'] : 0),
 			'currency_sign' => self::currencySign(self::accountCurrency(!empty($signup['company_id']) ? (int) $signup['company_id'] : 0)),
+			// Company options > General of the account (saved in step 3)
+			'settings' => self::companySettings(!empty($signup['company_id']) ? (int) $signup['company_id'] : 0),
 			'theme' => $theme,
 			// AI writing: configured (Options > AI settings) and included in the company's plan
 			'ai_available' => pjAi::isConfigured() && self::aiAllowed(!empty($signup['company_id']) ? (int) $signup['company_id'] : 0),
@@ -1069,6 +1073,7 @@ class pjJabbApi extends pjAppController
 		}
 		list($list) = explode('::', (string) $row['value'] . '::');
 		$m->reset()->where('foreign_id', $fid)->where('`key`', 'o_currency')->limit(1)->modifyAll(array('value' => $list . '::' . $code));
+		pjCompanyContext::clearCache();
 		return true;
 	}
 
@@ -1117,6 +1122,77 @@ class pjJabbApi extends pjAppController
 			'currencies' => $currencies,
 			'default'    => self::companyCurrency($company_id),
 		), self::priceFormat($company_id)));
+	}
+
+	/* ------------------------------------------------------------------
+	 * General settings of the account (Company options > General): date / time format, time zone,
+	 * first day of week, currency, price format, currency position. Not asked in the sign-up: saved
+	 * automatically as the company's own options (defaults below, the currency of step 2 and the time
+	 * zone of the company's country), so the back office and the website use them.
+	 * ------------------------------------------------------------------ */
+
+	/** Sign-up field => option key. */
+	private static $settingKeys = array(
+		'date_format'    => 'o_date_format',
+		'time_format'    => 'o_time_format',
+		'timezone'       => 'o_timezone',
+		'week_start'     => 'o_week_start',
+		'currency'       => 'o_currency',
+		'price_format'   => 'o_price_format',
+		'currency_place' => 'o_currency_place',
+	);
+
+	/** Defaults of a new account (as Company options > General ships them). */
+	private static $settingDefaults = array(
+		'date_format' => 'd.m.Y', 'time_format' => 'H:i', 'timezone' => 'Asia/Kolkata', 'week_start' => '1',
+		'currency' => 'USD', 'price_format' => '4', 'currency_place' => 'back',
+	);
+
+	/** Current settings of the company (its own options, otherwise the system's). */
+	private static function companySettings($company_id)
+	{
+		$pairs = pjCompanyContext::basePairs((int) $company_id);
+		$out = array();
+		foreach (self::$settingKeys as $field => $key)
+		{
+			$out[$field] = isset($pairs[$key]) && (string) $pairs[$key] !== '' ? (string) $pairs[$key] : self::$settingDefaults[$field];
+		}
+		return $out;
+	}
+
+	/**
+	 * Saves settings as the company's own options (Company options > General): an enum keeps its list and gets
+	 * the new selection ("a|b|c::b"), the time zone is a plain value. Missing rows are copied from the system first.
+	 */
+	private static function saveCompanySettings($company_id, $values)
+	{
+		$fid = pjCompanyContext::optionsForeignId((int) $company_id);
+		$m = pjBaseOptionModel::factory();
+		foreach ($values as $field => $value)
+		{
+			if (!isset(self::$settingKeys[$field]))
+			{
+				continue;
+			}
+			$key = self::$settingKeys[$field];
+			$row = $m->reset()->where('t1.foreign_id', $fid)->where('t1.key', $key)->limit(1)->findAll()->getDataIndex(0);
+			if (empty($row))
+			{
+				continue;
+			}
+			if ($row['type'] === 'enum')
+			{
+				list($list) = explode('::', (string) $row['value'] . '::');
+				$new = $list . '::' . $value;
+			} else {
+				$new = (string) $value;
+			}
+			if ($new !== (string) $row['value'])
+			{
+				$m->reset()->where('foreign_id', $fid)->where('`key`', $key)->limit(1)->modifyAll(array('value' => $new));
+			}
+		}
+		pjCompanyContext::clearCache();
 	}
 
 	/* ------------------------------------------------------------------
@@ -1526,6 +1602,7 @@ class pjJabbApi extends pjAppController
 	 * Step 3: company. signup_token + company fields (same fields as Companies > Add company):
 	 *   name*, legal_name, registration_no, tax_no, contact_person, company_email, phone,
 	 *   website, address_1*, address_2, city*, state, zip, country_id*, description, logo (file)
+	 *   device_timezone (optional: time zone of the host's device, used when it is in the company's country)
 	 * contact_person / company_email / phone default to the account values.
 	 */
 	public function pjActionSignupCompany()
@@ -1630,6 +1707,26 @@ class pjJabbApi extends pjAppController
 			pjCompanyModel::factory()->set('id', $company_id)->modify($data);
 		}
 
+		// General settings (Company options > General), saved automatically the first time this step is done:
+		// the defaults and the time zone of the company's country (this device's time zone when it is in that
+		// country). The currency stays the one of step 2. Later changes are made in the back office.
+		if ((int) $signup['step'] < 3)
+		{
+			$settings = self::$settingDefaults;
+			unset($settings['currency'], $settings['timezone']);
+			$country = pjBaseCountryModel::factory()->find($country_id)->getData();
+			if (!empty($country['alpha_2']))
+			{
+				$device = $this->param('device_timezone');
+				$zone = in_array($device, pjCountryDefaults::timezones($country['alpha_2']), true) ? $device : pjCountryDefaults::timezone($country['alpha_2']);
+				if ($zone !== null && in_array($zone, timezone_identifiers_list(), true))
+				{
+					$settings['timezone'] = $zone;
+				}
+			}
+			self::saveCompanySettings($company_id, $settings);
+		}
+
 		list($logo, $logo_error) = $this->handleLogo($company_id, $is_new ? null : $current['logo']);
 		if ($logo !== null)
 		{
@@ -1677,7 +1774,7 @@ class pjJabbApi extends pjAppController
 		$bathrooms = $this->param('bathrooms');
 		// Price per night (optional): saved as the default price of the property (Properties > Prices)
 		$price = str_replace(array(' ', ','), '', $this->param('price'));
-		// Currency of the prices (optional): one of System options > Currency; saved as the account's currency
+		// Currency of the prices (required): one of System options > Currency; saved as the account's currency
 		$currency = strtoupper($this->param('currency'));
 		$v['name'] = trim(preg_replace('/\s+/u', ' ', $v['name']));
 
@@ -1695,8 +1792,10 @@ class pjJabbApi extends pjAppController
 		{
 			$errors['name'] = 'This property name is already taken. Please choose another name.';
 		}
-		if ($currency !== '' && !in_array($currency, self::currencyCodes(), true))
+		if ($currency === '')
 		{
+			$errors['currency'] = 'Currency is required';
+		} elseif (!in_array($currency, self::currencyCodes(), true)) {
 			$errors['currency'] = 'Choose a currency from the list';
 		}
 		if (self::tooLong($v['state'], 100)) { $errors['state'] = 'Maximum 100 characters allowed'; }
@@ -1779,6 +1878,17 @@ class pjJabbApi extends pjAppController
 			));
 			pjCompanySignupModel::factory()->set('id', (int) $signup['id'])->modify(array('company_id' => $company_id));
 			$signup['company_id'] = $company_id;
+			// New account: the default general settings, with the time zone of the property's country
+			// (the host confirms or changes them in step 3)
+			$defaults = self::$settingDefaults;
+			$country = pjBaseCountryModel::factory()->find($country_id)->getData();
+			$zone = !empty($country['alpha_2']) ? pjCountryDefaults::timezone($country['alpha_2']) : null;
+			if ($zone !== null && in_array($zone, timezone_identifiers_list(), true))
+			{
+				$defaults['timezone'] = $zone;
+			}
+			unset($defaults['currency']); // saved below from the currency field
+			self::saveCompanySettings($company_id, $defaults);
 		} elseif ((int) $signup['step'] < 3) {
 			// Company not checked yet (step 3): keep the details it took from the property and the account up to date.
 			$this->syncSignupCompany($signup, $company_id, $v, $country_id);
@@ -2545,7 +2655,133 @@ class pjJabbApi extends pjAppController
 	}
 
 	/**
-	 * Public page data of a property made with the sign-up, once the sign-up is completed (published).
+	 * Properties shown on the website: active properties of active companies. A property of a sign-up that
+	 * is not finished yet stays hidden until the sign-up is completed.
+	 */
+	private static function publicCalendars($company_id = 0)
+	{
+		$active = array_map('intval', pjCompanyModel::factory()->where('t1.status', 'T')->findAll()->getDataPair(null, 'id'));
+		if (empty($active))
+		{
+			return array();
+		}
+		$hidden = array_map('intval', pjCompanySignupModel::factory()->where('t1.status !=', 'completed')
+			->where('t1.calendar_id IS NOT NULL')->findAll()->getDataPair(null, 'calendar_id'));
+		$m = pjCalendarModel::factory()->where('t1.status', 'T')->whereIn('t1.company_id', $active);
+		if ((int) $company_id > 0)
+		{
+			$m->where('t1.company_id', (int) $company_id);
+		}
+		if (!empty($hidden))
+		{
+			$m->whereNotIn('t1.id', $hidden);
+		}
+		return $m->orderBy('t1.id ASC')->findAll()->getData();
+	}
+
+	/** Theme the company chose (sign-up step 6 / Display), null when none. */
+	private static function companyTheme($company_id)
+	{
+		$copt = pjCompanyOptionModel::factory()->getPairs((int) $company_id);
+		$palette_id = isset($copt['o_color_palette']) ? (string) $copt['o_color_palette'] : '';
+		foreach (pjColorHelper::getPalettes() as $id => $p)
+		{
+			if ((string) $id === $palette_id)
+			{
+				return array('id' => (string) $id, 'name' => $p['name'],
+					'colors' => array('brand' => $p['brand'], 'accent' => $p['accent'], 'text' => $p['text'],
+						'background' => $p['bg'], 'price' => $p['price'], 'page_background' => $p['pageBg']));
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Company page (localhost:3000/stays/<company-slug>): the company and all its properties on the website.
+	 * Data: slug, name, description, logo, phone, email, website, places[], price_format, theme,
+	 *   properties[] {slug, name, property_type, headline, location {city, state, country}, bedrooms, bathrooms,
+	 *   max_guests, price, price_varies, price_based_on, currency, currency_sign, photo}
+	 */
+	public function pjActionGetCompanyPage()
+	{
+		$this->setAjax(true);
+		$this->requireSignupTable();
+		$slug = strtolower($this->param('slug'));
+		if ($slug === '' || !preg_match('/^[a-z0-9-]{1,60}$/', $slug))
+		{
+			$this->respond(404, 'Page not found.');
+		}
+		$company = null;
+		foreach (pjCompanyModel::factory()->where('t1.status', 'T')->orderBy('t1.id ASC')->findAll()->getData() as $c)
+		{
+			if (self::slugOf($c['name']) === $slug)
+			{
+				$company = $c;
+				break;
+			}
+		}
+		if ($company === null)
+		{
+			$this->respond(404, 'Page not found.');
+		}
+		$cid = (int) $company['id'];
+		$properties = array();
+		$places = array();
+		foreach (self::publicCalendars($cid) as $cal)
+		{
+			$t = self::propertyTexts((int) $cal['id'], $cid);
+			if (empty($t['name']) || trim((string) $t['name']) === '')
+			{
+				continue;
+			}
+			$opt = self::calendarOptions($cal['id'], $cid);
+			$price = self::propertyPrice($cal['id'], $cid);
+			$photos = self::photoList($cal['id']);
+			$city = isset($t['address_city']) ? trim((string) $t['address_city']) : '';
+			if ($city !== '')
+			{
+				$places[$city] = true;
+			}
+			$properties[] = array(
+				'slug'          => self::slugOf($t['name']),
+				'name'          => html_entity_decode((string) $t['name'], ENT_QUOTES, 'UTF-8'),
+				'property_type' => isset($t['property_type']) && in_array($t['property_type'], self::$propertyTypes, true) ? $t['property_type'] : null,
+				'headline'      => isset($t['headline']) && trim((string) $t['headline']) !== '' ? (string) $t['headline'] : null,
+				'location'      => array('city' => $city, 'state' => (string) $cal['address_state'], 'country' => self::countryNameEn($cal['address_country'], $cid)),
+				'bedrooms'      => $cal['bedrooms'] !== null && $cal['bedrooms'] !== '' ? (int) $cal['bedrooms'] : null,
+				'bathrooms'     => $cal['bathrooms'] !== null && $cal['bathrooms'] !== '' ? (int) $cal['bathrooms'] : null,
+				'max_guests'    => isset($opt['o_max_people']) && (int) $opt['o_max_people'] > 0 ? (int) $opt['o_max_people'] : null,
+				'price'         => $price['price'],
+				'price_varies'  => $price['price_varies'],
+				'price_based_on'=> isset($opt['o_price_based_on']) && $opt['o_price_based_on'] === 'days' ? 'days' : 'nights',
+				'currency'      => $price['currency'],
+				'currency_sign' => self::currencySign($price['currency']),
+				'photo'         => !empty($photos) ? $photos[0]['url'] : null,
+			);
+		}
+		if (empty($properties))
+		{
+			$this->respond(404, 'Page not found.');
+		}
+		$description = isset($company['description']) && is_string($company['description']) ? self::htmlToText($company['description']) : '';
+		$this->respond(200, 'OK', array(
+			'slug'         => $slug,
+			'name'         => html_entity_decode((string) $company['name'], ENT_QUOTES, 'UTF-8'),
+			'description'  => $description !== '' ? $description : null,
+			'logo'         => !empty($company['logo']) ? PJ_INSTALL_URL . ltrim($company['logo'], '/') : null,
+			'phone'        => !empty($company['phone']) ? (string) $company['phone'] : '',
+			'email'        => !empty($company['email']) ? (string) $company['email'] : '',
+			'website'      => !empty($company['website']) ? (string) $company['website'] : '',
+			'places'       => array_keys($places),
+			'price_format' => self::priceFormat($cid),
+			'theme'        => self::companyTheme($cid),
+			'properties'   => $properties,
+		));
+	}
+
+	/**
+	 * Public page data of a property on the website (an active property of an active company; a sign-up
+	 * property once the sign-up is completed).
 	 *   slug (from the property name)
 	 * Data: slug, name, property_type, headline, description, faqs[], location {city, state, country, lat, lng},
 	 *   bedrooms, bathrooms, max_guests, amenities[], price, price_varies, price_based_on (nights|days), currency,
@@ -2563,12 +2799,12 @@ class pjJabbApi extends pjAppController
 			$this->respond(404, 'Page not found.');
 		}
 		$found = null;
-		foreach (pjCompanySignupModel::factory()->where('t1.status', 'completed')->where('t1.calendar_id IS NOT NULL')->findAll()->getData() as $s)
+		foreach (self::publicCalendars() as $c)
 		{
-			$t = self::propertyTexts((int) $s['calendar_id'], (int) $s['company_id']);
+			$t = self::propertyTexts((int) $c['id'], (int) $c['company_id']);
 			if (isset($t['name']) && self::slugOf($t['name']) === $slug)
 			{
-				$found = array($s, $t);
+				$found = array($c, $t);
 				break;
 			}
 		}
@@ -2576,9 +2812,8 @@ class pjJabbApi extends pjAppController
 		{
 			$this->respond(404, 'Page not found.');
 		}
-		list($signup, $t) = $found;
-		$company_id = (int) $signup['company_id'];
-		$cal = pjCalendarModel::factory()->find((int) $signup['calendar_id'])->getData();
+		list($cal, $t) = $found;
+		$company_id = (int) $cal['company_id'];
 		$company = pjCompanyModel::factory()->find($company_id)->getData();
 		if (empty($cal) || (isset($cal['status']) && $cal['status'] === 'F') || empty($company) || (isset($company['status']) && $company['status'] !== 'T'))
 		{
@@ -2587,20 +2822,7 @@ class pjJabbApi extends pjAppController
 		$opt = self::calendarOptions($cal['id'], $company_id);
 		$price = self::propertyPrice($cal['id'], $company_id);
 
-		// theme chosen on step 6
-		$theme = null;
-		$copt = pjCompanyOptionModel::factory()->getPairs($company_id);
-		$palette_id = isset($copt['o_color_palette']) ? (string) $copt['o_color_palette'] : '';
-		foreach (pjColorHelper::getPalettes() as $id => $p)
-		{
-			if ((string) $id === $palette_id)
-			{
-				$theme = array('id' => (string) $id, 'name' => $p['name'],
-					'colors' => array('brand' => $p['brand'], 'accent' => $p['accent'], 'text' => $p['text'],
-						'background' => $p['bg'], 'price' => $p['price'], 'page_background' => $p['pageBg']));
-				break;
-			}
-		}
+		$theme = self::companyTheme($company_id);
 
 		// nights already taken (bookings and imported calendars), next 12 months
 		$booked = array();
@@ -2643,6 +2865,9 @@ class pjJabbApi extends pjAppController
 			'photos'        => array_map(function ($p) { return array('url' => $p['url'], 'thumb_url' => $p['thumb_url']); }, self::photoList($cal['id'])),
 			'host'          => array(
 				'name'  => (string) $company['name'],
+				// company page with all the host's properties (/stays/<slug>)
+				'slug'  => self::slugOf($company['name']),
+				'stays' => count(self::publicCalendars($company_id)),
 				'logo'  => !empty($company['logo']) ? PJ_INSTALL_URL . ltrim($company['logo'], '/') : null,
 				'phone' => $host_phone,
 				'email' => !empty($company['email']) ? (string) $company['email'] : '',
@@ -3509,6 +3734,18 @@ class pjJabbApi extends pjAppController
 			->orderBy('`name` ASC')
 			->findAll()
 			->getData();
+		// Suggestions for a new account: the country's currency (when offered) and time zones (main one first)
+		$codes = self::currencyCodes();
+		$known = array_flip(timezone_identifiers_list());
+		foreach ($countries as $i => $c)
+		{
+			$currency = pjCountryDefaults::currency($c['alpha_2']);
+			$main = pjCountryDefaults::timezone($c['alpha_2']);
+			$zones = array_values(array_filter(pjCountryDefaults::timezones($c['alpha_2']), function ($z) use ($known) { return isset($known[$z]); }));
+			$countries[$i]['currency'] = $currency !== null && in_array($currency, $codes, true) ? $currency : null;
+			$countries[$i]['timezone'] = $main !== null && isset($known[$main]) ? $main : (!empty($zones) ? $zones[0] : null);
+			$countries[$i]['timezones'] = $zones;
+		}
 		$this->respond(200, 'OK', array('countries' => $countries));
 	}
 }

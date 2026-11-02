@@ -3,6 +3,7 @@
 
 # Local archives (never commit: large, and may contain code or data)
 /*.zip
+/*.jpg
 
 # Local secrets / settings
 /app/config/google.php
