@@ -116,6 +116,8 @@ class pjAdmin extends pjAppController
 			'pjAdminFeatures::pjActionGetFeature' => 'pjAdminFeatures::pjActionIndex',
 			'pjAdminFeatures::pjActionSaveFeature' => 'pjAdminFeatures::pjActionUpdate',
 			'pjAdminOptions::pjActionSaveThemeColors' => 'pjAdminOptions::pjActionColors',
+			// administrators only (checked in the action)
+			'pjAdminOptions::pjActionSignupSettings' => 'pjAdminOptions::pjActionAi',
 			'pjAdminVouchers::pjActionCheckCode' => 'pjAdminVouchers::pjActionIndex',
 		
 			'pjAdminExtras::pjActionGetExtra' => 'pjAdminExtras::pjActionIndex',

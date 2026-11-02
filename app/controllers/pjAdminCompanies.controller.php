@@ -570,6 +570,11 @@ class pjAdminCompanies extends pjAdmin
 			{
 				pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminCompanies&action=pjActionCreate&msg=msgCompanyError");
 			}
+			// Subscriptions: the plan for new companies (without a plan a company has no full access)
+			if (class_exists('pjEntitlement'))
+			{
+				pjEntitlement::assignDefaultPlan((int) $id, $this->getUserId());
+			}
 
 			// Login of the company: a user with the Company role (company e-mail + the password entered)
 			$user_id = pjAuthUserModel::factory(array(

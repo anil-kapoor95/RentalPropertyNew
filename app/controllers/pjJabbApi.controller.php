@@ -44,34 +44,14 @@ class pjJabbApi extends pjAppController
 	/** Steps of the sign-up, in order (step number => name). The last one completes the sign-up. */
 	private static $steps = array(1 => 'account', 2 => 'property', 3 => 'company', 4 => 'photos', 5 => 'description', 6 => 'theme');
 
-	/** Photos one property may have during the sign-up. */
-	const MAX_PHOTOS = 20;
-
-	/** AI suggestions one sign-up may generate (every tone change or rewrite is one). */
-	const MAX_AI_GENERATIONS = 30;
-
-	/** Writing tones of the AI suggestion (step 5). The first one is the default. */
-	private static $tones = array(
-		'warm'    => 'Warm: friendly and welcoming, as if the host were talking to the guest. Simple, natural words.',
-		'premium' => 'Premium: polished, refined and understated, like a boutique hotel. Elegant but not flowery, no cliches.',
-		'simple'  => 'Simple: short, plain and factual sentences that are easy to scan. No marketing words.',
-	);
+	/*
+	 * Limits of the sign-up, the life time of its token and the writing tones of the AI texts are set by the
+	 * administrator in Options > Sign-up settings: pjSignupConfig::get('max_photos' | 'max_ai_generations' |
+	 * 'max_amenities' | 'max_amenity_length' | 'amenity_category' | 'max_faqs' | 'token_days'), pjSignupConfig::tone().
+	 */
 
 	/** Property types the front end offers (saved as the property text "property_type"). */
 	private static $propertyTypes = array('villa', 'homestay', 'apartment', 'cottage', 'resort');
-
-	/** Amenities one property may have, and the longest amenity name. */
-	const MAX_AMENITIES = 100;
-	const MAX_AMENITY_LENGTH = 80;
-
-	/** Feature category of amenities created by the sign-up (Options > Features: 2 = "Property features"). */
-	const AMENITY_CATEGORY = 2;
-
-	/** Questions guests ask (step 5): most saved per property. */
-	const MAX_FAQS = 8;
-
-	/** Life time of a sign-up token. */
-	const TOKEN_DAYS = 30;
 
 	private $logoDir = 'companies/';
 
@@ -371,7 +351,7 @@ class pjJabbApi extends pjAppController
 		$token = bin2hex(random_bytes(32));
 		pjCompanySignupModel::factory()->set('id', (int) $signup_id)->modify(array(
 			'token_hash'    => hash('sha256', $token),
-			'token_expires' => date('Y-m-d H:i:s', strtotime('+' . self::TOKEN_DAYS . ' days')),
+			'token_expires' => date('Y-m-d H:i:s', strtotime('+' . pjSignupConfig::get('token_days') . ' days')),
 			'modified'      => date('Y-m-d H:i:s'),
 		));
 		return $token;
@@ -647,7 +627,7 @@ class pjJabbApi extends pjAppController
 				}
 			}
 		}
-		return array_slice($faqs, 0, self::MAX_FAQS);
+		return array_slice($faqs, 0, pjSignupConfig::get('max_faqs'));
 	}
 
 	/** What the front end needs to continue: steps, next step, and the saved values for prefill. */
@@ -712,7 +692,7 @@ class pjJabbApi extends pjAppController
 				$description = isset($t['description']) && $t['description'] !== '' ? self::htmlToText($t['description']) : null;
 				$headline = isset($t['headline']) && $t['headline'] !== '' ? $t['headline'] : null;
 				$faqs = isset($t['faqs']) ? self::decodeFaqs($t['faqs']) : array();
-				$tone = isset($t['content_tone']) && isset(self::$tones[$t['content_tone']]) ? $t['content_tone'] : null;
+				$tone = isset($t['content_tone']) && pjSignupConfig::tone($t['content_tone']) !== null ? $t['content_tone'] : null;
 			}
 		}
 		$theme = null;
@@ -746,7 +726,7 @@ class pjJabbApi extends pjAppController
 			'headline' => $headline,
 			'faqs' => $faqs,
 			'tone' => $tone,
-			'tones' => array_keys(self::$tones),
+			'tones' => pjSignupConfig::toneKeys(),
 			// currency of the prices (Options of the account); the price itself is property.price
 			'currency' => self::accountCurrency(!empty($signup['company_id']) ? (int) $signup['company_id'] : 0),
 			// System options > Price format and currency position (for showing prices like the back office)
@@ -758,7 +738,14 @@ class pjJabbApi extends pjAppController
 			// AI writing: configured (Options > AI settings) and included in the company's plan
 			'ai_available' => pjAi::isConfigured() && self::aiAllowed(!empty($signup['company_id']) ? (int) $signup['company_id'] : 0),
 			'ai_locked'    => pjAi::isConfigured() && !self::aiAllowed(!empty($signup['company_id']) ? (int) $signup['company_id'] : 0),
-			'ai_generations_left' => max(0, self::MAX_AI_GENERATIONS - (int) (isset($signup['ai_generations']) ? $signup['ai_generations'] : 0)),
+			'ai_generations_left' => max(0, pjSignupConfig::get('max_ai_generations') - (int) (isset($signup['ai_generations']) ? $signup['ai_generations'] : 0)),
+			// Options > Sign-up settings
+			'limits' => array(
+				'max_photos'         => pjSignupConfig::get('max_photos'),
+				'max_faqs'           => pjSignupConfig::get('max_faqs'),
+				'max_amenities'      => pjSignupConfig::get('max_amenities'),
+				'max_amenity_length' => pjSignupConfig::get('max_amenity_length'),
+			),
 		);
 		if ($signup['status'] === 'completed')
 		{
@@ -1370,15 +1357,15 @@ class pjJabbApi extends pjAppController
 			{
 				continue;
 			}
-			if (self::tooLong($name, self::MAX_AMENITY_LENGTH))
+			if (self::tooLong($name, pjSignupConfig::get('max_amenity_length')))
 			{
-				return array(array(), sprintf('Amenity names can have at most %u characters', self::MAX_AMENITY_LENGTH));
+				return array(array(), sprintf('Amenity names can have at most %u characters', pjSignupConfig::get('max_amenity_length')));
 			}
 			$names[$key] = $name;
 		}
-		if (count($names) > self::MAX_AMENITIES)
+		if (count($names) > pjSignupConfig::get('max_amenities'))
 		{
-			return array(array(), sprintf('A property can have at most %u amenities', self::MAX_AMENITIES));
+			return array(array(), sprintf('A property can have at most %u amenities', pjSignupConfig::get('max_amenities')));
 		}
 		return array($names, null);
 	}
@@ -1425,7 +1412,7 @@ class pjJabbApi extends pjAppController
 			{
 				$id = pjFeatureModel::factory()->setAttributes(array(
 					'company_id'  => (int) $company_id,
-					'category_id' => self::AMENITY_CATEGORY,
+					'category_id' => pjSignupConfig::get('amenity_category'),
 					'status'      => 'T',
 				))->insert()->getInsertId();
 				if ($id === false || (int) $id <= 0)
@@ -1527,6 +1514,11 @@ class pjJabbApi extends pjAppController
 		pjCompanyContext::seedFeatures($company_id);
 		pjCompanyContext::ensureNotifications($company_id);
 		pjCompanyContext::seedNewCompanyLocales($company_id);
+		// Subscriptions: the plan for new companies (without a plan a company has no full access)
+		if (class_exists('pjEntitlement'))
+		{
+			pjEntitlement::assignDefaultPlan($company_id, (int) $user['id']);
+		}
 		return $company_id;
 	}
 
@@ -2078,9 +2070,9 @@ class pjJabbApi extends pjAppController
 		$files = array_values(array_filter($files, function ($f) { return !empty($f['name']) && $f['error'] !== UPLOAD_ERR_NO_FILE; }));
 
 		$existing = (int) pjCalendarPhotoModel::factory()->where('t1.calendar_id', $calendar_id)->findCount()->getData();
-		if ($existing + count($files) > self::MAX_PHOTOS)
+		if ($existing + count($files) > pjSignupConfig::get('max_photos'))
 		{
-			$this->respond(422, 'Validation failed', array(), array('photos' => sprintf('You can add up to %u photos', self::MAX_PHOTOS)));
+			$this->respond(422, 'Validation failed', array(), array('photos' => sprintf('You can add up to %u photos', pjSignupConfig::get('max_photos'))));
 		}
 		if (empty($files) && $existing === 0)
 		{
@@ -2233,14 +2225,14 @@ class pjJabbApi extends pjAppController
 		{
 			$this->respond(402, 'AI writing comes with the paid plans. Please write the texts yourself, or choose a plan.');
 		}
-		if ((int) $signup['ai_generations'] >= self::MAX_AI_GENERATIONS)
+		if ((int) $signup['ai_generations'] >= pjSignupConfig::get('max_ai_generations'))
 		{
 			$this->respond(429, 'You have used all AI suggestions. Please edit the last text or write your own.');
 		}
 		$tone = strtolower($this->param('tone'));
 		if ($tone === '')
 		{
-			$tone = key(self::$tones);
+			$tone = current(pjSignupConfig::toneKeys());
 		}
 		$field = strtolower($this->param('field'));
 		if ($field === '')
@@ -2250,9 +2242,9 @@ class pjJabbApi extends pjAppController
 		$highlights = $this->param('highlights');
 		$current = $this->param('current');
 		$errors = array();
-		if (!isset(self::$tones[$tone]))
+		if (pjSignupConfig::tone($tone) === null)
 		{
-			$errors['tone'] = 'Choose one of: ' . implode(', ', array_keys(self::$tones));
+			$errors['tone'] = 'Choose one of: ' . implode(', ', pjSignupConfig::toneKeys());
 		}
 		if (!in_array($field, array('all', 'headline', 'description', 'faqs'), true))
 		{
@@ -2323,7 +2315,7 @@ class pjJabbApi extends pjAppController
 		}
 		$prompt = "You write the guest page of a holiday rental property on its own booking website.\n"
 			. "LANGUAGE: write every word in English only, whatever the language of the facts. If a fact is written in another language or script, translate it (or transliterate a name) into English.\n"
-			. "TONE: " . self::$tones[$tone] . "\n"
+			. "TONE: " . pjSignupConfig::tone($tone) . "\n"
 			. "Use only the facts below. Do not invent amenities, distances, ratings, awards or prices. No emojis, no markdown.\n"
 			. "Facts:\n" . implode("\n", $lines) . "\n"
 			. (in_array('faqs', $wanted, true) ? "Guest topics (from the property's amenity list):\n" . implode("\n", $topic_lines) . "\n" : '')
@@ -2347,7 +2339,7 @@ class pjJabbApi extends pjAppController
 			'modified' => date('Y-m-d H:i:s'),
 		));
 		$out['tone'] = $tone;
-		$out['ai_generations_left'] = max(0, self::MAX_AI_GENERATIONS - (int) $signup['ai_generations'] - 1);
+		$out['ai_generations_left'] = max(0, pjSignupConfig::get('max_ai_generations') - (int) $signup['ai_generations'] - 1);
 		$this->respond(200, 'Text generated. Check it and edit it before you publish.', $out);
 	}
 
@@ -2434,7 +2426,7 @@ class pjJabbApi extends pjAppController
 				{
 					return null;
 				}
-				$out['faqs'] = array_slice($faqs, 0, self::MAX_FAQS);
+				$out['faqs'] = array_slice($faqs, 0, pjSignupConfig::get('max_faqs'));
 			} else {
 				if (!isset($data[$k]) || !is_string($data[$k]) || trim($data[$k]) === '')
 				{
@@ -2485,9 +2477,9 @@ class pjJabbApi extends pjAppController
 		{
 			$errors['headline'] = 'Maximum 120 characters allowed';
 		}
-		if ($tone !== '' && !isset(self::$tones[$tone]))
+		if ($tone !== '' && pjSignupConfig::tone($tone) === null)
 		{
-			$errors['tone'] = 'Choose one of: ' . implode(', ', array_keys(self::$tones));
+			$errors['tone'] = 'Choose one of: ' . implode(', ', pjSignupConfig::toneKeys());
 		}
 		$faqs = array();
 		if ($faqs_raw !== '' && $faqs_raw !== array())
@@ -2495,8 +2487,8 @@ class pjJabbApi extends pjAppController
 			if (!is_array($faqs_list))
 			{
 				$errors['faqs'] = 'Invalid questions';
-			} elseif (count($faqs_list) > self::MAX_FAQS) {
-				$errors['faqs'] = 'Maximum ' . self::MAX_FAQS . ' questions allowed';
+			} elseif (count($faqs_list) > pjSignupConfig::get('max_faqs')) {
+				$errors['faqs'] = 'Maximum ' . pjSignupConfig::get('max_faqs') . ' questions allowed';
 			} else {
 				foreach ($faqs_list as $f)
 				{
@@ -2679,6 +2671,53 @@ class pjJabbApi extends pjAppController
 		return $m->orderBy('t1.id ASC')->findAll()->getData();
 	}
 
+	/**
+	 * Public property whose name gives this link: array(calendar, texts) or null. The names of all public
+	 * properties are read with one query; only the matching property's texts are loaded.
+	 */
+	private static function publicCalendarBySlug($slug)
+	{
+		$cals = array();
+		foreach (self::publicCalendars() as $c)
+		{
+			$cals[(int) $c['id']] = $c;
+		}
+		if (empty($cals))
+		{
+			return null;
+		}
+		$rows = pjMultiLangModel::factory()->select('t1.foreign_id, t1.content')->where('t1.model', 'pjCalendar')->where('t1.field', 'name')
+			->whereIn('t1.foreign_id', array_keys($cals))->orderBy('t1.foreign_id ASC')->findAll()->getData();
+		$tried = array();
+		foreach ($rows as $r)
+		{
+			$id = (int) $r['foreign_id'];
+			if (isset($tried[$id]) || self::slugOf($r['content']) !== $slug)
+			{
+				continue;
+			}
+			$tried[$id] = true;
+			// the page uses the name the website shows (English, otherwise the company's language)
+			$t = self::propertyTexts($id, (int) $cals[$id]['company_id']);
+			if (isset($t['name']) && self::slugOf($t['name']) === $slug)
+			{
+				return array($cals[$id], $t);
+			}
+		}
+		return null;
+	}
+
+	/** "Designed by PHPJabbers" on the company's website: hidden only when its plan says so (Subscriptions > Plans). */
+	private static function showBranding($company_id)
+	{
+		if (!class_exists('pjEntitlement') || !pjEntitlement::isReady())
+		{
+			return true;
+		}
+		$state = pjEntitlement::state((int) $company_id);
+		return !($state['entitled'] && !empty($state['plan']) && isset($state['plan']['show_branding']) && (int) $state['plan']['show_branding'] === 0);
+	}
+
 	/** Theme the company chose (sign-up step 6 / Display), null when none. */
 	private static function companyTheme($company_id)
 	{
@@ -2775,6 +2814,7 @@ class pjJabbApi extends pjAppController
 			'places'       => array_keys($places),
 			'price_format' => self::priceFormat($cid),
 			'theme'        => self::companyTheme($cid),
+			'branding'     => self::showBranding($cid),
 			'properties'   => $properties,
 		));
 	}
@@ -2798,16 +2838,7 @@ class pjJabbApi extends pjAppController
 		{
 			$this->respond(404, 'Page not found.');
 		}
-		$found = null;
-		foreach (self::publicCalendars() as $c)
-		{
-			$t = self::propertyTexts((int) $c['id'], (int) $c['company_id']);
-			if (isset($t['name']) && self::slugOf($t['name']) === $slug)
-			{
-				$found = array($c, $t);
-				break;
-			}
-		}
+		$found = self::publicCalendarBySlug($slug);
 		if ($found === null)
 		{
 			$this->respond(404, 'Page not found.');
@@ -2873,6 +2904,8 @@ class pjJabbApi extends pjAppController
 				'email' => !empty($company['email']) ? (string) $company['email'] : '',
 			),
 			'theme'         => $theme,
+			// "Designed by PHPJabbers" (Subscriptions > Plans)
+			'branding'      => self::showBranding($company_id),
 			'booked'        => $booked,
 			'booking_url'   => PJ_INSTALL_URL . 'preview.php?cid=' . (int) $cal['id'],
 		);
@@ -3487,6 +3520,12 @@ class pjJabbApi extends pjAppController
 	/** OAuth client id of the Google Cloud project (app/config/google.php), or ''. */
 	private static function googleClientId()
 	{
+		// System options > API Keys: Google client ID (administrator); app/config/google.php as a fallback
+		$row = pjBaseOptionModel::factory()->select('t1.value')->where('t1.foreign_id', 1)->where('t1.key', 'o_google_client_id')->limit(1)->findAll()->getDataIndex(0);
+		if (!empty($row) && trim((string) $row['value']) !== '')
+		{
+			return trim((string) $row['value']);
+		}
 		$file = dirname(__FILE__) . '/../config/google.php';
 		$cfg = is_file($file) ? include $file : array();
 		return is_array($cfg) && !empty($cfg['client_id']) ? trim((string) $cfg['client_id']) : '';

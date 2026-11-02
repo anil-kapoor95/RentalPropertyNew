@@ -18,7 +18,7 @@ include dirname(__FILE__) . '/elements/heading.php';
 			<tbody>
 			<?php foreach ($tpl['plans'] as $p) { ?>
 				<tr>
-					<td><strong><?php echo pjSanitize::html($p['name']); ?></strong> <small class="text-muted"><?php echo pjSanitize::html($p['code']); ?></small><?php echo (int) $p['is_public'] !== 1 ? ' <small class="text-muted">(' . __('sub_hidden', true) . ')</small>' : ''; ?></td>
+					<td><strong><?php echo pjSanitize::html($p['name']); ?></strong> <small class="text-muted"><?php echo pjSanitize::html($p['code']); ?></small><?php echo (int) $p['is_public'] !== 1 ? ' <small class="text-muted">(' . __('sub_hidden', true) . ')</small>' : ''; ?><?php echo (int) $p['id'] === (int) $tpl['default_plan_id'] ? ' <span class="sub-badge sub-trial">' . __('sub_default_plan_badge', true) . '</span>' : ''; ?></td>
 					<td><?php echo $subMoney($p['price'], $p['currency']); ?><?php if ($p['price'] !== null) { ?> <small class="text-muted">/ <?php echo $subInterval($p); ?></small><?php } ?></td>
 					<td><?php echo (int) $p['trial_days']; ?></td>
 					<td><?php echo $subLimit($p['max_properties']); ?></td>

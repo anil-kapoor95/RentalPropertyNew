@@ -5,7 +5,7 @@ $heading_desc = 'sub_plan_desc';
 include dirname(__FILE__) . '/elements/heading.php';
 $p = $tpl['plan'] ? $tpl['plan'] : array('id' => 0, 'code' => '', 'name' => '', 'description' => '', 'price' => null, 'currency' => '', 'billing_interval' => 'month',
 	'interval_count' => 1, 'trial_days' => 0, 'max_properties' => null, 'max_users' => null, 'max_payment_gateways' => null, 'ai_monthly_messages' => null,
-	'feature_list' => pjEntitlement::$baseFeatures, 'is_public' => 1, 'status' => 'T', 'sort' => 0);
+	'feature_list' => pjEntitlement::$baseFeatures, 'is_public' => 1, 'show_branding' => 1, 'status' => 'T', 'sort' => 0);
 $v = function ($k) use ($p) { return $p[$k] === null ? '' : pjSanitize::html((string) $p[$k]); };
 ?>
 <div class="wrapper wrapper-content animated fadeInRight">
@@ -17,7 +17,11 @@ $v = function ($k) use ($p) { return $p[$k] === null ? '' : pjSanitize::html((st
 				<div class="col-md-4 form-group"><label><?php __('sub_plan_name'); ?> *</label><input class="form-control required" name="name" maxlength="100" required value="<?php echo $v('name'); ?>"></div>
 				<div class="col-md-2 form-group"><label><?php __('sub_plan_code'); ?> *</label><input class="form-control required" name="code" maxlength="32" required pattern="[a-z0-9_\-]{2,32}" value="<?php echo $v('code'); ?>"></div>
 				<div class="col-md-2 form-group"><label><?php __('sub_col_price'); ?></label><input class="form-control" name="price" type="number" min="0" step="0.01" value="<?php echo $v('price'); ?>" placeholder="<?php __('sub_price_not_set', false, true); ?>"></div>
-				<div class="col-md-1 form-group"><label><?php __('sub_currency'); ?></label><input class="form-control" name="currency" maxlength="3" value="<?php echo $tpl['plan'] && $tpl['plan']['currency'] ? pjSanitize::html($tpl['plan']['currency']) : ''; ?>" placeholder="<?php echo pjSanitize::html(pjEntitlement::setting('currency')); ?>"></div>
+				<div class="col-md-1 form-group"><label><?php __('sub_currency'); ?></label>
+					<?php $cur = $tpl['plan'] && $tpl['plan']['currency'] ? $tpl['plan']['currency'] : strtoupper((string) pjEntitlement::setting('currency')); ?>
+					<select class="form-control" name="currency">
+						<?php foreach ($tpl['currencies'] as $code) { ?><option value="<?php echo pjSanitize::html($code); ?>"<?php echo $code === $cur ? ' selected' : ''; ?>><?php echo pjSanitize::html($code); ?></option><?php } ?>
+					</select></div>
 				<div class="col-md-2 form-group"><label><?php __('sub_billing_interval'); ?></label>
 					<div class="input-group"><input class="form-control" name="interval_count" type="number" min="1" max="12" value="<?php echo (int) $p['interval_count']; ?>" style="max-width:70px">
 					<select class="form-control" name="billing_interval"><option value="month"<?php echo $p['billing_interval'] === 'month' ? ' selected' : ''; ?>><?php __('sub_month'); ?></option><option value="year"<?php echo $p['billing_interval'] === 'year' ? ' selected' : ''; ?>><?php __('sub_year'); ?></option></select></div></div>
@@ -44,7 +48,10 @@ $v = function ($k) use ($p) { return $p[$k] === null ? '' : pjSanitize::html((st
 			<p class="text-muted small m-t-sm"><?php __('sub_features_hint'); ?></p>
 			<div class="hr-line-dashed"></div>
 			<label class="sub-check m-r-lg"><input type="checkbox" name="status" value="T"<?php echo $p['status'] === 'T' ? ' checked' : ''; ?>> <?php __('sub_active_plan'); ?></label>
-			<label class="sub-check"><input type="checkbox" name="is_public" value="1"<?php echo (int) $p['is_public'] === 1 ? ' checked' : ''; ?>> <?php __('sub_public'); ?></label>
+			<label class="sub-check m-r-lg"><input type="checkbox" name="is_public" value="1"<?php echo (int) $p['is_public'] === 1 ? ' checked' : ''; ?>> <?php __('sub_public'); ?></label>
+			<label class="sub-check m-r-lg"><input type="checkbox" name="is_default" value="1"<?php echo $tpl['plan'] && (int) $tpl['plan']['id'] === (int) $tpl['default_plan_id'] ? ' checked' : ''; ?>> <?php __('sub_default_plan'); ?></label>
+			<label class="sub-check"><input type="checkbox" name="show_branding" value="1"<?php echo !isset($p['show_branding']) || (int) $p['show_branding'] === 1 ? ' checked' : ''; ?>> <?php __('sub_show_branding'); ?></label>
+			<p class="text-muted small m-t-xs"><?php __('sub_default_plan_hint'); ?> <?php __('sub_show_branding_hint'); ?></p>
 			<div class="hr-line-dashed"></div>
 			<button class="btn btn-primary btn-lg" type="submit"><?php __('sub_btn_save'); ?></button>
 			<a class="btn btn-white btn-lg pull-right" href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminSubscriptions&amp;action=pjActionPlans"><?php __('sub_btn_cancel'); ?></a>

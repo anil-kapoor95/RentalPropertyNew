@@ -25,6 +25,44 @@ class pjAdminOptions extends pjAdmin
 	}
 	
 	/**
+	 * Options > Sign-up settings (administrators only): limits of the website sign-up, life time of its token and
+	 * the writing tones of the AI texts (pjSignupConfig). Platform settings, not per company.
+	 *   GET                 page
+	 *   POST signup_save=1  save (empty = default value; numbers out of range are not saved)
+	 */
+	public function pjActionSignupSettings()
+	{
+		$this->checkLogin();
+		if (!pjAuth::factory('pjAdminOptions', 'pjActionAi')->hasAccess() || !$this->isAdmin())
+		{
+			$this->sendForbidden();
+			return;
+		}
+		if (self::isPost() && $this->_post->check('signup_save'))
+		{
+			$bad = array();
+			foreach (pjSignupConfig::$numbers as $name => $n)
+			{
+				$value = trim((string) $this->_post->toString($name));
+				if ($value !== '' && (!ctype_digit($value) || (int) $value < $n[2] || (int) $value > $n[3]))
+				{
+					$bad[] = $name;
+					continue;
+				}
+				pjSignupConfig::save($n[0], $value);
+			}
+			foreach (pjSignupConfig::$tones as $tone => $t)
+			{
+				$text = trim(preg_replace('/\s+/u', ' ', strip_tags((string) $this->_post->toString('tone_' . $tone))));
+				pjSignupConfig::save($t[0], function_exists('mb_substr') ? mb_substr($text, 0, 500, 'UTF-8') : substr($text, 0, 500));
+			}
+			pjUtil::redirect($_SERVER['PHP_SELF'] . '?controller=pjAdminOptions&action=pjActionSignupSettings&err=' . (empty($bad) ? 'SUS01' : 'SUS02&bad=' . implode(',', $bad)));
+		}
+		$this->set('cfg', pjSignupConfig::all());
+		$this->set('feature_categories', __('feature_categories', true, false));
+	}
+
+	/**
 	 * Options > AI settings (administrators only): AI service, model and API keys used by the
 	 * public sign-up to write property descriptions (pjAi). Platform settings, not per company.
 	 *   GET                       page

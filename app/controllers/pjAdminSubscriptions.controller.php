@@ -209,6 +209,7 @@ class pjAdminSubscriptions extends pjAdmin
 		$counts = pjCompanySubscriptionModel::factory()->select('t1.plan_id, COUNT(*) AS `cnt`')->groupBy('t1.plan_id')->findAll()->getDataPair('plan_id', 'cnt');
 		$this->set('plans', pjEntitlement::plans());
 		$this->set('counts', $counts);
+		$this->set('default_plan_id', (int) pjEntitlement::setting('default_plan_id'));
 	}
 
 	public function pjActionPlan()
@@ -253,6 +254,10 @@ class pjAdminSubscriptions extends pjAdmin
 			$price = trim(str_replace(',', '.', (string) $this->_post->toString('price')));
 			$features = array_values(array_intersect(array_keys(pjEntitlement::$features), (array) $this->_post->toArray('features')));
 			$currency = strtoupper(trim((string) $this->_post->toString('currency')));
+			if (!in_array($currency, $this->currencyList(), true))
+			{
+				$currency = '';
+			}
 			$data = array(
 				'code' => $code, 'name' => $name,
 				'description' => trim((string) $this->_post->toString('description')) !== '' ? trim((string) $this->_post->toString('description')) : ':NULL',
@@ -267,6 +272,7 @@ class pjAdminSubscriptions extends pjAdmin
 				'ai_monthly_messages' => $num($this->_post->toString('ai_monthly_messages')),
 				'features' => implode(',', $features),
 				'is_public' => $this->_post->check('is_public') ? 1 : 0,
+				'show_branding' => $this->_post->check('show_branding') ? 1 : 0,
 				'status' => $this->_post->check('status') ? 'T' : 'F',
 				'sort' => max(0, $this->_post->toInt('sort')),
 				'modified' => date('Y-m-d H:i:s'),
@@ -274,14 +280,36 @@ class pjAdminSubscriptions extends pjAdmin
 			if ($plan)
 			{
 				pjPlanModel::factory()->set('id', $plan['id'])->modify($data);
+				$plan_id = (int) $plan['id'];
 			} else {
 				$data['created'] = date('Y-m-d H:i:s');
-				pjPlanModel::factory()->setAttributes($data)->insert();
+				$plan_id = (int) pjPlanModel::factory()->setAttributes($data)->insert()->getInsertId();
+			}
+			// Plan for new companies (one plan): set here, or cleared when this plan is no longer it
+			if ($this->_post->check('is_default') && $plan_id > 0 && $data['status'] === 'T')
+			{
+				pjEntitlement::saveSetting('default_plan_id', $plan_id);
+			} elseif ((int) pjEntitlement::setting('default_plan_id') === $plan_id) {
+				pjEntitlement::saveSetting('default_plan_id', '');
 			}
 			pjEntitlement::clearCache();
 			$this->back('pjActionPlans', 'subSaved');
 		}
 		$this->set('plan', $plan);
+		$this->set('currencies', $this->currencyList());
+		$this->set('default_plan_id', (int) pjEntitlement::setting('default_plan_id'));
+	}
+
+	/** Currencies of System options > Currency (the administrator's list), in its order. */
+	private function currencyList()
+	{
+		$row = pjBaseOptionModel::factory()->where('t1.foreign_id', 1)->where('t1.key', 'o_currency')->limit(1)->findAll()->getDataIndex(0);
+		if (empty($row))
+		{
+			return array();
+		}
+		list($list) = explode('::', (string) $row['value'] . '::');
+		return array_values(array_unique(array_filter(array_map('trim', explode('|', $list)), function ($c) { return (bool) preg_match('/^[A-Z]{3}$/', $c); })));
 	}
 
 	/* ------------------------------------------------------------------

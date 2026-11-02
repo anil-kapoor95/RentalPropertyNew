@@ -53,6 +53,9 @@ class pjEntitlement
 
 	public static $statuses = array('trial', 'active', 'past_due', 'cancelled', 'expired');
 
+	/** Payment methods every company may use (also without a plan); the others need "payment_gateway_choice". */
+	public static $freePaymentMethods = array('paypal', 'cash');
+
 	/** Offline payment methods do not count as "payment gateways". */
 	public static $offlineMethods = array('cash', 'bank');
 
@@ -66,7 +69,10 @@ class pjEntitlement
 
 	public static $defaults = array(
 		'currency' => 'USD', 'grace_days' => '7',
-		'unassigned_mode' => 'full', 'expired_mode' => 'read_only', 'self_trial' => '0',
+		// A company without a plan has no full access (basic features only, nothing new).
+		'unassigned_mode' => 'restricted', 'expired_mode' => 'read_only', 'self_trial' => '0',
+		// Plan every new company gets (Subscriptions > Plans: "Plan for new companies"), '' = none
+		'default_plan_id' => '',
 	);
 
 	/** The update that creates the subscription tables has run. */
@@ -342,6 +348,16 @@ class pjEntitlement
 		return $u['properties'] < $max;
 	}
 
+	/** May the company switch on this payment method (PayPal and cash always; the rest with "payment_gateway_choice")? */
+	public static function allowsPaymentMethod($company_id, $method)
+	{
+		if (!self::isReady() || in_array((string) $method, self::$freePaymentMethods, true))
+		{
+			return true;
+		}
+		return self::allows($company_id, 'payment_gateway_choice');
+	}
+
 	public static function canAddUser($company_id)
 	{
 		$max = self::limit($company_id, 'max_users');
@@ -432,6 +448,33 @@ class pjEntitlement
 		}
 		self::saveSubscription($company_id, $data);
 		self::log($company_id, 'assigned', sprintf('Plan %s assigned (%s) until %s%s', $plan['name'], $status, $data['current_period_end'], $note !== '' ? ' - ' . $note : ''), $user_id);
+		return true;
+	}
+
+	/** The plan new companies get (Subscriptions > Plans), or false. */
+	public static function defaultPlan()
+	{
+		$id = (int) self::setting('default_plan_id');
+		$plan = $id > 0 ? self::plan($id) : false;
+		return $plan && $plan['status'] === 'T' ? $plan : false;
+	}
+
+	/**
+	 * A new company gets the plan for new companies: active, without an end date (the company changes it on
+	 * My plan, the administrator on Subscriptions). Nothing happens when no such plan is set or it has one already.
+	 */
+	public static function assignDefaultPlan($company_id, $user_id = null)
+	{
+		$plan = self::isReady() ? self::defaultPlan() : false;
+		if (!$plan || (int) $company_id <= 0 || self::subscription($company_id))
+		{
+			return false;
+		}
+		$now = date('Y-m-d H:i:s');
+		self::saveSubscription($company_id, array('plan_id' => (int) $plan['id'], 'status' => 'active', 'started_at' => $now,
+			'current_period_start' => $now, 'current_period_end' => ':NULL', 'trial_ends_at' => ':NULL',
+			'cancel_at_period_end' => 0, 'cancelled_at' => ':NULL', 'pending_plan_id' => ':NULL'));
+		self::log($company_id, 'assigned', sprintf('Plan %s assigned (plan for new companies)', $plan['name']), $user_id);
 		return true;
 	}
 

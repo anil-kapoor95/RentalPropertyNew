@@ -29,6 +29,7 @@ class pjPlanModel extends pjAppModel
 		array('name' => 'ai_monthly_messages', 'type' => 'int', 'default' => ':NULL'),
 		array('name' => 'features', 'type' => 'text', 'default' => ':NULL'),
 		array('name' => 'is_public', 'type' => 'tinyint', 'default' => '1'),
+		array('name' => 'show_branding', 'type' => 'tinyint', 'default' => '1'),
 		array('name' => 'status', 'type' => 'enum', 'default' => 'T'),
 		array('name' => 'sort', 'type' => 'smallint', 'default' => '0'),
 		array('name' => 'created', 'type' => 'datetime', 'default' => ':NOW()'),

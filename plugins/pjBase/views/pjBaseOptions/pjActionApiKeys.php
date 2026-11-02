@@ -90,7 +90,8 @@
                                         </div>
 
                         				<div class="form-group">
-                                        	<label class="col-lg-2 control-label"><?php __('plugin_base_api_key'); ?></label>
+                                        	<?php $is_client_id = $tpl['arr'][$i]['key'] === 'o_google_client_id'; ?>
+                                        	<label class="col-lg-2 control-label"><?php __($is_client_id ? 'plugin_base_client_id' : 'plugin_base_api_key'); ?></label>
 
                                         	<div class="col-sm-8">
                                         		<div class="m-b-md">
@@ -112,6 +113,7 @@
                                             		}
                                             		?>
                                             	</div>
+                                        		<?php if (!$is_client_id) { ?>
                                         		<div class="row">
                                                     <div class="col-lg-4">
                                                         <a href="#" class="btn btn-primary btn-outline btn-verify" data-key="<?php echo $tpl['arr'][$i]['key'];?>" data-csrf="<?php echo pjAppController::getCsrfToken(); ?>"> <?php __('plugin_base_btn_verify_key');?></a>
@@ -119,6 +121,7 @@
 
                                                     <div id="verify-container-<?php echo $tpl['arr'][$i]['key'] ?>" class="col-lg-8"></div><!-- /.col-lg-8 -->
                                                 </div><!-- /.row -->
+                                        		<?php } ?>
                                         	</div>
                                         </div>
 

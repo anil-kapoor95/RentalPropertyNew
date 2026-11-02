@@ -30,7 +30,8 @@ $isScriptDiscounts = in_array($controller_name, array('pjAdminDiscounts'));
 // Settings
 $isScriptOptions = in_array($controller_name, array('pjAdminOptions')) && !in_array($action_name, array('pjActionPreview', 'pjActionInstall'));
 $isScriptOptionsNotifications         = $isScriptOptions && in_array($action_name, array('pjActionNotifications'));
-$isScriptOptionsAi                    = $isScriptOptions && $action_name === 'pjActionAi';
+$isScriptOptionsAi                    = $isScriptOptions && in_array($action_name, array('pjActionAi'), true);
+$isScriptOptionsSignup                = $isScriptOptions && $action_name === 'pjActionSignupSettings';
 // Company options: General (System Options > General of the active company)
 $isScriptCompanyGeneral = $controller_name === 'pjBaseOptions' && $action_name === 'pjActionIndex';
 
@@ -217,9 +218,9 @@ $isScriptCoupons = $isScriptVouchers || $isScriptDiscounts;
 <?php endif; ?>
 
 <?php if ($hasAccessScriptOptionsNotifications || $hasAccessScriptSubscriptions || $hasAccessScriptOptionsAi): ?>
-    <li<?php echo $isScriptOptionsNotifications || $isScriptSubPayments || $isScriptOptionsAi ? ' class="active"' : NULL; ?>>
+    <li<?php echo $isScriptOptionsNotifications || $isScriptSubPayments || $isScriptOptionsAi || $isScriptOptionsSignup ? ' class="active"' : NULL; ?>>
         <a href="#"><i class="fa fa-cogs"></i> <span class="nav-label"><?php __('menuOptions');?></span><span class="fa arrow"></span></a>
-        <ul class="nav nav-second-level collapse<?php echo $isScriptOptionsNotifications || $isScriptSubPayments || $isScriptOptionsAi ? ' in' : NULL; ?>">
+        <ul class="nav nav-second-level collapse<?php echo $isScriptOptionsNotifications || $isScriptSubPayments || $isScriptOptionsAi || $isScriptOptionsSignup ? ' in' : NULL; ?>">
             <?php if ($hasAccessScriptOptionsNotifications): ?>
                 <li<?php echo $isScriptOptionsNotifications ? ' class="active"' : NULL; ?>><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminOptions&amp;action=pjActionNotifications"><?php __('menuNotifications');?></a></li>
             <?php endif; ?>
@@ -228,6 +229,7 @@ $isScriptCoupons = $isScriptVouchers || $isScriptDiscounts;
             <?php endif; ?>
             <?php if ($hasAccessScriptOptionsAi): ?>
                 <li<?php echo $isScriptOptionsAi ? ' class="active"' : NULL; ?>><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminOptions&amp;action=pjActionAi"><?php __('ai_menu');?></a></li>
+                <li<?php echo $isScriptOptionsSignup ? ' class="active"' : NULL; ?>><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminOptions&amp;action=pjActionSignupSettings"><?php __('menuSignupSettings');?></a></li>
             <?php endif; ?>
 
         </ul>

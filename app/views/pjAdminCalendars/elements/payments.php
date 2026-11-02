@@ -38,6 +38,19 @@
 	                $active_arr = pjPayments::getActivePaymentMethods($tpl['arr']['id']);
 	                $other_methods = pjPayments::getPaymentMethods();
 	            }
+	            // Subscription plan: only the payment methods the company may use can be added (administrators: all)
+	            $locked_methods = 0;
+	            if (!$controller->isAdmin() && class_exists('pjEntitlement'))
+	            {
+	                foreach (array_keys($other_methods) as $m)
+	                {
+	                    if (!array_key_exists($m, $active_arr) && !pjEntitlement::allowsPaymentMethod($controller->getCompanyId(), $m))
+	                    {
+	                        unset($other_methods[$m]);
+	                        $locked_methods++;
+	                    }
+	                }
+	            }
 	            if(!empty($active_arr))
 	            {
 	                ?>
@@ -142,6 +155,11 @@
 	            }
 	            ?>
 							
+	            <?php if ($locked_methods > 0) { ?>
+	            <div class="alert alert-info m-t-md"><i class="fa fa-lock m-r-xs"></i> <?php __('subMoreGatewaysOnPlan'); ?>
+	                <?php if ((int) $controller->getRoleId() === 4) { ?> <a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminSubscriptions&amp;action=pjActionMyPlan" class="alert-link"><?php __('sub_myplan_title'); ?></a><?php } ?>
+	            </div>
+	            <?php } ?>
 	            <div class="hr-line-dashed"> </div> 
 	            
 	            <div class="clearfix">

@@ -1159,6 +1159,40 @@ class pjAdminCalendars extends pjAdmin
         {
             self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'Access denied.'));
         }
+        // Subscription plan: which payment methods the company may use (administrators: all).
+        // PayPal and cash always; the other gateways need "Choice of payment gateways" in the plan.
+        $method_allowed = function ($method) {
+            return $this->isAdmin() || !class_exists('pjEntitlement') || pjEntitlement::allowsPaymentMethod($this->getCompanyId(), $method);
+        };
+        if ($foreign_id !== NULL && !$this->_post->check('options_update') && $this->_get->check('payment_method') && !$method_allowed($this->_get->toString('payment_method')))
+        {
+            echo '<div class="modal-body"><div class="alert alert-warning m-b-none"><i class="fa fa-lock m-r-xs"></i> ' . __('subPaymentMethodLocked', true) . '</div></div>'
+                . '<div class="modal-footer"><button type="button" class="btn btn-white" data-dismiss="modal">' . __('btnCancel', true) . '</button></div>';
+            exit;
+        }
+        if ($this->_post->check('options_update') && $foreign_id !== NULL)
+        {
+            $before_active = class_exists('pjEntitlement') ? array_flip(pjEntitlement::activeGateways($foreign_id)) : array();
+            $switching_on = array();
+            foreach ((array) $this->_post->toArray('plugin_payment_options') as $method => $opts)
+            {
+                if (is_array($opts) && isset($opts['is_active']) && (int) $opts['is_active'] === 1 && !isset($before_active[$method]))
+                {
+                    $switching_on[] = $method;
+                }
+            }
+            if (in_array($this->_post->toString('payment_method'), array('cash', 'bank'), true) && $this->_post->toInt('is_active') === 1)
+            {
+                $switching_on[] = $this->_post->toString('payment_method');
+            }
+            foreach ($switching_on as $method)
+            {
+                if (!$method_allowed($method))
+                {
+                    self::jsonResponse(array('status' => 'ERR', 'code' => 402, 'text' => __('subPaymentMethodLocked', true)));
+                }
+            }
+        }
         if($this->_post->check('options_update') && $foreign_id !== NULL && class_exists('pjEntitlement'))
         {
             // Subscription plan: number of online payment gateways switched on per property
