@@ -164,5 +164,43 @@ var jQuery = jQuery || $.noConflict();
 				});
 			}
 		}
+
+		// Website address: own domain of the company (save / check at Vercel)
+		var $site = $("#pjSiteLink");
+		if ($site.length) {
+			var siteCall = function ($btn, data) {
+				if ($btn.hasClass("disabled")) { return; }
+				$btn.addClass("disabled");
+				var $err = $site.find(".pj-site-domain-error").hide().text("");
+				data.id = $site.data("id");
+				data.csrf_token = $('meta[name="csrf-token"]').attr("content") || "";
+				$.ajax({
+					url: "index.php?controller=pjAdminCompanies&action=pjActionSiteDomain",
+					type: "POST",
+					data: data,
+					dataType: "json",
+					headers: {"X-CSRF-Token": data.csrf_token}
+				}).done(function (res) {
+					if (res && res.status === "OK") {
+						window.location.reload();
+						return;
+					}
+					$btn.removeClass("disabled");
+					$err.text(res && res.text ? res.text : "").show();
+				}).fail(function () {
+					$btn.removeClass("disabled");
+				});
+			};
+			$site.on("click", ".pj-site-domain-save", function () {
+				siteCall($(this), {op: "save", domain: $.trim($("#pjSiteDomain").val())});
+			}).on("click", ".pj-site-domain-check", function () {
+				siteCall($(this), {op: "check"});
+			}).on("keydown", "#pjSiteDomain", function (e) {
+				if (e.which === 13) {
+					e.preventDefault();
+					$site.find(".pj-site-domain-save").trigger("click");
+				}
+			});
+		}
 	});
 })(jQuery);

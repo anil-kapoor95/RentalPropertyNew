@@ -338,7 +338,8 @@ class pjAdmin extends pjAppController
 			->set('total_amount_today', $total_amount_today)
 			->set('cnt_bookings_this_month', $cnt_bookings_this_month)
 			->set('total_amount_this_month', $total_amount_this_month)
-			->set('cnt_users', $pjAuthUserModel->findCount()->getData())
+			// users of the active company (the owner and the company's users), as in its Users list + the owner
+			->set('cnt_users', $pjAuthUserModel->where('t1.company_id', $this->getCompanyId())->findCount()->getData())
 			->set('cnt_calendars', count($calendar_arr))
 			->set('calendar_option_arr', $calendar_option_arr);
 			

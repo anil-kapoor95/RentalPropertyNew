@@ -59,7 +59,7 @@
 									$rowClass = " hidden";
 								}
 								
-								if (in_array($tpl['arr'][$i]['key'], array('o_hide_phpjabbers_logo', 'o_hide_footer', 'o_hide_page', 'o_footer_text')))
+								if (in_array($tpl['arr'][$i]['key'], array('o_hide_phpjabbers_logo', 'o_hide_footer', 'o_hide_page', 'o_footer_text', 'o_website_branding_text', 'o_website_branding_footer', 'o_website_branding_url')))
 								{
 									$branding = dirname(__FILE__) . '/elements/branding.php';
 									if (is_file($branding))

@@ -576,6 +576,23 @@ $allowed_origins = array(
     'http://localhost:3000',
     'http://127.0.0.1:3000',
 );
+// Plus the website address (System Options > API Keys) and the hosts' connected domains (My company > Website
+// address): written by pjSiteLinks to app/web/upload/api_domains.json.
+$domain_list = ROOT_PATH . PJ_UPLOAD_PATH . 'api_domains.json';
+if (is_file($domain_list))
+{
+    $more = json_decode((string) @file_get_contents($domain_list), true);
+    if (is_array($more))
+    {
+        foreach ($more as $o)
+        {
+            if (is_string($o) && preg_match('~^https?://[a-z0-9.-]+(:\d+)?$~i', $o))
+            {
+                $allowed_origins[] = strtolower($o);
+            }
+        }
+    }
+}
 
 // API routes: action => controller that runs it.
 // Call:  POST api.php?action=<action>   (or send "action" in the body)
@@ -609,6 +626,7 @@ $routes = array(
     // Guest page of a published property
     'pjActionGetPropertyPage' => 'pjJabbApi',
     'pjActionGetCompanyPage' => 'pjJabbApi',
+    'pjActionResolveDomain' => 'pjJabbApi',
     // Booking on the host's website
     'pjActionBookingSetup'  => 'pjJabbApi',
     'pjActionBookingQuote'  => 'pjJabbApi',
@@ -622,6 +640,11 @@ $routes = array(
 );
 
 $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
+// Local test of a host's own domain: http://www.myvilla.com.localhost:3000 (*.localhost is always this computer)
+if (preg_match('~^http://[a-z0-9.-]+\.localhost:3000$~i', $origin))
+{
+    $allowed_origins[] = $origin;
+}
 if ($origin !== '' && in_array($origin, $allowed_origins, true))
 {
     header('Access-Control-Allow-Origin: ' . $origin);

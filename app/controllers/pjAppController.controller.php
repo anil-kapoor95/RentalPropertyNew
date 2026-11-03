@@ -235,6 +235,23 @@ class pjAppController extends pjBaseAppController
 	
     public static function getTokens($booking_arr, $option_arr, $locale_id)
     {
+        // Prices in the property's currency (its company's options), not the one of the page that sends the e-mail
+        $registry = pjRegistry::getInstance();
+        $previous_options = $registry->is('options') ? $registry->get('options') : null;
+        if (is_array($option_arr) && !empty($option_arr['o_currency']))
+        {
+            $registry->set('options', array_merge(is_array($previous_options) ? $previous_options : array(), $option_arr));
+        }
+        $tokens = self::buildTokens($booking_arr, $option_arr, $locale_id);
+        if ($previous_options !== null)
+        {
+            $registry->set('options', $previous_options);
+        }
+        return $tokens;
+    }
+
+    private static function buildTokens($booking_arr, $option_arr, $locale_id)
+    {
         $payment_methods = __('payment_methods', true);
     	$na = __('lblNA', true, false);
     	$c_name = !empty($booking_arr['c_name']) ? @$booking_arr['c_name'] : $na;
@@ -286,7 +303,21 @@ class pjAppController extends pjBaseAppController
 			->select("t1.*, t2.content as name")
 			->join('pjMultiLang', "t2.foreign_id = t1.id AND t2.model = 'pjCalendar' AND t2.locale = '".$locale_id."' AND t2.field = 'name'", 'left')
 			->find($booking_arr['calendar_id'])->getData();
-			$calendar_name = $calendar['name'];
+			$calendar_name = isset($calendar['name']) ? (string) $calendar['name'] : '';
+			if ($calendar_name === '')
+			{
+				// no name in this language: the name in any language of the property
+				foreach (pjMultiLangModel::factory()->select('t1.locale, t1.content')->where('t1.model', 'pjCalendar')
+					->where('t1.foreign_id', (int) $booking_arr['calendar_id'])->where('t1.field', 'name')
+					->orderBy('t1.locale ASC')->findAll()->getData() as $row)
+				{
+					if (trim((string) $row['content']) !== '')
+					{
+						$calendar_name = (string) $row['content'];
+						break;
+					}
+				}
+			}
 		}
 		
 		$extra_arr = pjExtraModel::factory()
@@ -351,7 +382,84 @@ class pjAppController extends pjBaseAppController
         ->limit(0, 1)
         ->findAll()
         ->getData();
+        if (empty($lang_subject[0]['content']) || empty($lang_message[0]['content']))
+        {
+            // No text for this property / company yet: the template notification of the system, then the built-in text
+            $fallback = self::defaultSubjectMessage($notification, $locale_id);
+            if ($fallback !== null)
+            {
+                return $fallback;
+            }
+        }
         return compact('lang_message', 'lang_subject');
+    }
+
+    /** Built-in booking e-mails (variant|recipient => subject, message); tokens as in getTokens(). */
+    private static $defaultEmails = array(
+        'confirmation|client' => array(
+            'Your booking at {CalendarName} ({ReservationUUID})',
+            '<p>Dear {Name},</p><p>Thank you for booking <strong>{CalendarName}</strong>. We have received your booking.</p><p>Booking ID: <strong>{ReservationUUID}</strong><br>Check-in: {StartDate}<br>Check-out: {EndDate}<br>Guests: {Adults} adults, {Children} children<br>Payment method: {PaymentMethod}<br>Total price: {TotalPrice}<br>Deposit: {Deposit}</p><p>The host will contact you if anything else is needed.</p>'),
+        'confirmation|owner' => array(
+            'New booking {ReservationUUID} for {CalendarName}',
+            '<p>You have a new booking for <strong>{CalendarName}</strong>.</p><p>Booking ID: <strong>{ReservationUUID}</strong><br>Check-in: {StartDate}<br>Check-out: {EndDate}<br>Guests: {Adults} adults, {Children} children<br>Payment method: {PaymentMethod}<br>Total price: {TotalPrice}<br>Deposit: {Deposit}</p><p>Guest: {Name}<br>Email: {Email}<br>Phone: {Phone}<br>Notes: {Notes}</p>'),
+        'payment|client' => array(
+            'Payment received for booking {ReservationUUID}',
+            '<p>Dear {Name},</p><p>We have received your payment for <strong>{CalendarName}</strong>.</p><p>Booking ID: <strong>{ReservationUUID}</strong><br>Check-in: {StartDate}<br>Check-out: {EndDate}<br>Paid: {Deposit}<br>Total price: {TotalPrice}</p>'),
+        'payment|owner' => array(
+            'Payment received for booking {ReservationUUID}',
+            '<p>The guest paid for booking <strong>{ReservationUUID}</strong> at {CalendarName}.</p><p>Check-in: {StartDate}<br>Check-out: {EndDate}<br>Paid: {Deposit}<br>Total price: {TotalPrice}<br>Guest: {Name} ({Email}, {Phone})</p>'),
+        'cancel|client' => array(
+            'Booking {ReservationUUID} cancelled',
+            '<p>Dear {Name},</p><p>Your booking <strong>{ReservationUUID}</strong> at {CalendarName} ({StartDate} - {EndDate}) has been cancelled.</p>'),
+        'cancel|owner' => array(
+            'Booking {ReservationUUID} cancelled',
+            '<p>Booking <strong>{ReservationUUID}</strong> at {CalendarName} ({StartDate} - {EndDate}) by {Name} has been cancelled.</p>'),
+    );
+
+    /**
+     * Subject and message when a notification has no text: the system template (same recipient, transport,
+     * variant; foreign_id 0, company 0), otherwise the built-in text. null: nothing to fall back on.
+     */
+    private static function defaultSubjectMessage($notification, $locale_id)
+    {
+        static $busy = false;
+        if ($busy || empty($notification['recipient']) || empty($notification['variant']))
+        {
+            return null;
+        }
+        $variant = $notification['variant'] == 'confirmation' ? 'confirm' : $notification['variant'];
+        if ((int) $notification['foreign_id'] !== 0 || (int) $notification['company_id'] !== 0)
+        {
+            $tpl = pjNotificationModel::factory()->where('t1.foreign_id', 0)->where('t1.company_id', 0)
+                ->where('t1.is_general', (int) $notification['is_general'])->where('t1.recipient', $notification['recipient'])
+                ->where('t1.transport', $notification['transport'])->where('t1.variant', $notification['variant'])
+                ->limit(1)->findAll()->getDataIndex(0);
+            if (!empty($tpl) && (int) $tpl['id'] !== (int) $notification['id'])
+            {
+                $busy = true;
+                $resp = self::getSubjectMessage($tpl, $locale_id);
+                $busy = false;
+                if (!empty($resp['lang_subject'][0]['content']) && !empty($resp['lang_message'][0]['content']))
+                {
+                    return $resp;
+                }
+            }
+        }
+        if ($notification['transport'] !== 'email')
+        {
+            return null;
+        }
+        // the company / administrator copy ("admin") gets the owner's text
+        $who = $notification['recipient'] === 'admin' ? 'owner' : $notification['recipient'];
+        $key = $notification['variant'] . '|' . $who;
+        if (!isset(self::$defaultEmails[$key]))
+        {
+            return null;
+        }
+        return array(
+            'lang_subject' => array(array('content' => self::$defaultEmails[$key][0])),
+            'lang_message' => array(array('content' => self::$defaultEmails[$key][1])),
+        );
     }
     
 	public static function getSmsMessage($notification, $locale_id)

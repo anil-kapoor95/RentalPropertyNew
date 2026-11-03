@@ -105,6 +105,14 @@ class pjJabbApi extends pjAppController
 		return isset($p[$key]) && !is_array($p[$key]) ? (string) $p[$key] : '';
 	}
 
+	/** Work done after the answer is sent (e-mails): the caller does not wait for the mail server. */
+	private static $afterResponse = array();
+
+	private static function afterResponse($fn)
+	{
+		self::$afterResponse[] = $fn;
+	}
+
 	private function respond($code, $message, $data = array(), $errors = array())
 	{
 		http_response_code($code === 200 ? 200 : (int) $code);
@@ -121,7 +129,39 @@ class pjJabbApi extends pjAppController
 		{
 			$resp['data'] = $data;
 		}
-		pjAppController::jsonResponse($resp);
+		if (empty(self::$afterResponse))
+		{
+			pjAppController::jsonResponse($resp);
+		}
+		// Send the whole answer first (length known, connection closed), then do the queued work
+		$json = pjAppController::jsonEncode($resp);
+		ignore_user_abort(true);
+		@set_time_limit(120);
+		while (ob_get_level() > 0)
+		{
+			@ob_end_clean();
+		}
+		header('Content-Type: application/json; charset=utf-8');
+		header('Content-Encoding: none');
+		header('Content-Length: ' . strlen($json));
+		header('Connection: close');
+		echo $json;
+		@flush();
+		if (function_exists('fastcgi_finish_request'))
+		{
+			fastcgi_finish_request();
+		}
+		$jobs = self::$afterResponse;
+		self::$afterResponse = array();
+		foreach ($jobs as $job)
+		{
+			try {
+				call_user_func($job);
+			} catch (\Throwable $e) {
+				error_log('API after-response job: ' . $e->getMessage());
+			}
+		}
+		exit;
 	}
 
 	private function requirePost()
@@ -386,7 +426,32 @@ class pjJabbApi extends pjAppController
 		}
 		$signup = self::normalizeStep($signup);
 		$signup['user'] = $user;
+		if ((int) $signup['company_id'] > 0)
+		{
+			self::useCompanyTimezone((int) $signup['company_id']);
+		}
 		return $signup;
+	}
+
+	/**
+	 * Dates written for a company (bookings, subscriptions, sign-up steps) use the company's time zone
+	 * (Company options > General), as the back office does when that company is active.
+	 */
+	private static function useCompanyTimezone($company_id)
+	{
+		static $done = array();
+		$company_id = (int) $company_id;
+		if ($company_id <= 0 || isset($done[$company_id]))
+		{
+			return;
+		}
+		$done[$company_id] = true;
+		$settings = self::companySettings($company_id);
+		$tz = isset($settings['timezone']) ? (string) $settings['timezone'] : '';
+		if ($tz !== '' && in_array($tz, timezone_identifiers_list(), true))
+		{
+			pjTimezone::factory()->setAllTimezones($tz);
+		}
 	}
 
 	/**
@@ -653,7 +718,7 @@ class pjJabbApi extends pjAppController
 				}
 				$company['logo'] = !empty($c['logo']) ? PJ_INSTALL_URL . ltrim($c['logo'], '/') : null;
 				// link of the company page on the website (/stays/<slug>)
-				$company['slug'] = self::slugOf($c['name']);
+				$company['slug'] = self::companyLink((int) $c['id'], $c['name']);
 			}
 		}
 
@@ -685,6 +750,8 @@ class pjJabbApi extends pjAppController
 				// Guests: "Max people" of the property (Limits in the back office)
 				$opt = self::calendarOptions($cal['id'], $signup['company_id']);
 				$property['id'] = (int) $cal['id'];
+				// stored link of the property (website/<slug>); unique even when two properties have the same name
+				$property['slug'] = self::propertyLink((int) $cal['id'], isset($t['name']) ? $t['name'] : '');
 				$property['property_type'] = isset($t['property_type']) && in_array($t['property_type'], self::$propertyTypes, true) ? $t['property_type'] : null;
 				$property['amenities'] = self::propertyAmenities($cal['id'], $signup['company_id']);
 				$property['max_guests'] = isset($opt['o_max_people']) && (int) $opt['o_max_people'] > 0 ? (int) $opt['o_max_people'] : null;
@@ -1018,7 +1085,12 @@ class pjJabbApi extends pjAppController
 
 		$token = $this->issueToken((int) $signup_id);
 		// Options > Sign-up emails: welcome email to the host, "new sign-up" email to the administrator
-		pjSignupMail::accountCreated(array('name' => $acc['name'], 'email' => $acc['email'], 'phone' => $acc['phone']), $this->signupSiteUrl());
+		// welcome / new sign-up e-mails after the answer (the mail server can take seconds)
+		$mail_host = array('name' => $acc['name'], 'email' => $acc['email'], 'phone' => $acc['phone']);
+		$mail_site = $this->signupSiteUrl();
+		self::afterResponse(function () use ($mail_host, $mail_site) {
+			pjSignupMail::accountCreated($mail_host, $mail_site);
+		});
 		$this->respond(200, 'Account created. Please continue with your property details.',
 			array_merge(array('signup_token' => $token, 'resumed' => false), $this->signupState(array('id' => $signup_id))));
 	}
@@ -1320,6 +1392,28 @@ class pjJabbApi extends pjAppController
 	private static function aiAllowed($company_id)
 	{
 		return true;
+	}
+
+	/** "Pro", "Pro or Business" … : names of the active, public plans with a feature (Subscriptions > Plans). */
+	private static function planNamesWith($feature)
+	{
+		$names = array();
+		if (class_exists('pjEntitlement') && pjEntitlement::isReady())
+		{
+			foreach (pjEntitlement::plans(true) as $plan)
+			{
+				if ((int) $plan['is_public'] === 1 && in_array($feature, $plan['feature_list'], true))
+				{
+					$names[] = (string) $plan['name'];
+				}
+			}
+		}
+		if (empty($names))
+		{
+			return '';
+		}
+		$last = array_pop($names);
+		return empty($names) ? $last : implode(', ', $names) . ' or ' . $last;
 	}
 
 	/* ------------------------------------------------------------------
@@ -1957,6 +2051,11 @@ class pjJabbApi extends pjAppController
 			pjUtil::pjActionGenerateImages($calendar_id, $pjOptionModel->reset()->getAllPairs($calendar_id));
 		}
 
+		// The link follows the name until the sign-up is finished (then it is kept, so shared links keep working)
+		if (self::linksReady() && $signup['status'] !== 'completed')
+		{
+			pjSiteLinks::renameCalendarSlug($calendar_id, $v['name']);
+		}
 		if ($amenities !== null)
 		{
 			self::saveAmenities($calendar_id, $company_id, $amenities);
@@ -2633,6 +2732,24 @@ class pjJabbApi extends pjAppController
 		return substr($s, 0, 60);
 	}
 
+	/** Stored links (update_2026_11_03_14_00_00.sql) are there. */
+	private static function linksReady()
+	{
+		return class_exists('pjSiteLinks') && pjSiteLinks::isReady();
+	}
+
+	/** Link of a property: its stored, unique slug (made from the name the first time). */
+	private static function propertyLink($calendar_id, $name)
+	{
+		return self::linksReady() ? pjSiteLinks::calendarSlug((int) $calendar_id, (string) $name) : self::slugOf($name);
+	}
+
+	/** Link of a company page (/stays/<slug>): its stored, unique slug. */
+	private static function companyLink($company_id, $name)
+	{
+		return self::linksReady() ? pjSiteLinks::companySlug((int) $company_id, (string) $name) : self::slugOf($name);
+	}
+
 	/** Name of a country in English (the website is in English), '' when unknown. */
 	private static function countryNameEn($country_id, $company_id)
 	{
@@ -2678,6 +2795,30 @@ class pjJabbApi extends pjAppController
 	 */
 	private static function publicCalendarBySlug($slug)
 	{
+		// 1. The stored link (unique: "casanova", "casanova-2" ...). Properties without one get it first.
+		if (self::linksReady())
+		{
+			for ($pass = 0; $pass < 2; $pass++)
+			{
+				$cal = pjCalendarModel::factory()->where('t1.slug', $slug)->limit(1)->findAll()->getDataIndex(0);
+				if (!empty($cal))
+				{
+					foreach (self::publicCalendars((int) $cal['company_id']) as $c)
+					{
+						if ((int) $c['id'] === (int) $cal['id'])
+						{
+							return array($c, self::propertyTexts((int) $c['id'], (int) $c['company_id']));
+						}
+					}
+					return null;
+				}
+				if ($pass === 0)
+				{
+					pjSiteLinks::ensureAll();
+				}
+			}
+		}
+		// 2. Old links made from the current name (e.g. after a rename); the page then shows the stored link.
 		$cals = array();
 		foreach (self::publicCalendars() as $c)
 		{
@@ -2709,6 +2850,28 @@ class pjJabbApi extends pjAppController
 	}
 
 	/** "Designed by PHPJabbers" on the company's website: hidden only when its plan says so (Subscriptions > Plans). */
+	/**
+	 * Text and link of the branding line on the websites (System Options > Visual & Branding).
+	 * text: line at the top, footer: text in the footer, url: optional link. An emptied text is not shown.
+	 */
+	private static function brandingLine()
+	{
+		static $line = null;
+		if ($line !== null)
+		{
+			return $line;
+		}
+		$pairs = pjBaseOptionModel::factory()->where('t1.foreign_id', 1)
+			->whereIn('t1.key', array('o_website_branding_text', 'o_website_branding_footer', 'o_website_branding_url'))
+			->findAll()->getDataPair('key', 'value');
+		$url = isset($pairs['o_website_branding_url']) ? trim((string) $pairs['o_website_branding_url']) : 'https://www.phpjabbers.com';
+		return $line = array(
+			'text'   => isset($pairs['o_website_branding_text']) ? trim((string) $pairs['o_website_branding_text']) : 'Designed by PHPJabbers',
+			'footer' => isset($pairs['o_website_branding_footer']) ? trim((string) $pairs['o_website_branding_footer']) : 'Website by PHPJabbers',
+			'url'    => preg_match('~^https?://~i', $url) ? $url : '',
+		);
+	}
+
 	private static function showBranding($company_id)
 	{
 		if (!class_exists('pjEntitlement') || !pjEntitlement::isReady())
@@ -2752,12 +2915,25 @@ class pjJabbApi extends pjAppController
 			$this->respond(404, 'Page not found.');
 		}
 		$company = null;
-		foreach (pjCompanyModel::factory()->where('t1.status', 'T')->orderBy('t1.id ASC')->findAll()->getData() as $c)
+		if (self::linksReady())
 		{
-			if (self::slugOf($c['name']) === $slug)
+			$company = pjCompanyModel::factory()->where('t1.status', 'T')->where('t1.slug', $slug)->limit(1)->findAll()->getDataIndex(0);
+			if (empty($company))
 			{
-				$company = $c;
-				break;
+				pjSiteLinks::ensureAll();
+				$company = pjCompanyModel::factory()->where('t1.status', 'T')->where('t1.slug', $slug)->limit(1)->findAll()->getDataIndex(0);
+			}
+			$company = !empty($company) ? $company : null;
+		}
+		if ($company === null)
+		{
+			foreach (pjCompanyModel::factory()->where('t1.status', 'T')->orderBy('t1.id ASC')->findAll()->getData() as $c)
+			{
+				if (self::slugOf($c['name']) === $slug)
+				{
+					$company = $c;
+					break;
+				}
 			}
 		}
 		if ($company === null)
@@ -2783,7 +2959,7 @@ class pjJabbApi extends pjAppController
 				$places[$city] = true;
 			}
 			$properties[] = array(
-				'slug'          => self::slugOf($t['name']),
+				'slug'          => self::propertyLink((int) $cal['id'], $t['name']),
 				'name'          => html_entity_decode((string) $t['name'], ENT_QUOTES, 'UTF-8'),
 				'property_type' => isset($t['property_type']) && in_array($t['property_type'], self::$propertyTypes, true) ? $t['property_type'] : null,
 				'headline'      => isset($t['headline']) && trim((string) $t['headline']) !== '' ? (string) $t['headline'] : null,
@@ -2805,7 +2981,7 @@ class pjJabbApi extends pjAppController
 		}
 		$description = isset($company['description']) && is_string($company['description']) ? self::htmlToText($company['description']) : '';
 		$this->respond(200, 'OK', array(
-			'slug'         => $slug,
+			'slug'         => self::companyLink($cid, $company['name']),
 			'name'         => html_entity_decode((string) $company['name'], ENT_QUOTES, 'UTF-8'),
 			'description'  => $description !== '' ? $description : null,
 			'logo'         => !empty($company['logo']) ? PJ_INSTALL_URL . ltrim($company['logo'], '/') : null,
@@ -2816,7 +2992,59 @@ class pjJabbApi extends pjAppController
 			'price_format' => self::priceFormat($cid),
 			'theme'        => self::companyTheme($cid),
 			'branding'     => self::showBranding($cid),
+			'branding_line' => self::brandingLine(),
 			'properties'   => $properties,
+		));
+	}
+
+	/**
+	 * Path of a property on the website that made the call: "/casanova" on the main website; on the company's
+	 * own domain "" when the company has one public property (it is the home page), else "/casanova".
+	 */
+	private static function sitePropertyPath($site, $company_id, $slug)
+	{
+		if ($site !== '' && self::linksReady())
+		{
+			$c = pjSiteLinks::companyOfDomain((string) parse_url($site, PHP_URL_HOST));
+			if (!empty($c) && (int) $c['id'] === (int) $company_id && count(self::publicCalendars((int) $company_id)) === 1)
+			{
+				return '';
+			}
+		}
+		return '/' . $slug;
+	}
+
+	/**
+	 * Website of a company's own domain (the website's proxy asks this for every host that is not its own).
+	 *   host* (e.g. www.myvilla.com)
+	 * Data: company_slug, property_slug (when the company has exactly one public property: it is the home page,
+	 *   else null: the home page lists the properties), domain
+	 */
+	public function pjActionResolveDomain()
+	{
+		$this->setAjax(true);
+		$this->requireSignupTable();
+		$company = self::linksReady() ? pjSiteLinks::companyOfDomain($this->param('host')) : null;
+		if (empty($company) || (class_exists('pjEntitlement') && pjEntitlement::isReady() && !pjEntitlement::allows((int) $company['id'], 'custom_domain')))
+		{
+			$this->respond(404, 'Unknown domain.');
+		}
+		$cid = (int) $company['id'];
+		$cals = self::publicCalendars($cid);
+		if (empty($cals))
+		{
+			$this->respond(404, 'Unknown domain.');
+		}
+		$property = null;
+		if (count($cals) === 1)
+		{
+			$t = self::propertyTexts((int) $cals[0]['id'], $cid);
+			$property = self::propertyLink((int) $cals[0]['id'], isset($t['name']) ? $t['name'] : '');
+		}
+		$this->respond(200, 'OK', array(
+			'company_slug'  => self::companyLink($cid, $company['name']),
+			'property_slug' => $property,
+			'domain'        => (string) $company['custom_domain'],
 		));
 	}
 
@@ -2846,6 +3074,7 @@ class pjJabbApi extends pjAppController
 		}
 		list($cal, $t) = $found;
 		$company_id = (int) $cal['company_id'];
+		self::loadWebsiteLabels($company_id);
 		$company = pjCompanyModel::factory()->find($company_id)->getData();
 		if (empty($cal) || (isset($cal['status']) && $cal['status'] === 'F') || empty($company) || (isset($company['status']) && $company['status'] !== 'T'))
 		{
@@ -2871,7 +3100,7 @@ class pjJabbApi extends pjAppController
 
 		$host_phone = !empty($company['phone']) ? (string) $company['phone'] : '';
 		$out = array(
-			'slug'          => $slug,
+			'slug'          => self::propertyLink((int) $cal['id'], $t['name']),
 			'name'          => (string) $t['name'],
 			'property_type' => isset($t['property_type']) && in_array($t['property_type'], self::$propertyTypes, true) ? $t['property_type'] : null,
 			'headline'      => isset($t['headline']) && $t['headline'] !== '' ? (string) $t['headline'] : null,
@@ -2898,7 +3127,7 @@ class pjJabbApi extends pjAppController
 			'host'          => array(
 				'name'  => (string) $company['name'],
 				// company page with all the host's properties (/stays/<slug>)
-				'slug'  => self::slugOf($company['name']),
+				'slug'  => self::companyLink((int) $company['id'], $company['name']),
 				'stays' => count(self::publicCalendars($company_id)),
 				'logo'  => !empty($company['logo']) ? PJ_INSTALL_URL . ltrim($company['logo'], '/') : null,
 				'phone' => $host_phone,
@@ -2907,17 +3136,19 @@ class pjJabbApi extends pjAppController
 			'theme'         => $theme,
 			// "Designed by PHPJabbers" (Subscriptions > Plans)
 			'branding'      => self::showBranding($company_id),
+			'branding_line' => self::brandingLine(),
 			'booked'        => $booked,
 			'booking_url'   => PJ_INSTALL_URL . 'preview.php?cid=' . (int) $cal['id'],
 			// booking card texts (back office > Languages)
-			'labels'        => array(
+			// page texts (System Options > Languages: book_* and site_* labels)
+			'labels'        => array_merge(array(
 				'book_now'     => self::lbl('book_book_now'),
 				'check_in'     => self::lbl('book_check_in'),
 				'check_out'    => self::lbl('book_check_out'),
 				'choose_dates' => self::lbl('book_choose_dates'),
 				'adults'       => self::lbl('bf_adults'),
 				'children'     => self::lbl('bf_children'),
-			),
+			), self::labelList(self::$siteLabels)),
 			// Adults / children of the property's booking form (Booking options > Booking form)
 			'guests'        => array(
 				'adults'   => array('show' => (int) $opt['o_bf_adults'] !== 1, 'max' => max(1, (int) $opt['o_bf_adults_max'])),
@@ -2964,6 +3195,11 @@ class pjJabbApi extends pjAppController
 					'features'         => $features,
 					'includes_themes'  => in_array('themes', $plan['feature_list'], true),
 					'purchasable'      => pjEntitlement::isPurchasable($plan),
+					'limits'           => array(
+						'max_properties'       => $plan['max_properties'],
+						'max_users'            => $plan['max_users'],
+						'max_payment_gateways' => $plan['max_payment_gateways'],
+					),
 				);
 			}
 		}
@@ -3312,7 +3548,10 @@ class pjJabbApi extends pjAppController
 		$pro = self::proGatewaysAllowed($company_id);
 		if ($gateway['tier'] === 'pro' && $is_active && !$pro)
 		{
-			$this->respond(402, sprintf('%s comes with the Pro plan. PayPal and cash are free on every plan.', $gateway['name']));
+			$plans = self::planNamesWith('payment_gateway_choice');
+			$this->respond(402, $plans !== ''
+				? sprintf('%s comes with the %s plan. PayPal and cash are free on every plan.', $gateway['name'], $plans)
+				: sprintf('%s is not included in your plan. PayPal and cash are free on every plan.', $gateway['name']));
 		}
 		$offline = !empty($gateway['offline']);
 		$is_test_mode = !$offline && $this->param('is_test_mode') === '1';
@@ -3837,15 +4076,40 @@ class pjJabbApi extends pjAppController
 		}
 		list($cal, $t) = $found;
 		$cid = (int) $cal['company_id'];
+		self::useCompanyTimezone($cid);
+		self::loadWebsiteLabels($cid);
 		$opt = self::calendarOptions($cal['id'], $cid);
 		// the price calculation also reads options from the controller
 		$this->option_arr = $opt;
-		return array($cal, $t, $cid, $opt, $slug);
+		return array($cal, $t, $cid, $opt, self::propertyLink((int) $cal['id'], isset($t['name']) ? $t['name'] : $slug));
+	}
+
+	/** Language whose label texts are loaded for this request (null: not loaded yet). */
+	private static $labelsLocale = null;
+
+	/**
+	 * Loads the label texts (System Options > Languages) of the website language fresh from the database.
+	 * The API has no back-office session options, so the texts cached in its session were never refreshed:
+	 * a label changed in the back office kept its old text on the websites.
+	 */
+	private static function loadWebsiteLabels($company_id)
+	{
+		$lid = self::websiteLocale((int) $company_id);
+		if (self::$labelsLocale === $lid)
+		{
+			return;
+		}
+		pjAppController::setFields($lid);
+		self::$labelsLocale = $lid;
 	}
 
 	/** Text of the back office language (the key itself when it has none). */
 	private static function lbl($key)
 	{
+		if (self::$labelsLocale === null)
+		{
+			self::loadWebsiteLabels(0);
+		}
 		$v = __($key, true);
 		return is_string($v) && $v !== '' ? $v : $key;
 	}
@@ -4128,6 +4392,8 @@ class pjJabbApi extends pjAppController
 		$price_types = __($opt['o_price_based_on'] === 'days' ? 'day_price_types' : 'price_types', true);
 		$this->respond(200, 'OK', array(
 			'slug' => $slug,
+			// company page link (/stays/<company>): the website checks it on a company's own domain
+			'company_slug' => self::companyLink($cid, isset($company['name']) ? $company['name'] : ''),
 			'property' => array(
 				'name'           => (string) $t['name'],
 				'photo'          => !empty($photos) ? $photos[0]['url'] : null,
@@ -4161,6 +4427,33 @@ class pjJabbApi extends pjAppController
 			'week_start'        => $week_start,
 			'labels'            => $labels,
 		));
+	}
+
+	/** Texts of the property website page (update_2026_11_03_18_00_00.sql). */
+	private static $siteLabels = array(
+		'site_nav_sections', 'site_nav_overview', 'site_nav_amenities', 'site_nav_location', 'site_nav_faq', 'site_hosted_by',
+		'site_see_all_stays', 'site_book_direct', 'site_bedroom', 'site_bedrooms', 'site_bathroom', 'site_bathrooms',
+		'site_up_to_guest', 'site_up_to_guests', 'site_entire', 'site_type_villa', 'site_type_homestay', 'site_type_apartment',
+		'site_type_cottage', 'site_type_resort', 'site_about', 'site_amenities', 'site_show_all_amenities', 'site_show_less',
+		'site_availability', 'site_good_to_know', 'site_guests', 'site_up_to', 'site_prices', 'site_per_night', 'site_per_day',
+		'site_per_night_varies', 'site_per_day_varies', 'site_host', 'site_location', 'site_map_of', 'site_faq',
+		'site_price_on_request', 'site_price_from', 'site_night', 'site_nights', 'site_day', 'site_days', 'site_dates_free',
+		'site_dates_taken', 'site_whatsapp', 'site_new_tab', 'site_whatsapp_text', 'site_whatsapp_dates', 'site_guest_word',
+		'site_guests_word', 'site_total', 'site_estimate', 'site_book_direct_owner', 'site_rights', 'site_photos_title',
+		'site_photo_prev', 'site_photo_next', 'site_photo_alt', 'site_open_photo', 'site_view_all_photos', 'site_cal_prev',
+		'site_cal_next', 'site_cal_weekdays', 'site_cal_your_dates', 'site_cal_taken', 'site_cal_available', 'site_cal_pick_in',
+		'site_cal_pick_out', 'site_cal_summary'
+	);
+
+	/** key => text of these labels (the key itself when a text is missing). */
+	private static function labelList($keys)
+	{
+		$out = array();
+		foreach ($keys as $k)
+		{
+			$out[$k] = self::lbl($k);
+		}
+		return $out;
 	}
 
 	/** Texts of the booking pages (back office > Languages); the update adds the ones the old booking form had not. */
@@ -4320,14 +4613,17 @@ class pjJabbApi extends pjAppController
 		{
 			require_once dirname(__FILE__) . '/pjFront.controller.php';
 		}
-		pjFront::pjActionConfirmSend($id, $opt, $lid, 'confirmation');
+		// sent after the answer: the guest does not wait for the mail / SMS server
+		self::afterResponse(function () use ($id, $opt, $lid) {
+			pjFront::pjActionConfirmSend($id, $opt, $lid, 'confirmation');
+		});
 
 		$booking = pjReservationModel::factory()->find($id)->getData();
 		$payment = array('method' => $method, 'online' => $method !== '' && !empty($methods[$method]['online']), 'pay_url' => null, 'bank_account' => '');
 		if ($payment['online'])
 		{
 			$site = $this->signupSiteUrl();
-			$return = ($site !== '' ? $site : rtrim(PJ_INSTALL_URL, '/')) . '/property/' . $slug . '/book/confirmed?ref=' . $booking['uuid'];
+			$return = ($site !== '' ? $site : rtrim(PJ_INSTALL_URL, '/')) . self::sitePropertyPath($site, $cid, $slug) . '/book/confirmed?ref=' . $booking['uuid'] . '&key=' . self::bookingKey($booking['uuid']);
 			$payment['pay_url'] = PJ_INSTALL_URL . 'index.php?controller=pjFront&action=pjActionPayBooking&cid=' . (int) $cal['id']
 				. '&ref=' . rawurlencode($booking['uuid']) . '&return=' . rawurlencode($return)
 				. '&hash=' . sha1($booking['uuid'] . strtotime($booking['created']) . $return . PJ_SALT);
@@ -4335,16 +4631,26 @@ class pjJabbApi extends pjAppController
 			$payment['bank_account'] = self::bankAccount($cal['id'], $lid);
 		}
 		unset($price['raw']);
-		$this->respond(200, 'OK', array('reference' => $booking['uuid'], 'status' => $booking['status'], 'payment' => $payment, 'price' => $price));
+		$this->respond(200, 'OK', array('reference' => $booking['uuid'], 'key' => self::bookingKey($booking['uuid']), 'status' => $booking['status'], 'payment' => $payment, 'price' => $price));
 	}
 
 	/** A booking made on the website (confirmation page). slug*, ref* (booking reference) */
+	/**
+	 * Secret key of a booking for its confirmation page: the reference alone (2 letters + a time) can be
+	 * guessed, so the page also needs this key (sent with the booking and in the payment return link).
+	 */
+	private static function bookingKey($uuid)
+	{
+		return substr(hash_hmac('sha256', 'booking|' . (string) $uuid, PJ_SALT), 0, 32);
+	}
+
 	public function pjActionBookingStatus()
 	{
 		$this->setAjax(true);
 		list($cal, $t, $cid, $opt) = $this->bookingProperty();
 		$ref = (string) $this->param('ref');
-		$b = preg_match('/^[A-Za-z0-9-]{6,64}$/', $ref)
+		$key = (string) $this->param('key');
+		$b = preg_match('/^[A-Za-z0-9-]{6,64}$/', $ref) && hash_equals(self::bookingKey($ref), $key)
 			? pjReservationModel::factory()->where('t1.uuid', $ref)->where('t1.calendar_id', (int) $cal['id'])->limit(1)->findAll()->getDataIndex(0)
 			: array();
 		if (empty($b))

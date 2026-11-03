@@ -21,6 +21,7 @@ include dirname(__FILE__) . '/elements/heading.php';
 					?>
 				</div>
 			</div>
+			<?php include dirname(__FILE__) . '/elements/site-link.php'; ?>
 			<?php } ?>
 		</div>
 	</div>

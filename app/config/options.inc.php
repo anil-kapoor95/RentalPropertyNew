@@ -55,7 +55,7 @@ if (!defined("PJ_SCRIPT_VERSION")) define("PJ_SCRIPT_VERSION", "4.0");
 if (!defined("PJ_SCRIPT_ID")) define("PJ_SCRIPT_ID", "242");
 if (!defined("PJ_SCRIPT_BUILD")) define("PJ_SCRIPT_BUILD", "3.0.0");
 if (!defined("PJ_SCRIPT_PREFIX")) define("PJ_SCRIPT_PREFIX", "rpbcalendar_");
-if (!defined("PJ_TEST_MODE")) define("PJ_TEST_MODE", true);
+if (!defined("PJ_TEST_MODE")) define("PJ_TEST_MODE", false);
 if (!defined("PJ_DISABLE_MYSQL_CHECK")) define("PJ_DISABLE_MYSQL_CHECK", false);
 
 if (!defined("PJ_ENABELE_OFFLINE_PAYMENTS")) define("PJ_ENABELE_OFFLINE_PAYMENTS", true);

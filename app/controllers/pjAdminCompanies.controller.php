@@ -298,6 +298,92 @@ class pjAdminCompanies extends pjAdmin
 			->where(sprintf("(t1.company_id IS NULL OR t1.company_id = %u)", (int) $company_id))
 			->orderBy('t1.name ASC')->findAll()->getData()
 		);
+		if ((int) $company_id > 0)
+		{
+			$this->setSiteLink((int) $company_id);
+		}
+	}
+
+	/**
+	 * "Website address" box of the company form: the links of the company page and its properties, and the
+	 * company's own domain (plan feature "custom_domain") with its status at Vercel and the DNS record to add.
+	 */
+	private function setSiteLink($company_id)
+	{
+		if (!class_exists('pjSiteLinks') || !pjSiteLinks::isReady())
+		{
+			$this->set('site_link', null);
+			return;
+		}
+		$company = pjCompanyModel::factory()->find((int) $company_id)->getData();
+		if (empty($company))
+		{
+			$this->set('site_link', null);
+			return;
+		}
+		$base = pjSiteLinks::websiteUrl();
+		$properties = array();
+		foreach (pjCalendarModel::factory()->select('t1.id')->where('t1.company_id', (int) $company_id)->where('t1.status', 'T')
+			->orderBy('t1.id ASC')->findAll()->getData() as $c)
+		{
+			$properties[] = array('name' => pjSiteLinks::calendarName($c['id']), 'url' => $base . '/' . pjSiteLinks::calendarSlug($c['id']));
+		}
+		$domain = !empty($company['custom_domain']) ? (string) $company['custom_domain'] : '';
+		$this->set('site_link', array(
+			'id'          => pjCompanyContext::hashOf((int) $company_id),
+			'company_url' => $base . '/stays/' . pjSiteLinks::companySlug((int) $company_id, $company['name']),
+			'properties'  => $properties,
+			'allowed'     => !class_exists('pjEntitlement') || !pjEntitlement::isReady() || pjEntitlement::allows((int) $company_id, 'custom_domain'),
+			'vercel'      => pjSiteLinks::vercelConfigured(),
+			'domain'      => $domain,
+			'status'      => !empty($company['domain_status']) ? (string) $company['domain_status'] : '',
+			'message'     => !empty($company['domain_message']) && $company['domain_message'] !== 'vercel_not_configured' ? (string) $company['domain_message'] : '',
+			'checked'     => !empty($company['domain_checked']) ? (string) $company['domain_checked'] : '',
+			'dns'         => $domain !== '' ? pjSiteLinks::dnsRecord($domain) : null,
+		));
+	}
+
+	/**
+	 * Ajax: save (op=save, domain) or check (op=check) the company's own domain. id = company hash.
+	 * The company itself (My company) or the administrator (Companies > Edit).
+	 */
+	public function pjActionSiteDomain()
+	{
+		$this->setAjax(true);
+		if (!$this->isXHR() || !self::isPost())
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => 'Missing headers.'));
+		}
+		pjAppController::validateCsrfToken();
+		$id = $this->idParam($this->_post->toString('id'));
+		$arr = $id > 0 ? pjCompanyModel::factory()->find($id)->getData() : array();
+		if (empty($arr) || !class_exists('pjSiteLinks') || !pjSiteLinks::isReady())
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'Company not found.'));
+		}
+		$allowed = ($this->isAdmin() && pjAuth::factory('pjAdminCompanies', 'pjActionUpdate')->hasAccess())
+			|| ((int) $arr['user_id'] === (int) $this->getUserId() && pjAuth::factory('pjAdminCompanies', 'pjActionProfile')->hasAccess());
+		if (!$allowed)
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'Access denied.'));
+		}
+		$domain = trim((string) $this->_post->toString('domain'));
+		if ($this->_post->toString('op') === 'check')
+		{
+			$status = pjSiteLinks::checkDomain($id);
+			self::jsonResponse(array('status' => 'OK', 'code' => 200, 'domain_status' => $status));
+		}
+		$plan_ok = !class_exists('pjEntitlement') || !pjEntitlement::isReady() || pjEntitlement::allows($id, 'custom_domain');
+		if ($domain !== '' && !$plan_ok)
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => __('lblSiteLinkLocked', true)));
+		}
+		list($ok, $error) = pjSiteLinks::saveDomain($id, $domain);
+		if (!$ok)
+		{
+			self::jsonResponse(array('status' => 'ERR', 'code' => 422, 'text' => __($error, true)));
+		}
+		self::jsonResponse(array('status' => 'OK', 'code' => 200, 'text' => __('lblSiteLinkSaved', true)));
 	}
 
 	private function appendFormAssets()

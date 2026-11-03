@@ -32,7 +32,8 @@ class pjCalendarModel extends pjAppModel
 	    array('name' => 'lat', 'type' => 'varchar', 'default' => ':NULL'),
 	    array('name' => 'lng', 'type' => 'varchar', 'default' => ':NULL'),
 	    array('name' => 'show_googlemap', 'type' => 'enum', 'default' => 'T'),
-	    array('name' => 'status', 'type' => 'enum', 'default' => 'T')
+	    array('name' => 'status', 'type' => 'enum', 'default' => 'T'),
+	    array('name' => 'slug', 'type' => 'varchar', 'default' => ':NULL')
 	);
 	
 	public $i18n = array('name', 'description', 'address_1', 'google_address', 'address_city', 'meta_title', 'meta_keywords', 'meta_description', 'confirm_subject', 'confirm_tokens', 'payment_subject', 'payment_tokens', 'terms_url', 'terms_body', 'y_company', 'y_name', 'y_street_address', 'y_city', 'y_state');

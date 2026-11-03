@@ -657,8 +657,8 @@ class pjCompanyContext
 	}
 
 	/**
-	 * Give a new company its own copy of the amenity list (features) of the
-	 * oldest company, so properties can be tagged straight away.
+	 * Give a new company its own copy of the amenity list (features): the template list
+	 * (company_id 0) or else the oldest company's, so properties can be tagged straight away.
 	 */
 	public static function seedFeatures($company_id)
 	{
@@ -672,12 +672,20 @@ class pjCompanyContext
 		{
 			return;
 		}
-		$source = pjCompanyModel::factory()->where('t1.id !=', $company_id)->orderBy('t1.id ASC')->limit(1)->findAll()->getDataIndex(0);
-		if (empty($source))
+		// Source: the template list (company_id 0, kept when all companies are removed), otherwise the oldest
+		// other company that has amenities. Without any source the company starts with an empty list.
+		$source_id = 0;
+		if ((int) $pjFeatureModel->reset()->where('t1.company_id', 0)->findCount()->getData() === 0)
 		{
-			return;
+			$row = $pjFeatureModel->reset()->select('t1.company_id')->where('t1.company_id !=', $company_id)->where('t1.company_id >', 0)
+				->orderBy('t1.company_id ASC')->limit(1)->findAll()->getDataIndex(0);
+			if (empty($row))
+			{
+				return;
+			}
+			$source_id = (int) $row['company_id'];
 		}
-		$features = $pjFeatureModel->reset()->where('t1.company_id', $source['id'])->orderBy('t1.id ASC')->findAll()->getData();
+		$features = $pjFeatureModel->reset()->where('t1.company_id', $source_id)->orderBy('t1.id ASC')->findAll()->getData();
 		$pjMultiLangModel = pjMultiLangModel::factory();
 		foreach ($features as $f)
 		{

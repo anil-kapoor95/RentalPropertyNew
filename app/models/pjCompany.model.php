@@ -34,6 +34,11 @@ class pjCompanyModel extends pjAppModel
 		array('name' => 'notes', 'type' => 'text', 'default' => ':NULL'),
 		array('name' => 'status', 'type' => 'enum', 'default' => 'T'),
 		array('name' => 'is_admin_ws', 'type' => 'tinyint', 'default' => '0'),
+		array('name' => 'slug', 'type' => 'varchar', 'default' => ':NULL'),
+		array('name' => 'custom_domain', 'type' => 'varchar', 'default' => ':NULL'),
+		array('name' => 'domain_status', 'type' => 'varchar', 'default' => ':NULL'),
+		array('name' => 'domain_message', 'type' => 'varchar', 'default' => ':NULL'),
+		array('name' => 'domain_checked', 'type' => 'datetime', 'default' => ':NULL'),
 		array('name' => 'created', 'type' => 'datetime', 'default' => ':NOW()'),
 		array('name' => 'modified', 'type' => 'datetime', 'default' => ':NULL')
 	);
