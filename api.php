@@ -627,6 +627,8 @@ $routes = array(
     'pjActionGetPropertyPage' => 'pjJabbApi',
     'pjActionGetCompanyPage' => 'pjJabbApi',
     'pjActionResolveDomain' => 'pjJabbApi',
+    'pjActionGetDirectory' => 'pjJabbApi',
+    'pjActionGetSocialLinks' => 'pjJabbApi',
     // Booking on the host's website
     'pjActionBookingSetup'  => 'pjJabbApi',
     'pjActionBookingQuote'  => 'pjJabbApi',
@@ -637,6 +639,8 @@ $routes = array(
     // Payment gateways (host)
     'pjActionGetPaymentMethods' => 'pjJabbApi',
     'pjActionSavePaymentMethod' => 'pjJabbApi',
+    // Calendar sync (iCal links) of the sign-up property
+    'pjActionCalendarSync' => 'pjJabbApi',
 );
 
 $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';

@@ -2090,6 +2090,114 @@ class pjJabbApi extends pjAppController
 		$this->respond(200, 'Property saved.', $state);
 	}
 
+	/** Problem of a calendar (iCal) link, '' when it is a readable public iCal feed. */
+	private static function icalLinkError($url)
+	{
+		if (self::tooLong($url, 1000) || !preg_match('~^https?://~i', $url) || !pjAppController::isSafeFeedUrl($url))
+		{
+			return 'Enter a valid calendar (iCal) link starting with https://';
+		}
+		$contents = pjAppController::fetchIcalContents($url);
+		if ($contents === false)
+		{
+			return 'The calendar link could not be opened. Check the link and try again.';
+		}
+		if (stripos($contents, 'BEGIN:VCALENDAR') === false)
+		{
+			return 'This link is not a calendar (iCal) feed. On Airbnb: Listing > Availability > Connect calendars > Export calendar.';
+		}
+		return '';
+	}
+
+	/** Calendars of the property and the link of its own calendar (to paste into Airbnb). */
+	private static function calendarSyncState($calendar_id)
+	{
+		$names = array(1 => 'other', 2 => 'airbnb', 3 => 'vrbo', 4 => 'homeaway', 5 => 'tripadvisor', 6 => 'booking.com');
+		$feeds = array();
+		foreach (pjFeedModel::factory()->where('t1.calendar_id', (int) $calendar_id)->orderBy('t1.id ASC')->findAll()->getData() as $f)
+		{
+			$feeds[] = array('id' => (int) $f['id'], 'url' => (string) $f['url'],
+				'provider' => isset($names[(int) $f['provider_id']]) ? $names[(int) $f['provider_id']] : 'other');
+		}
+		$path = pjAppController::ensureCalendarIcalFile((int) $calendar_id);
+		$export = '';
+		if ($path !== false)
+		{
+			$rel = ltrim(str_replace('\\', '/', (string) $path), '/');
+			$root = str_replace('\\', '/', rtrim((string) PJ_INSTALL_PATH, '/\\')) . '/';
+			if (strpos($rel, ltrim($root, '/')) === 0)
+			{
+				$rel = substr($rel, strlen(ltrim($root, '/')));
+			}
+			$export = PJ_INSTALL_URL . $rel;
+		}
+		return array('feeds' => $feeds, 'export_url' => $export);
+	}
+
+	/**
+	 * Calendar sync of the sign-up property (Live step > Connect your Airbnb calendar), as Properties > iCal feeds.
+	 *   POST signup_token, op: get | save (ical_url*: adds the link and imports it) | sync (imports every link again)
+	 *        | remove (feed_id*: the link is no longer synchronised)
+	 * Data: feeds[] {id, url, provider}, export_url (this property's own calendar: paste it into Airbnb > Import
+	 *   calendar so direct bookings block Airbnb), import {status, text} after save / sync.
+	 */
+	public function pjActionCalendarSync()
+	{
+		$this->setAjax(true);
+		$this->requirePost();
+		$this->requireSignupTable();
+		$signup = $this->signupFromToken();
+		$calendar = $this->signupProperty($signup);
+		$calendar_id = (int) $calendar['id'];
+		$op = $this->param('op');
+		$import = null;
+
+		if ($op === 'save')
+		{
+			$url = trim($this->param('ical_url'));
+			$error = $url === '' ? 'Paste the calendar (iCal) link of your listing.' : self::icalLinkError($url);
+			if ($error !== '')
+			{
+				$this->respond(422, 'Validation failed', array(), array('ical_url' => $error));
+			}
+			$import = $this->importIcal($calendar_id, $url);
+		} elseif ($op === 'sync') {
+			$added = 0;
+			$updated = 0;
+			$failed = 0;
+			foreach (pjFeedModel::factory()->where('t1.calendar_id', $calendar_id)->findAll()->getData() as $f)
+			{
+				$res = $this->importIcal($calendar_id, (string) $f['url']);
+				if ($res['status'] === 'OK')
+				{
+					$added += $res['added'];
+					$updated += $res['updated'];
+				} else {
+					$failed++;
+				}
+			}
+			$import = $failed > 0
+				? array('status' => 'ERR', 'text' => sprintf('%u calendar link(s) could not be read. They are synchronised again automatically.', $failed))
+				: array('status' => 'OK', 'text' => sprintf('Calendars synchronised: %u new and %u updated bookings / blocked dates.', $added, $updated));
+		} elseif ($op === 'remove') {
+			$feed = pjFeedModel::factory()->where('t1.id', (int) $this->param('feed_id'))->where('t1.calendar_id', $calendar_id)->limit(1)->findAll()->getDataIndex(0);
+			if (empty($feed))
+			{
+				$this->respond(404, 'Calendar link not found.');
+			}
+			pjFeedModel::factory()->set('id', (int) $feed['id'])->erase();
+		} elseif ($op !== 'get' && $op !== '') {
+			$this->respond(422, 'Unknown operation.');
+		}
+
+		$data = self::calendarSyncState($calendar_id);
+		if ($import !== null)
+		{
+			$data['import'] = array('status' => $import['status'], 'text' => $import['text']);
+		}
+		$this->respond(200, 'OK', $data);
+	}
+
 	/** Calendar feed links of a property. */
 	private static function propertyFeeds($calendar_id)
 	{
@@ -2681,7 +2789,8 @@ class pjJabbApi extends pjAppController
 
 	/**
 	 * Themes (colour palettes). signup_token optional.
-	 * Data: themes[] {id, name, colors, free, locked}, default_id (the free theme), free_id, allowed (paid themes unlocked)
+	 * Data: themes[] {id, name, colors, free, locked}, default_id (the free theme), free_id, allowed (paid themes unlocked),
+	 *   plan_names (plans that unlock the paid themes)
 	 */
 	public function pjActionGetThemes()
 	{
@@ -2708,7 +2817,9 @@ class pjJabbApi extends pjAppController
 				'locked' => !$free && !$allowed,
 			);
 		}
-		$this->respond(200, 'OK', array('themes' => $themes, 'default_id' => $free_id, 'free_id' => $free_id, 'allowed' => $allowed));
+		$this->respond(200, 'OK', array('themes' => $themes, 'default_id' => $free_id, 'free_id' => $free_id, 'allowed' => $allowed,
+			// names of the active public plans that unlock the paid themes ("Pro or Business"), '' when none
+			'plan_names' => self::planNamesWith('themes')));
 	}
 
 	/* ------------------------------------------------------------------
@@ -2897,6 +3008,151 @@ class pjJabbApi extends pjAppController
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * Social links of the website (System Options > Visual & Branding, administrators only).
+	 * Data: links[] {network: instagram|facebook|linkedin|x|youtube, url} (only the ones filled in, in this order)
+	 */
+	public function pjActionGetSocialLinks()
+	{
+		$this->setAjax(true);
+		$networks = array('instagram', 'facebook', 'linkedin', 'x', 'youtube');
+		$pairs = pjBaseOptionModel::factory()->where('t1.foreign_id', 1)
+			->whereIn('t1.key', array_map(function ($n) { return 'o_social_' . $n; }, $networks))
+			->findAll()->getDataPair('key', 'value');
+		$links = array();
+		foreach ($networks as $n)
+		{
+			$url = isset($pairs['o_social_' . $n]) ? trim((string) $pairs['o_social_' . $n]) : '';
+			// only real web links (no javascript: or other schemes)
+			if ($url !== '' && preg_match('~^https?://[^\s<>"]+$~i', $url))
+			{
+				$links[] = array('network' => $n, 'url' => $url);
+			}
+		}
+		$this->respond(200, 'OK', array('links' => $links));
+	}
+
+	/**
+	 * Directory of the website (localhost:3000/properties): every published property of every active company.
+	 *   q (place or name), type (villa|homestay|apartment|cottage|resort), guests (min), sort (recommended|price-asc|
+	 *   price-desc|newest), page, per_page (1-24, default 9)
+	 * Data: items[] {slug, name, property_type, headline, location {city, state, country}, bedrooms, bathrooms, max_guests,
+	 *   price, price_varies, price_based_on, currency, currency_sign, price_format, photo, host {name, slug}},
+	 *   total, page, per_page, total_pages
+	 */
+	public function pjActionGetDirectory()
+	{
+		$this->setAjax(true);
+		$this->requireSignupTable();
+		$q = function_exists('mb_strtolower') ? mb_strtolower(trim($this->param('q')), 'UTF-8') : strtolower(trim($this->param('q')));
+		$q = function_exists('mb_substr') ? mb_substr($q, 0, 80, 'UTF-8') : substr($q, 0, 80);
+		$type = in_array($this->param('type'), self::$propertyTypes, true) ? $this->param('type') : '';
+		$guests = max(0, min(50, (int) $this->param('guests')));
+		$sort = in_array($this->param('sort'), array('price-asc', 'price-desc', 'newest'), true) ? $this->param('sort') : 'recommended';
+		$per_page = (int) $this->param('per_page') > 0 ? min(24, (int) $this->param('per_page')) : 9;
+
+		$companies = array();
+		$items = array();
+		foreach (self::publicCalendars() as $cal)
+		{
+			$cid = (int) $cal['company_id'];
+			$t = self::propertyTexts((int) $cal['id'], $cid);
+			if (empty($t['name']) || trim((string) $t['name']) === '')
+			{
+				continue;
+			}
+			if (!isset($companies[$cid]))
+			{
+				$c = pjCompanyModel::factory()->find($cid)->getData();
+				$companies[$cid] = array('name' => !empty($c['name']) ? html_entity_decode((string) $c['name'], ENT_QUOTES, 'UTF-8') : '',
+					'slug' => !empty($c) ? self::companyLink($cid, $c['name']) : '', 'price_format' => self::priceFormat($cid));
+			}
+			$ptype = isset($t['property_type']) && in_array($t['property_type'], self::$propertyTypes, true) ? $t['property_type'] : null;
+			$opt = self::calendarOptions($cal['id'], $cid);
+			$max = isset($opt['o_max_people']) && (int) $opt['o_max_people'] > 0 ? (int) $opt['o_max_people'] : null;
+			$name = html_entity_decode((string) $t['name'], ENT_QUOTES, 'UTF-8');
+			$city = isset($t['address_city']) ? trim((string) $t['address_city']) : '';
+			$country = self::countryNameEn($cal['address_country'], $cid);
+			// filters
+			if ($type !== '' && $ptype !== $type)
+			{
+				continue;
+			}
+			if ($guests > 0 && $max !== null && $max < $guests)
+			{
+				continue;
+			}
+			if ($q !== '')
+			{
+				$hay = $name . ' ' . $city . ' ' . $cal['address_state'] . ' ' . $country . ' ' . $companies[$cid]['name'] . ' ' . (isset($t['headline']) ? $t['headline'] : '');
+				$hay = function_exists('mb_strtolower') ? mb_strtolower($hay, 'UTF-8') : strtolower($hay);
+				$match = true;
+				foreach (preg_split('/\s+/u', $q) as $word)
+				{
+					if ($word !== '' && strpos($hay, $word) === false)
+					{
+						$match = false;
+						break;
+					}
+				}
+				if (!$match)
+				{
+					continue;
+				}
+			}
+			$price = self::propertyPrice($cal['id'], $cid);
+			$photos = self::photoList($cal['id']);
+			$items[] = array(
+				'id'            => (int) $cal['id'],
+				'slug'          => self::propertyLink((int) $cal['id'], $t['name']),
+				'name'          => $name,
+				'property_type' => $ptype,
+				'headline'      => isset($t['headline']) && trim((string) $t['headline']) !== '' ? (string) $t['headline'] : null,
+				'location'      => array('city' => $city, 'state' => (string) $cal['address_state'], 'country' => $country),
+				'bedrooms'      => $cal['bedrooms'] !== null && $cal['bedrooms'] !== '' ? (int) $cal['bedrooms'] : null,
+				'bathrooms'     => $cal['bathrooms'] !== null && $cal['bathrooms'] !== '' ? (int) $cal['bathrooms'] : null,
+				'max_guests'    => $max,
+				'price'         => $price['price'],
+				'price_varies'  => $price['price_varies'],
+				'price_based_on'=> isset($opt['o_price_based_on']) && $opt['o_price_based_on'] === 'days' ? 'days' : 'nights',
+				'currency'      => $price['currency'],
+				'currency_sign' => self::currencySign($price['currency']),
+				'price_format'  => $companies[$cid]['price_format'],
+				'photo'         => !empty($photos) ? $photos[0]['url'] : null,
+				'host'          => array('name' => $companies[$cid]['name'], 'slug' => $companies[$cid]['slug']),
+			);
+		}
+
+		// sort: recommended = with photos first, then the newest
+		usort($items, function ($a, $b) use ($sort) {
+			if ($sort === 'price-asc' || $sort === 'price-desc')
+			{
+				if ($a['price'] === null || $b['price'] === null)
+				{
+					return ($a['price'] === null) - ($b['price'] === null);
+				}
+				$d = (float) $a['price'] - (float) $b['price'];
+				$d = $sort === 'price-asc' ? $d : -$d;
+				return $d < 0 ? -1 : ($d > 0 ? 1 : $b['id'] - $a['id']);
+			}
+			if ($sort === 'recommended' && (bool) $a['photo'] !== (bool) $b['photo'])
+			{
+				return $a['photo'] ? -1 : 1;
+			}
+			return $b['id'] - $a['id'];
+		});
+
+		$total = count($items);
+		$pages = max(1, (int) ceil($total / $per_page));
+		$page = min(max(1, (int) $this->param('page')), $pages);
+		$slice = array_slice($items, ($page - 1) * $per_page, $per_page);
+		foreach ($slice as $k => $item)
+		{
+			unset($slice[$k]['id']);
+		}
+		$this->respond(200, 'OK', array('items' => array_values($slice), 'total' => $total, 'page' => $page, 'per_page' => $per_page, 'total_pages' => $pages));
 	}
 
 	/**
@@ -4192,7 +4448,8 @@ class pjJabbApi extends pjAppController
 	private static function bookingExtras($calendar_id, $locale_id)
 	{
 		$rows = pjExtraModel::factory()
-			->select('t1.*, t2.content AS name')
+			// name in the website language, else in any language that has it (extras added in another language)
+			->select(sprintf("t1.*, COALESCE(NULLIF(t2.content, ''), (SELECT ml.content FROM `%s` AS ml WHERE ml.model='pjExtra' AND ml.foreign_id=t1.id AND ml.field='name' AND ml.content <> '' ORDER BY ml.locale ASC LIMIT 1)) AS name", pjMultiLangModel::factory()->getTable()))
 			->join('pjMultiLang', sprintf("t2.model='pjExtra' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='%u'", (int) $locale_id), 'left outer')
 			->where('t1.status', 'T')
 			->where(sprintf("t1.id IN (SELECT `extra_id` FROM `%s` WHERE `calendar_id` = %u)", pjCalendarExtraModel::factory()->getTable(), (int) $calendar_id))
@@ -4420,7 +4677,9 @@ class pjJabbApi extends pjAppController
 			'countries'         => $countries,
 			'extras'            => self::bookingExtras($cal['id'], $lid),
 			'extra_price_types' => is_array($price_types) ? $price_types : new stdClass(),
-			'coupons'           => !class_exists('pjEntitlement') || pjEntitlement::allows($cid, 'coupons'),
+			// the coupon field is always offered; a code only works when it is a coupon of this property
+			// (and the company may use coupons: pjAppController::couponsActive, checked in the price calculation)
+			'coupons'           => true,
 			'payment_methods'   => array_values(self::bookingPaymentMethods($cal['id'], $cid, $lid, isset($opt['o_currency']) ? $opt['o_currency'] : '')),
 			'terms'             => $terms,
 			'booked'            => $booked,
@@ -4659,7 +4918,7 @@ class pjJabbApi extends pjAppController
 		}
 		$lid = self::websiteLocale($cid);
 		$extras = array();
-		foreach (pjReservationExtraModel::factory()->select('t1.qty, t2.content AS name')
+		foreach (pjReservationExtraModel::factory()->select(sprintf("t1.qty, COALESCE(NULLIF(t2.content, ''), (SELECT ml.content FROM `%s` AS ml WHERE ml.model='pjExtra' AND ml.foreign_id=t1.extra_id AND ml.field='name' AND ml.content <> '' ORDER BY ml.locale ASC LIMIT 1)) AS name", pjMultiLangModel::factory()->getTable()))
 			->join('pjMultiLang', sprintf("t2.model='pjExtra' AND t2.foreign_id=t1.extra_id AND t2.field='name' AND t2.locale='%u'", $lid), 'left outer')
 			->where('t1.reservation_id', (int) $b['id'])->findAll()->getData() as $e)
 		{

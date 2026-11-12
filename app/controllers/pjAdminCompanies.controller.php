@@ -306,7 +306,7 @@ class pjAdminCompanies extends pjAdmin
 
 	/**
 	 * "Website address" box of the company form: the links of the company page and its properties, and the
-	 * company's own domain (plan feature "custom_domain") with its status at Vercel and the DNS record to add.
+	 * company's own domain (plan feature "custom_domain") with its DNS status and the DNS record to add.
 	 */
 	private function setSiteLink($company_id)
 	{
@@ -334,7 +334,6 @@ class pjAdminCompanies extends pjAdmin
 			'company_url' => $base . '/stays/' . pjSiteLinks::companySlug((int) $company_id, $company['name']),
 			'properties'  => $properties,
 			'allowed'     => !class_exists('pjEntitlement') || !pjEntitlement::isReady() || pjEntitlement::allows((int) $company_id, 'custom_domain'),
-			'vercel'      => pjSiteLinks::vercelConfigured(),
 			'domain'      => $domain,
 			'status'      => !empty($company['domain_status']) ? (string) $company['domain_status'] : '',
 			'message'     => !empty($company['domain_message']) && $company['domain_message'] !== 'vercel_not_configured' ? (string) $company['domain_message'] : '',

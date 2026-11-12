@@ -59,6 +59,11 @@
 									$rowClass = " hidden";
 								}
 								
+								// social links: their own block below (administrators only)
+								if (strpos($tpl['arr'][$i]['key'], 'o_social_') === 0)
+								{
+									continue;
+								}
 								if (in_array($tpl['arr'][$i]['key'], array('o_hide_phpjabbers_logo', 'o_hide_footer', 'o_hide_page', 'o_footer_text', 'o_website_branding_text', 'o_website_branding_footer', 'o_website_branding_url')))
 								{
 									$branding = dirname(__FILE__) . '/elements/branding.php';
@@ -107,6 +112,7 @@
 								<?php
 							}
 							?>
+							<?php include dirname(__FILE__) . '/elements/social.php'; ?>
 							<div class="hr-line-dashed"></div>
 							<div class="clearfix">
 								<button class="ladda-button btn btn-primary btn-lg pull-left btn-phpjabbers-loader" data-style="zoom-in">

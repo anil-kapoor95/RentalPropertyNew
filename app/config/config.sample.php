@@ -7,6 +7,8 @@ if (!defined("PJ_PREFIX")) define("PJ_PREFIX", "[prefix]");
 if (!defined("PJ_USE_IV")) define("PJ_USE_IV", "[use_iv]");
 if (!defined("PJ_INSTALL_FOLDER")) define("PJ_INSTALL_FOLDER", "[install_folder]");
 if (!defined("PJ_INSTALL_PATH")) define("PJ_INSTALL_PATH", "[install_path]");
+// Address of the Next.js website (short links, hosts' domains, API access). Set it when the website goes live.
+if (!defined("PJ_WEBSITE_URL")) define("PJ_WEBSITE_URL", "http://localhost:3000");
 if (!defined("PJ_INSTALL_URL")) define("PJ_INSTALL_URL", "[install_url]");
 if (!defined("PJ_SALT")) define("PJ_SALT", "[salt]");
 if (!defined("PJ_INSTALLATION")) define("PJ_INSTALLATION", "[pj_installation]");

@@ -844,7 +844,7 @@ class pjAdminCalendars extends pjAdmin
 					}	
 					
 					$_arr= $pjReservationModel
-						->select('t1.id, t2.content AS property, t1.uuid, t1.date_from, t1.date_to, t1.status, 
+						->select('t1.id, ' . pjAppController::calendarNameSql('t2', 't1.calendar_id') . ' AS property, t1.uuid, t1.date_from, t1.date_to, t1.status, 
 								  t1.amount, t1.extra_price, t1.deposit, t1.tax, t1.tourist_tax, t1.security, t1.promo_amount, discount_amount,
 								  t1.c_name, t1.c_email, t1.c_phone, t1.c_phone, t1.c_adults, t1. c_children,
 								  t1.c_notes, t1.c_address, t1.c_city, t1.c_country, t1.c_state, t1.c_zip, t1.ip, t1.payment_method, t1.created, t1.modified')
@@ -2178,7 +2178,7 @@ class pjAdminCalendars extends pjAdmin
 			}
 
 			$data = $pjReservationModel->select('t1.id, t1.calendar_id, t1.uuid, t1.date_from, t1.date_to, t1.status, t1.price_based_on, t1.amount, t1.deposit, t1.c_name, t1.c_email,
-				IF(t1.price_based_on="nights", DATEDIFF(t1.date_to, t1.date_from), DATEDIFF(t1.date_to, t1.date_from) + 1) AS nights, t3.content AS calendar')
+				IF(t1.price_based_on="nights", DATEDIFF(t1.date_to, t1.date_from), DATEDIFF(t1.date_to, t1.date_from) + 1) AS nights, ' . pjAppController::calendarNameSql('t3', 't1.calendar_id') . ' AS calendar')
 				->join('pjMultiLang', "t3.model='pjCalendar' AND t3.foreign_id=t1.calendar_id AND t3.field='name' AND t3.locale='".$this->getLocaleId()."'", 'left outer')
 				->orderBy("$column $direction")->limit($rowCount, $offset)->findAll()->getData();
 			foreach($data as $k => $v)

@@ -381,7 +381,7 @@ class pjAdminReservations extends pjAdmin
 			}
 
 			$data = $pjReservationModel->select('t1.id, t1.calendar_id, t1.uuid, t1.date_from, t1.date_to, t1.status, t1.price_based_on, t1.amount, t1.deposit, t1.c_name, t1.c_email,
-				IF(t1.price_based_on="nights", DATEDIFF(t1.date_to, t1.date_from), DATEDIFF(t1.date_to, t1.date_from) + 1) AS nights, t3.content AS calendar')
+				IF(t1.price_based_on="nights", DATEDIFF(t1.date_to, t1.date_from), DATEDIFF(t1.date_to, t1.date_from) + 1) AS nights, ' . pjAppController::calendarNameSql('t3', 't1.calendar_id') . ' AS calendar')
 				->join('pjMultiLang', "t3.model='pjCalendar' AND t3.foreign_id=t1.calendar_id AND t3.field='name' AND t3.locale='".$this->getLocaleId()."'", 'left outer')
 				->orderBy("$column $direction")->limit($rowCount, $offset)->findAll()->getData();
 			foreach($data as $k => $v)
@@ -413,7 +413,7 @@ class pjAdminReservations extends pjAdmin
 			$pjCalendarModel->where('t1.user_id', $this->getUserId());
 		}
 		$this->set('calendar_arr', $pjCalendarModel
-			->select('t1.id, t2.content AS name')
+			->select('t1.id, ' . pjAppController::calendarNameSql('t2', 't1.id') . ' AS name')
 			->join('pjMultiLang', "t2.model='pjCalendar' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left outer')
 			->orderBy('`name` ASC')
 			->findAll()
@@ -494,7 +494,7 @@ class pjAdminReservations extends pjAdmin
 		}
 		
 		$reservation = $pjReservationModel
-			->select("t1.*, t2.content AS country, t3.user_id, t4.content AS calendar_name")
+			->select("t1.*, t2.content AS country, t3.user_id, " . pjAppController::calendarNameSql('t4', 't1.calendar_id') . " AS calendar_name")
 			->join('pjMultiLang', "t2.model='pjBaseCountry' AND t2.foreign_id=t1.c_country AND t2.field='name' AND t2.locale=t1.locale_id", 'left outer')
 			->join('pjCalendar', 't3.id=t1.calendar_id', 'left outer')
 			->join('pjMultiLang', "t4.model='pjCalendar' AND t4.foreign_id=t1.calendar_id AND t4.field='name' AND t4.locale='".$this->getLocaleId()."'", 'left outer')
@@ -731,7 +731,7 @@ class pjAdminReservations extends pjAdmin
 	        $last_day_of_month  = date('Y-m-t', $ts);
 	        
 	        $pjCalendarModel = pjCalendarModel::factory()
-		        ->select('t1.id, t1.uuid, t2.content AS name, t3.value AS o_bookings_per_day')
+		        ->select('t1.id, t1.uuid, ' . pjAppController::calendarNameSql('t2', 't1.id') . ' AS name, t3.value AS o_bookings_per_day')
 		        ->join('pjMultiLang', sprintf("t2.model='pjCalendar' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale=%u", $this->getLocaleId()), 'left outer')
 		        ->join('pjOption', "t3.foreign_id=t1.id AND t3.key='o_bookings_per_day'", 'left outer')
 		        ->orderBy('name ASC, t1.uuid ASC');

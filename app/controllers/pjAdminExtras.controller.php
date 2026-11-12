@@ -42,7 +42,7 @@ class pjAdminExtras extends pjAdmin
 				pjAppController::jsonResponse(array('status' => 'OK'));
 			} else {
 				$this->set('calendar_arr', pjCalendarModel::factory()->where('t1.company_id', $this->getCompanyId())
-					->select('t1.*, t2.content AS name')
+					->select('t1.*, ' . pjAppController::calendarNameSql('t2', 't1.id') . ' AS name')
 					->join('pjMultiLang', "t2.model='pjCalendar' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left outer')
 					->orderBy('name ASC')
 					->findAll()
@@ -300,7 +300,7 @@ class pjAdminExtras extends pjAdmin
 				$this->setLocalesData();
 				
 				$this->set('calendar_arr', pjCalendarModel::factory()->where('t1.company_id', $this->getCompanyId())
-					->select('t1.*, t2.content AS name')
+					->select('t1.*, ' . pjAppController::calendarNameSql('t2', 't1.id') . ' AS name')
 					->join('pjMultiLang', "t2.model='pjCalendar' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left outer')
 					->orderBy('name ASC')
 					->findAll()

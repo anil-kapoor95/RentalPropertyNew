@@ -325,7 +325,9 @@ class pjCompanyContext
 		'o_ai_provider', 'o_ai_model_gemini', 'o_ai_model_openai', 'o_ai_model_anthropic',
 		'o_gemini_api_key', 'o_openai_api_key', 'o_anthropic_api_key',
 		'o_ai_models_gemini', 'o_ai_models_openai', 'o_ai_models_anthropic',
-		'o_ai_custom_models_gemini', 'o_ai_custom_models_openai', 'o_ai_custom_models_anthropic'
+		'o_ai_custom_models_gemini', 'o_ai_custom_models_openai', 'o_ai_custom_models_anthropic',
+		// social links of the website (System Options > Visual & Branding)
+		'o_social_instagram', 'o_social_facebook', 'o_social_linkedin', 'o_social_x', 'o_social_youtube'
 	);
 
 	public static function isCompanyOptionKey($key, $tab_id)

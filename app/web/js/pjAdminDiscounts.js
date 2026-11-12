@@ -90,10 +90,10 @@ var jQuery = jQuery || $.noConflict();
 				valid_box = $('#valid_' + val);
 			$('.valid-box').css('display', 'none');
 			valid_box.css('display', 'block');
-		}).on("click", "#type", function (e) {
+		}).on("change click", "#type", function (e) {
 			var sign = $('option:selected', this).attr('data-sign');
 			$('#icon_type').html(sign);
-		}).on("click", "#options", function (e) {
+		}).on("change click", "#options", function (e) {
 			updateOptions();
 		}).on("change", ".number", function (e) {
 			var v = parseFloat(this.value);

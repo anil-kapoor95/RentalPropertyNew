@@ -60,10 +60,9 @@ $sl_badge = array('active' => 'label-primary', 'pending' => 'label-warning', 'er
 						<button type="button" class="btn btn-white btn-xs m-l-sm pj-site-domain-check"><i class="fa fa-refresh m-r-xs"></i><?php __('lblSiteLinkCheck'); ?></button>
 						<?php if ($sl['checked'] !== '') { ?><small class="text-muted m-l-xs"><?php echo pjSanitize::html($sl['checked']); ?></small><?php } ?>
 					</p>
-					<?php if (!$sl['vercel']) { ?>
-						<p class="alert alert-warning"><i class="fa fa-exclamation-triangle m-r-xs"></i><?php __('lblSiteLinkNoVercel'); ?></p>
-					<?php } elseif ($sl['message'] !== '' && $sl_status !== 'active') { ?>
-						<p class="text-muted"><?php echo pjSanitize::html($sl['message']); ?></p>
+					<?php if ($sl_status !== 'active') { ?>
+						<?php if ($sl['message'] !== '') { ?><p class="text-muted m-b-xs"><?php echo pjSanitize::html($sl['message']); ?></p><?php } ?>
+						<p class="alert alert-info"><i class="fa fa-info-circle m-r-xs"></i><?php __('lblSiteLinkManual'); ?></p>
 					<?php } ?>
 					<?php if ($sl_status !== 'active' && !empty($sl['dns'])) { ?>
 					<p class="m-b-xs"><?php __('lblSiteLinkDns'); ?></p>

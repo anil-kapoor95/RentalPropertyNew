@@ -100,7 +100,7 @@
 			</select>
 		</div>
 	
-		<label for=""><?php __('lblVoucherCode'); ?></label>
+		<label for=""><?php __('lblVoucherUsage'); ?></label>
 	
 		<div class="row">
 			<div class="col-sm-4">

@@ -47,6 +47,31 @@ class pjAppController extends pjBaseAppController
 		}
 	}
 
+	/**
+	 * Coupons for a property: its company's plan includes coupons, or coupons were added to this property
+	 * (Company options > Coupons & Discounts; administrators may add them for any plan).
+	 */
+	public static function couponsActive($calendar_id)
+	{
+		if (!class_exists('pjEntitlement') || pjEntitlement::allows(pjCompanyContext::companyOfCalendar($calendar_id), 'coupons'))
+		{
+			return true;
+		}
+		return (int) pjCalendarVoucherModel::factory()->where('t1.calendar_id', (int) $calendar_id)->findCount()->getData() > 0;
+	}
+
+	/**
+	 * SQL: name of a property in the back-office language, else in any language that has it (a property made on
+	 * the website only has its name in the company's languages). $text = the joined pjMultiLang alias of the
+	 * current language, $calendar_id = SQL of the property id.
+	 */
+	public static function calendarNameSql($text, $calendar_id)
+	{
+		$table = pjMultiLangModel::factory()->getTable();
+		return sprintf("COALESCE(NULLIF(%1\$s.content, ''), (SELECT ml.content FROM `%2\$s` AS ml WHERE ml.model='pjCalendar' AND ml.foreign_id=%3\$s AND ml.field='name' AND ml.content <> '' ORDER BY ml.locale ASC LIMIT 1))",
+			$text, $table, $calendar_id);
+	}
+
 	public $defaultCalendarId = 'admin_calendar_id';
 		
 	public function pjActionCheckInstall()
@@ -84,7 +109,7 @@ class pjAppController extends pjBaseAppController
     			$pjCalendarModel->where('t1.user_id', $this->getUserId());
     		}
 	    	$calendars = $pjCalendarModel
-				->select('t1.*, t2.content AS `name`')
+				->select('t1.*, ' . self::calendarNameSql('t2', 't1.id') . ' AS `name`')
 				->join('pjMultiLang', "t2.model='pjCalendar' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$this->getLocaleId()."'", 'left')
 				->orderBy('t1.id ASC')
 				->findAll()->getDataPair('id');
@@ -1065,7 +1090,7 @@ class pjAppController extends pjBaseAppController
 		$sub_total = $amount + $extra_price;
 		
 		// Coupons and discounts are a plan feature of the property's company.
-		$coupons_allowed = !class_exists('pjEntitlement') || pjEntitlement::allows(pjCompanyContext::companyOfCalendar($calendar_id), 'coupons');
+		$coupons_allowed = self::couponsActive($calendar_id);
 		if($promo_code != '' && $coupons_allowed)
 		{
 			// Coupon of the property's company only (codes are unique per company).
@@ -1140,7 +1165,8 @@ class pjAppController extends pjBaseAppController
 		
 		
 		$discount_arr = pjDiscountModel::factory()
-			->select('t1.*, t2.content as name')
+			// name in the booking language, else in any language that has it
+			->select(sprintf("t1.*, COALESCE(NULLIF(t2.content, ''), (SELECT ml.content FROM `%s` AS ml WHERE ml.model='pjDiscount' AND ml.foreign_id=t1.id AND ml.field='name' AND ml.content <> '' ORDER BY ml.locale ASC LIMIT 1)) AS name", pjMultiLangModel::factory()->getTable()))
 			->join('pjMultiLang', "t2.foreign_id = t1.id AND t2.model = 'pjDiscount' AND t2.locale = '".$locale_id."' AND t2.field = 'name'", 'left')
 			->where("(t1.id IN (SELECT TCV.discount_id FROM `".pjCalendarDiscountModel::factory()->getTable()."` AS `TCV` WHERE `TCV`.calendar_id='".(int) $calendar_id."'))")
 			->where('t1.company_id', pjCompanyContext::companyOfCalendar($calendar_id))

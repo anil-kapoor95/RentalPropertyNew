@@ -96,7 +96,7 @@ var jQuery = jQuery || $.noConflict();
 		    if (parseFloat(this.value) >= 99999999999999.99) {
 		    	this.value = 99999999999999.99;
 		    }
-		}).on("click", "#type", function (e) {
+		}).on("change click", "#type", function (e) {
 			var sign = $('option:selected', this).attr('data-sign');
 			$('#icon_type').html(sign);
 		}).on("click", ".btnAddVoucher, .pj-table-icon-edit", function (e) {

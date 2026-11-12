@@ -10,9 +10,9 @@ if (!defined("ROOT_PATH"))
  * - Every property and company has its own stored, unique link ("slug"): <website>/casanova and
  *   <website>/stays/anil-kapoor. Two properties with the same name get "casanova" and "casanova-2".
  *   A link is made from the name once and then kept (renaming the property does not break shared links).
- * - A company may use its own domain (plan feature "custom_domain"). The domain is added to the website's
- *   Vercel project with the Vercel API (System Options > API Keys) and checked there; active domains are
- *   written to a list file that api.php reads to let these websites call the API.
+ * - A company may use its own domain (plan feature "custom_domain"). The host points the domain to the website
+ *   (DNS record shown in My company), the administrator adds it in the Vercel dashboard (Project > Domains), and
+ *   the DNS is checked here; active domains are written to a list file that api.php reads (CORS).
  */
 class pjSiteLinks
 {
@@ -194,22 +194,14 @@ class pjSiteLinks
 		return $d;
 	}
 
-	/** Platform option (System Options > API Keys). */
-	public static function option($key, $default = '')
-	{
-		$row = pjBaseOptionModel::factory()->where('t1.foreign_id', 1)->where('t1.key', $key)->limit(1)->findAll()->getDataIndex(0);
-		return !empty($row) && trim((string) $row['value']) !== '' ? trim((string) $row['value']) : $default;
-	}
-
-	/** Address of the guest websites, e.g. "https://www.stayowned.com" (no trailing slash). */
+	/**
+	 * Address of the guest websites, e.g. "https://www.stayowned.com" (no trailing slash): PJ_WEBSITE_URL of
+	 * app/config/config.inc.php (set it once when the website goes live), else http://localhost:3000.
+	 */
 	public static function websiteUrl()
 	{
-		return rtrim(self::option('o_website_url', 'http://localhost:3000'), '/');
-	}
-
-	public static function vercelConfigured()
-	{
-		return self::option('o_vercel_token') !== '' && self::option('o_vercel_project_id') !== '';
+		$url = defined('PJ_WEBSITE_URL') ? trim((string) PJ_WEBSITE_URL) : '';
+		return rtrim($url !== '' ? $url : 'http://localhost:3000', '/');
 	}
 
 	/** DNS record the host has to add: CNAME for a subdomain (www.), A for the bare domain. */
@@ -222,93 +214,30 @@ class pjSiteLinks
 			: array('type' => 'CNAME', 'name' => $parts[0], 'value' => self::VERCEL_CNAME);
 	}
 
-	/** Vercel REST call: array(http_code, decoded body). */
-	private static function vercel($method, $path, $body = null)
+	/**
+	 * Does the domain point to the website (Vercel)? array(status active|pending, message). The domain itself is
+	 * added to the website in the Vercel dashboard (Project > Settings > Domains) by the administrator.
+	 */
+	public static function dnsCheck($domain)
 	{
-		$team = self::option('o_vercel_team_id');
-		$url = 'https://api.vercel.com' . $path . ($team !== '' ? (strpos($path, '?') === false ? '?' : '&') . 'teamId=' . rawurlencode($team) : '');
-		$ch = curl_init($url);
-		$headers = array('Authorization: Bearer ' . self::option('o_vercel_token'), 'Content-Type: application/json');
-		curl_setopt_array($ch, array(
-			CURLOPT_CUSTOMREQUEST  => $method,
-			CURLOPT_RETURNTRANSFER => true,
-			CURLOPT_HTTPHEADER     => $headers,
-			CURLOPT_CONNECTTIMEOUT => 5,
-			CURLOPT_TIMEOUT        => 15,
-		));
-		if ($body !== null)
+		$records = function_exists('dns_get_record') ? @dns_get_record($domain, DNS_A | DNS_CNAME) : false;
+		if (is_array($records))
 		{
-			curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
-		}
-		$resp = curl_exec($ch);
-		$code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
-		$json = is_string($resp) ? json_decode($resp, true) : null;
-		return array($code, is_array($json) ? $json : array());
-	}
-
-	/** Adds the domain to the website's Vercel project (already there: fine). array(ok, message) */
-	public static function vercelAdd($domain)
-	{
-		if (!self::vercelConfigured())
-		{
-			return array(false, 'vercel_not_configured');
-		}
-		list($code, $json) = self::vercel('POST', '/v10/projects/' . rawurlencode(self::option('o_vercel_project_id')) . '/domains', array('name' => $domain));
-		if ($code >= 200 && $code < 300)
-		{
-			return array(true, '');
-		}
-		$err = isset($json['error']['code']) ? (string) $json['error']['code'] : '';
-		if (in_array($err, array('domain_already_in_use_by_project', 'domain_already_exists'), true))
-		{
-			return array(true, '');
-		}
-		return array(false, isset($json['error']['message']) ? (string) $json['error']['message'] : 'Vercel error ' . $code);
-	}
-
-	/** Removes the domain from the Vercel project (when the host changes or clears it). */
-	public static function vercelRemove($domain)
-	{
-		if (!self::vercelConfigured() || $domain === '')
-		{
-			return;
-		}
-		self::vercel('DELETE', '/v9/projects/' . rawurlencode(self::option('o_vercel_project_id')) . '/domains/' . rawurlencode($domain));
-	}
-
-	/** Status of the domain at Vercel: array(status active|pending|error, message). */
-	public static function vercelCheck($domain)
-	{
-		if (!self::vercelConfigured())
-		{
-			return array('pending', 'vercel_not_configured');
-		}
-		$project = rawurlencode(self::option('o_vercel_project_id'));
-		list($code, $json) = self::vercel('GET', '/v9/projects/' . $project . '/domains/' . rawurlencode($domain));
-		if ($code === 404)
-		{
-			list($ok, $msg) = self::vercelAdd($domain);
-			if (!$ok)
+			foreach ($records as $r)
 			{
-				return array('error', $msg);
+				// cname.vercel-dns.com (or a project's own *.vercel-dns-*.com name)
+				if (isset($r['target']) && preg_match('~vercel-dns[a-z0-9-]*\.com\.?$~i', (string) $r['target']))
+				{
+					return array('active', '');
+				}
+				// Vercel's addresses (76.76.21.21 and its newer 216.198.79.x range)
+				if (isset($r['ip']) && preg_match('~^(76\.76\.21\.|216\.198\.79\.)~', (string) $r['ip']))
+				{
+					return array('active', '');
+				}
 			}
-			list($code, $json) = self::vercel('GET', '/v9/projects/' . $project . '/domains/' . rawurlencode($domain));
 		}
-		if ($code < 200 || $code >= 300)
-		{
-			return array('error', isset($json['error']['message']) ? (string) $json['error']['message'] : 'Vercel error ' . $code);
-		}
-		if (empty($json['verified']))
-		{
-			return array('pending', 'Vercel is waiting for the domain to be verified.');
-		}
-		list($code2, $config) = self::vercel('GET', '/v6/domains/' . rawurlencode($domain) . '/config');
-		if ($code2 >= 200 && $code2 < 300 && !empty($config['misconfigured']))
-		{
-			return array('pending', 'The DNS record is not there yet (it can take up to a few hours).');
-		}
-		return array('active', '');
+		return array('pending', 'The DNS record is not there yet (it can take up to a few hours).');
 	}
 
 	/** Saves a company's domain (normalized, '' clears it) and checks it. array(ok, error label key) */
@@ -329,10 +258,6 @@ class pjSiteLinks
 		{
 			return array(false, 'lblSiteLinkTaken');
 		}
-		if ($old !== '' && $old !== $domain)
-		{
-			self::vercelRemove($old);
-		}
 		$data = array('custom_domain' => $domain !== '' ? $domain : ':NULL', 'domain_status' => ':NULL', 'domain_message' => ':NULL', 'domain_checked' => ':NULL');
 		pjCompanyModel::factory()->set('id', (int) $company_id)->modify($data);
 		if ($domain !== '')
@@ -343,7 +268,7 @@ class pjSiteLinks
 		return array(true, '');
 	}
 
-	/** Checks the company's domain at Vercel and stores the result. */
+	/** Checks the DNS of the company's domain and stores the result. */
 	public static function checkDomain($company_id)
 	{
 		$company = pjCompanyModel::factory()->find((int) $company_id)->getData();
@@ -352,11 +277,7 @@ class pjSiteLinks
 		{
 			return null;
 		}
-		if (self::vercelConfigured())
-		{
-			self::vercelAdd($domain);
-		}
-		list($status, $message) = self::vercelCheck($domain);
+		list($status, $message) = self::dnsCheck($domain);
 		pjCompanyModel::factory()->set('id', (int) $company_id)->modify(array(
 			'domain_status'  => $status,
 			'domain_message' => substr((string) $message, 0, 250),

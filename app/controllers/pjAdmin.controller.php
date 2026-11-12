@@ -344,7 +344,7 @@ class pjAdmin extends pjAppController
 			->set('calendar_option_arr', $calendar_option_arr);
 			
 		$pjReservationModel->reset()
-			->select('t1.id, t1.uuid, t1.c_name, t1.created, t1.date_from, t1.date_to, t1.status, IF(t1.price_based_on="nights", DATEDIFF(t1.date_to, t1.date_from), DATEDIFF(t1.date_to, t1.date_from) + 1) AS nights, t3.content AS `calendar_name`')
+			->select('t1.id, t1.uuid, t1.c_name, t1.created, t1.date_from, t1.date_to, t1.status, IF(t1.price_based_on="nights", DATEDIFF(t1.date_to, t1.date_from), DATEDIFF(t1.date_to, t1.date_from) + 1) AS nights, ' . pjAppController::calendarNameSql('t3', 't1.calendar_id') . ' AS `calendar_name`')
 			->join('pjCalendar', 't2.id=t1.calendar_id', 'left')
 			->join('pjMultiLang', "t3.model='pjCalendar' AND t3.foreign_id=t1.calendar_id AND t3.field='name' AND t3.locale='".$this->getLocaleId()."'", 'left')
 			->limit(5)
@@ -358,7 +358,7 @@ class pjAdmin extends pjAppController
 		$this->set('latest_reservation_arr', $latest_reservation_arr);
 		
 		$pjReservationModel->reset()
-			->select('t1.*, IF(t1.price_based_on="nights", DATEDIFF(t1.date_to, t1.date_from), DATEDIFF(t1.date_to, t1.date_from) + 1) AS nights, t3.content AS `calendar_name`')
+			->select('t1.*, IF(t1.price_based_on="nights", DATEDIFF(t1.date_to, t1.date_from), DATEDIFF(t1.date_to, t1.date_from) + 1) AS nights, ' . pjAppController::calendarNameSql('t3', 't1.calendar_id') . ' AS `calendar_name`')
 			->join('pjCalendar', 't2.id=t1.calendar_id', 'left')
 			->join('pjMultiLang', "t3.model='pjCalendar' AND t3.foreign_id=t1.calendar_id AND t3.field='name' AND t3.locale='".$this->getLocaleId()."'", 'left')
 			->whereIn('t1.status', array('Confirmed','Pending'))
@@ -373,7 +373,7 @@ class pjAdmin extends pjAppController
 		$this->set('arriving_today_arr', $arriving_today_arr);
 		
 		$pjReservationModel->reset()
-			->select('t1.*, IF(t1.price_based_on="nights", DATEDIFF(t1.date_to, t1.date_from), DATEDIFF(t1.date_to, t1.date_from) + 1) AS nights, t3.content AS `calendar_name`')
+			->select('t1.*, IF(t1.price_based_on="nights", DATEDIFF(t1.date_to, t1.date_from), DATEDIFF(t1.date_to, t1.date_from) + 1) AS nights, ' . pjAppController::calendarNameSql('t3', 't1.calendar_id') . ' AS `calendar_name`')
 			->join('pjCalendar', 't2.id=t1.calendar_id', 'left')
 			->join('pjMultiLang', "t3.model='pjCalendar' AND t3.foreign_id=t1.calendar_id AND t3.field='name' AND t3.locale='".$this->getLocaleId()."'", 'left')
 			->whereIn('t1.status', array('Confirmed','Pending'))

@@ -90,12 +90,8 @@
                                         </div>
 
                         				<div class="form-group">
-                                        	<?php
-                                        	$is_client_id = $tpl['arr'][$i]['key'] === 'o_google_client_id';
-                                        	// Website address and Vercel settings: plain values, nothing to verify with Google
-                                        	$no_verify = in_array($tpl['arr'][$i]['key'], array('o_website_url', 'o_vercel_token', 'o_vercel_project_id', 'o_vercel_team_id'), true);
-                                        	?>
-                                        	<label class="col-lg-2 control-label"><?php __($is_client_id ? 'plugin_base_client_id' : ($no_verify ? 'lblApiFieldValue' : 'plugin_base_api_key')); ?></label>
+                                        	<?php $is_client_id = $tpl['arr'][$i]['key'] === 'o_google_client_id'; ?>
+                                        	<label class="col-lg-2 control-label"><?php __($is_client_id ? 'plugin_base_client_id' : 'plugin_base_api_key'); ?></label>
 
                                         	<div class="col-sm-8">
                                         		<div class="m-b-md">
@@ -117,7 +113,7 @@
                                             		}
                                             		?>
                                             	</div>
-                                        		<?php if (!$is_client_id && !$no_verify) { ?>
+                                        		<?php if (!$is_client_id) { ?>
                                         		<div class="row">
                                                     <div class="col-lg-4">
                                                         <a href="#" class="btn btn-primary btn-outline btn-verify" data-key="<?php echo $tpl['arr'][$i]['key'];?>" data-csrf="<?php echo pjAppController::getCsrfToken(); ?>"> <?php __('plugin_base_btn_verify_key');?></a>
