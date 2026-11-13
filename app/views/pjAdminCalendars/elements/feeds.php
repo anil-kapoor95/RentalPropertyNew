@@ -25,6 +25,7 @@
     <div class="panel-body">
 
         <div class="panel-body-inner">
+<?php $plan_feature = 'ical_sync'; include dirname(__FILE__) . '/plan-lock.php'; ?>
 
             <div class="row">
 

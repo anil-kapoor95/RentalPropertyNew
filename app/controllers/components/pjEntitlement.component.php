@@ -46,7 +46,10 @@ class pjEntitlement
 	);
 
 	/** Features kept by an expired / cancelled / restricted company (existing data keeps working). */
-	public static $baseFeatures = array('website', 'properties', 'availability', 'ical_sync', 'social_sharing', 'email_notifications', 'payment_gateway');
+	public static $baseFeatures = array('website', 'properties', 'availability', 'social_sharing', 'email_notifications', 'payment_gateway');
+
+	/** Features that are in the catalogue but not built yet: shown as "Coming soon", never sold as working. */
+	public static $comingSoon = array('customers', 'analytics', 'calendar_notes', 'ai_chatbot');
 
 	/** Numeric limits (null = unlimited). */
 	public static $limits = array('max_properties', 'max_users', 'max_payment_gateways', 'ai_monthly_messages');
@@ -70,7 +73,9 @@ class pjEntitlement
 	public static $defaults = array(
 		'currency' => 'USD', 'grace_days' => '7',
 		// A company without a plan has no full access (basic features only, nothing new).
-		'unassigned_mode' => 'restricted', 'expired_mode' => 'read_only', 'self_trial' => '0',
+		// expired_mode: 'suspend' = the website takes no bookings and the back office is read-only (My plan stays
+		// open to pay); 'read_only' = back office read-only, website open; 'basic' = only the basic features.
+		'unassigned_mode' => 'restricted', 'expired_mode' => 'suspend', 'self_trial' => '0',
 		// Plan every new company gets (Subscriptions > Plans: "Plan for new companies"), '' = none
 		'default_plan_id' => '',
 	);
@@ -188,6 +193,17 @@ class pjEntitlement
 		return !empty($plan) && $plan['status'] === 'T' && (int) $plan['is_public'] === 1 && $plan['price'] !== null && $plan['price'] > 0;
 	}
 
+	/** A free plan (price 0): a company may switch to it itself, no payment involved. */
+	public static function isFree($plan)
+	{
+		return !empty($plan) && $plan['status'] === 'T' && $plan['price'] !== null && $plan['price'] <= 0;
+	}
+
+	public static function isComingSoon($feature)
+	{
+		return in_array($feature, self::$comingSoon, true);
+	}
+
 	/** End of one billing period starting at $from (Y-m-d H:i:s). */
 	public static function addPeriod($from, $plan)
 	{
@@ -273,6 +289,7 @@ class pjEntitlement
 					$state['limits'] = array('max_properties' => 0, 'max_users' => 0, 'max_payment_gateways' => 0, 'ai_monthly_messages' => 0);
 				}
 			} else {
+				$sub = self::applyDueChange($sub);
 				$plan = self::plan($sub['plan_id']);
 				list($status, $entitled, $grace_end) = self::effectiveStatus($sub);
 				$state['source'] = 'plan';
@@ -324,6 +341,65 @@ class pjEntitlement
 		return $s['source'] === 'plan' && !$s['entitled'] && self::setting('expired_mode') === 'suspend';
 	}
 
+	/** The company's back office is read-only (expired / cancelled with "suspend" or "read_only" mode): it can look, and pay on My plan. */
+	public static function backOfficeReadOnly($company_id)
+	{
+		if ((int) $company_id <= 0)
+		{
+			return false;
+		}
+		$s = self::state($company_id);
+		return $s['source'] === 'plan' && !$s['entitled'] && in_array(self::setting('expired_mode'), array('suspend', 'read_only'), true);
+	}
+
+	/**
+	 * Back-office guard (called from every controller's beforeFilter): an expired company in read-only mode may
+	 * look at everything but change nothing, except paying / changing its plan (My plan), its own profile and
+	 * logging out. Administrators are never limited. Stops the request with a JSON 402 (Ajax) or a redirect.
+	 */
+	public static function readOnlyGuard($controller)
+	{
+		if (!self::isReady() || !class_exists('pjCompanyContext') || !is_object($controller) || !$controller->isLoged() || $controller->isAdmin())
+		{
+			return;
+		}
+		// (the framework moves $_GET / $_POST into its own input objects)
+		$get = is_object($controller->_get) ? $controller->_get : null;
+		$ctl = $get ? (string) $get->toString('controller') : (isset($_GET['controller']) ? (string) $_GET['controller'] : '');
+		$action = $get ? (string) $get->toString('action') : (isset($_GET['action']) ? (string) $_GET['action'] : '');
+		if (in_array($ctl, array('pjAdminSubscriptions', 'pjFront', 'pjJabbApi', 'pjCron', 'pjInstaller', 'pjListings'), true)
+			|| in_array($action, array('pjActionLogin', 'pjActionLogout', 'pjActionProfile', 'pjActionForgot', 'pjActionSwitch'), true))
+		{
+			return;
+		}
+		$is_post = isset($_SERVER['REQUEST_METHOD']) && strtoupper($_SERVER['REQUEST_METHOD']) === 'POST';
+		$is_xhr = isset($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] === 'XMLHttpRequest';
+		$mutating = $is_post || preg_match('/^pjAction(Delete|Save|Set|Copy|Import|Upload|Remove|Sort|Send|Change|Clone|Restore|Empty|Toggle|Create|Add)/', $action);
+		if (!$mutating)
+		{
+			return;
+		}
+		// read-only Ajax lists are POSTed too (grids): those keep working
+		if ($is_post && $is_xhr && preg_match('/^pjAction(Get|Check|Load|Find|Search|Preview|Export)/', $action))
+		{
+			return;
+		}
+		$cid = (int) pjCompanyContext::activeId($controller->getRoleId(), $controller->getUserId());
+		if (!self::backOfficeReadOnly($cid))
+		{
+			return;
+		}
+		$text = __('subReadOnly', true);
+		if ($is_xhr)
+		{
+			header('Content-Type: application/json; charset=utf-8');
+			echo json_encode(array('status' => 'ERR', 'code' => 402, 'text' => $text));
+			exit;
+		}
+		header('Location: ' . $_SERVER['PHP_SELF'] . '?controller=pjAdminSubscriptions&action=pjActionMyPlan&msg=subReadOnly');
+		exit;
+	}
+
 	/* ------------------------------------------------------------------
 	 * Usage
 	 * ------------------------------------------------------------------ */
@@ -332,7 +408,8 @@ class pjEntitlement
 	{
 		$company_id = (int) $company_id;
 		return array(
-			'properties' => (int) pjCalendarModel::factory()->where('t1.company_id', $company_id)->findCount()->getData(),
+			// switched-off properties do not count against the plan's limit
+			'properties' => (int) pjCalendarModel::factory()->where('t1.company_id', $company_id)->where('t1.status', 'T')->findCount()->getData(),
 			'users'      => (int) pjAuthUserModel::factory()->where('t1.company_id', $company_id)->where('t1.role_id', 5)->findCount()->getData(),
 		);
 	}
@@ -585,6 +662,118 @@ class pjEntitlement
 		return true;
 	}
 
+	/**
+	 * A plan change scheduled for the end of the period (downgrade) is applied once that end has passed:
+	 * a free plan starts at once without an end date; a paid plan starts with its first period due
+	 * (past_due during the grace days, then expired if not paid). Cancellation at period end wins.
+	 * Returns the (updated) subscription row.
+	 */
+	public static function applyDueChange($sub, $now = null)
+	{
+		if (empty($sub) || empty($sub['pending_plan_id']) || (int) $sub['cancel_at_period_end'] === 1)
+		{
+			return $sub;
+		}
+		$now = $now === null ? time() : (int) $now;
+		$end_str = $sub['status'] === 'trial' && !empty($sub['trial_ends_at']) ? $sub['trial_ends_at'] : $sub['current_period_end'];
+		if (empty($end_str) || $now <= strtotime($end_str) || !in_array($sub['status'], array('trial', 'active', 'past_due', 'expired'), true))
+		{
+			return $sub;
+		}
+		$plan = self::plan($sub['pending_plan_id']);
+		if (!$plan || $plan['status'] !== 'T')
+		{
+			self::saveSubscription($sub['company_id'], array('pending_plan_id' => ':NULL'));
+			self::log($sub['company_id'], 'scheduled', 'Scheduled plan change dropped: the plan is no longer available');
+			return self::subscription($sub['company_id']);
+		}
+		$old = self::plan($sub['plan_id']);
+		$data = array('plan_id' => (int) $plan['id'], 'status' => 'active', 'trial_ends_at' => ':NULL', 'pending_plan_id' => ':NULL',
+			'cancel_at_period_end' => 0, 'cancelled_at' => ':NULL');
+		if (self::isFree($plan))
+		{
+			$data['current_period_start'] = date('Y-m-d H:i:s', $now);
+			$data['current_period_end'] = ':NULL';
+		} else {
+			// the first period of the new plan is due now: grace days to pay it
+			$data['current_period_start'] = $end_str;
+			$data['current_period_end'] = $end_str;
+		}
+		self::saveSubscription($sub['company_id'], $data);
+		self::log($sub['company_id'], 'plan_changed', sprintf('Scheduled change applied: %s -> %s', $old ? $old['name'] : '?', $plan['name']));
+		return self::subscription($sub['company_id']);
+	}
+
+	/**
+	 * Company switches to a free plan itself. While it has paid time left the change waits for the end of
+	 * the period (no refund); otherwise (no plan, trial, expired, free plan) it starts now.
+	 * Returns 'scheduled' | 'switched' | false.
+	 */
+	public static function switchToFree($company_id, $plan, $user_id)
+	{
+		if (!self::isFree($plan) || (int) $plan['is_public'] !== 1)
+		{
+			return false;
+		}
+		$s = self::state($company_id);
+		$sub = $s['subscription'];
+		if ($sub && (int) $sub['plan_id'] === (int) $plan['id'] && $s['entitled'])
+		{
+			return false; // already on it
+		}
+		$paid_left = $sub && $s['entitled'] && $s['plan'] && !self::isFree($s['plan']) && $s['status'] !== 'trial'
+			&& !empty($sub['current_period_end']) && strtotime($sub['current_period_end']) > time();
+		if ($paid_left)
+		{
+			self::scheduleChange($company_id, $plan['id'], $user_id);
+			return 'scheduled';
+		}
+		$now = date('Y-m-d H:i:s');
+		$data = array('plan_id' => (int) $plan['id'], 'status' => 'active', 'current_period_start' => $now, 'current_period_end' => ':NULL',
+			'trial_ends_at' => ':NULL', 'cancel_at_period_end' => 0, 'cancelled_at' => ':NULL', 'pending_plan_id' => ':NULL');
+		if (!$sub || empty($sub['started_at']))
+		{
+			$data['started_at'] = $now;
+		}
+		self::saveSubscription($company_id, $data);
+		self::log($company_id, 'assigned', sprintf('Plan %s chosen by the company (free plan)', $plan['name']), $user_id);
+		return 'switched';
+	}
+
+	/**
+	 * Unused paid time of the current plan, in seconds of the new plan (credit for an upgrade / plan change):
+	 * value left = old price x remaining share of its period; converted at the new plan's price.
+	 */
+	public static function changeCreditSeconds($sub, $new_plan, $now = null)
+	{
+		$now = $now === null ? time() : (int) $now;
+		if (empty($sub) || empty($new_plan) || (int) $sub['plan_id'] === (int) $new_plan['id']
+			|| !in_array($sub['status'], array('active', 'past_due'), true) || empty($sub['current_period_end']) || empty($sub['current_period_start']))
+		{
+			return 0;
+		}
+		$old = self::plan($sub['plan_id']);
+		$end = strtotime($sub['current_period_end']);
+		$start = strtotime($sub['current_period_start']);
+		if (!$old || self::isFree($old) || $old['price'] === null || $end <= $now || $end <= $start
+			|| strtoupper((string) $old['currency']) !== strtoupper((string) $new_plan['currency']) || (float) $new_plan['price'] <= 0)
+		{
+			return 0;
+		}
+		// only time that was actually paid for (not a trial or a period the administrator assigned), at the amount paid
+		$paid = pjBillingTransactionModel::factory()->where('t1.company_id', (int) $sub['company_id'])->where('t1.plan_id', (int) $old['id'])
+			->where('t1.status', 'paid')->where('t1.period_end >', date('Y-m-d H:i:s', $now))->where('t1.amount >', 0)
+			->orderBy('t1.period_end DESC')->limit(1)->findAll()->getDataIndex(0);
+		if (empty($paid) || strtoupper((string) $paid['currency']) !== strtoupper((string) $new_plan['currency']))
+		{
+			return 0;
+		}
+		$old_len = max(86400, strtotime(self::addPeriod($sub['current_period_start'], $old)) - $start);
+		$value_left = min((float) $paid['amount'], (float) $old['price']) * min(1, ($end - $now) / $old_len);
+		$new_len = strtotime(self::addPeriod(date('Y-m-d H:i:s', $now), $new_plan)) - $now;
+		return (int) floor($value_left / (float) $new_plan['price'] * $new_len);
+	}
+
 	/** Company starts the free trial itself (only when allowed in the settings, once per company). */
 	public static function startTrial($company_id, $plan_id, $user_id)
 	{
@@ -649,6 +838,12 @@ class pjEntitlement
 			$start = $sub['current_period_end'];
 		}
 		$end = self::addPeriod($start, $plan);
+		// Plan change with paid time left on the old plan: that time is not lost, it is credited as extra time.
+		$credit = $start === $now ? self::changeCreditSeconds($sub, $plan) : 0;
+		if ($credit > 0)
+		{
+			$end = date('Y-m-d H:i:s', strtotime($end) + $credit);
+		}
 
 		$m->reset()->set('id', $txn['id'])->modify(array(
 			'status' => 'paid', 'paid_at' => $now, 'provider_ref' => $provider_ref !== '' ? $provider_ref : ':NULL',
@@ -660,13 +855,15 @@ class pjEntitlement
 		{
 			$data['started_at'] = $now;
 		}
-		if ($sub && (int) $sub['pending_plan_id'] === (int) $plan['id'])
+		// a payment is an explicit choice of this plan: an earlier scheduled change (downgrade) is dropped
+		if ($sub && !empty($sub['pending_plan_id']))
 		{
 			$data['pending_plan_id'] = ':NULL';
 		}
 		self::saveSubscription($cid, $data);
 		$m->commit();
-		self::log($cid, 'payment', sprintf('Payment %s %s (%s, %s) - plan %s active until %s', $txn['amount'], $txn['currency'], $txn['provider'], $provider_ref, $plan['name'], $end), $user_id);
+		self::log($cid, 'payment', sprintf('Payment %s %s (%s, %s) - plan %s active until %s%s', $txn['amount'], $txn['currency'], $txn['provider'], $provider_ref, $plan['name'], $end,
+			$credit > 0 ? sprintf(' (incl. %.1f days credited from the previous plan)', $credit / 86400) : ''), $user_id);
 		return 'applied';
 	}
 
@@ -720,6 +917,15 @@ class pjEntitlement
 			return 'Subscription tables are missing.';
 		}
 		$changed = 0;
+		// scheduled plan changes (downgrades) whose period has ended
+		foreach (pjCompanySubscriptionModel::factory()->where('t1.pending_plan_id IS NOT NULL')->findAll()->getData() as $sub)
+		{
+			$after = self::applyDueChange($sub);
+			if ((int) $after['plan_id'] !== (int) $sub['plan_id'])
+			{
+				$changed++;
+			}
+		}
 		foreach (pjCompanySubscriptionModel::factory()->whereIn('t1.status', array('trial', 'active', 'past_due'))->findAll()->getData() as $sub)
 		{
 			list($status) = self::effectiveStatus($sub);

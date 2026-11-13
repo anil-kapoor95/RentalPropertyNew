@@ -19,6 +19,7 @@ class pjCompanySignupModel extends pjAppModel
 		array('name' => 'user_id', 'type' => 'int', 'default' => ':NULL'),
 		array('name' => 'company_id', 'type' => 'int', 'default' => ':NULL'),
 		array('name' => 'calendar_id', 'type' => 'int', 'default' => ':NULL'),
+		array('name' => 'plan_code', 'type' => 'varchar', 'default' => ':NULL'),
 		array('name' => 'step', 'type' => 'tinyint', 'default' => '0'),
 		array('name' => 'ai_generations', 'type' => 'smallint', 'default' => '0'),
 		array('name' => 'status', 'type' => 'enum', 'default' => 'pending'),

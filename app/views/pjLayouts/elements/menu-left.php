@@ -95,6 +95,14 @@ $pjcsToken = pjAppController::getCsrfToken();
         <?php endif; ?>
     </div>
 </li>
+<?php if (class_exists('pjEntitlement') && (int) $pjcsRole !== 1 && $pjcsActive && pjEntitlement::backOfficeReadOnly((int) $pjcsActive['id'])): ?>
+    <li class="pj-plan-readonly" style="padding: 10px 20px;">
+        <div class="alert alert-danger m-b-none" style="font-size: 12px;">
+            <i class="fa fa-lock m-r-xs"></i><?php __('subReadOnlyShort'); ?>
+            <a class="alert-link" href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminSubscriptions&amp;action=pjActionMyPlan"><?php __('subRenewNow'); ?></a>
+        </div>
+    </li>
+<?php endif; ?>
 <?php if (pjCompanyContext::canSwitch($pjcsRole, $pjcsUser)): ?>
     <li class="pjcs-switch">
         <a href="#" class="pjcs-toggle"><i class="fa fa-exchange"></i> <span class="nav-label"><?php __('lblSetCompany'); ?></span><span class="fa arrow"></span></a>

@@ -1,7 +1,7 @@
 <?php
 $sub_msg = $controller->_get->toString('msg');
-$sub_ok = array('subSaved', 'subTrialStarted', 'subDowngradeScheduled', 'subCancelScheduled', 'subPaymentOk', 'subRequestSent');
-$sub_info = array('subPaymentPending', 'subPaymentCancelled', 'subLocked');
+$sub_ok = array('subSaved', 'subTrialStarted', 'subDowngradeScheduled', 'subCancelScheduled', 'subPaymentOk', 'subRequestSent', 'subFreeSwitched');
+$sub_info = array('subPaymentPending', 'subPaymentCancelled', 'subLocked', 'subReadOnly');
 $sub_err = array('subErrSave', 'subErrCsrf', 'subErrCompany', 'subErrPlan', 'subErrTrial', 'subErrCheckout', 'subErrPlanUsed',
 	'subErrPlanFields', 'subErrPlanCode', 'subErrKey', 'subErrDuplicateRef', 'subErrLimit', 'subErrMethod', 'subErrCurrency', 'subPaymentFailed',
 	'subErrPromoFields', 'subErrPromoCode', 'subErrCoupon');

@@ -1770,6 +1770,8 @@ class pjAdminCalendars extends pjAdmin
     public function pjActionSaveFeed()
     {
         $this->setAjax(true);
+        // Airbnb / iCal sync is a plan feature (the cron only synchronises companies whose plan has it)
+        $this->requirePlanFeature('ical_sync');
         
         if ($this->isXHR())
         {
@@ -1864,6 +1866,8 @@ class pjAdminCalendars extends pjAdmin
     public function pjActionRefreshFeed()
     {
         $this->setAjax(true);
+        // Airbnb / iCal sync is a plan feature (the cron only synchronises companies whose plan has it)
+        $this->requirePlanFeature('ical_sync');
         
         if (!$this->isXHR())
         {
@@ -1918,6 +1922,8 @@ class pjAdminCalendars extends pjAdmin
     public function pjActionUpdateFeed()
     {
         $this->setAjax(true);
+        // Airbnb / iCal sync is a plan feature (the cron only synchronises companies whose plan has it)
+        $this->requirePlanFeature('ical_sync');
         
         if (!$this->isXHR())
         {
@@ -2541,6 +2547,8 @@ class pjAdminCalendars extends pjAdmin
     {
 
         $this->setAjax(true);
+        // Airbnb / iCal sync is a plan feature (the cron only synchronises companies whose plan has it)
+        $this->requirePlanFeature('ical_sync');
         
         if ($this->isXHR())
         {

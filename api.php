@@ -742,7 +742,16 @@ foreach ($_FILES as $key => $file)
 
 // The controller is called from this server, so it sees this server's address: pass on the caller's
 // (used for log-in throttling; never taken from the request).
+unset($data['api_proxy_key'], $data['api_client_ip'], $data['api_site_url']);
 $data['api_client_ip'] = isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : '';
+// Behind the website's own server (Next.js on Vercel calling this file server-side) REMOTE_ADDR is that server:
+// it may pass the visitor's address in X-Client-IP when it also sends the shared secret (PJ_API_PROXY_SECRET).
+if (defined('PJ_API_PROXY_SECRET') && PJ_API_PROXY_SECRET !== '' && isset($_SERVER['HTTP_X_PROXY_SECRET'], $_SERVER['HTTP_X_CLIENT_IP'])
+    && hash_equals((string) PJ_API_PROXY_SECRET, (string) $_SERVER['HTTP_X_PROXY_SECRET']) && filter_var($_SERVER['HTTP_X_CLIENT_IP'], FILTER_VALIDATE_IP))
+{
+    $data['api_client_ip'] = (string) $_SERVER['HTTP_X_CLIENT_IP'];
+}
+$data['api_proxy_key'] = hash_hmac('sha256', 'pjJabbApi-proxy-v1', PJ_SALT); // = pjJabbApi::proxyKey()
 // Sign-up website that made the call (only an allowed origin): used for links in the sign-up emails
 $data['api_site_url'] = $origin !== '' && in_array($origin, $allowed_origins, true) ? $origin : '';
 

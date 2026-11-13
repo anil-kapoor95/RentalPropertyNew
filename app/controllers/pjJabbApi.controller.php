@@ -57,6 +57,31 @@ class pjJabbApi extends pjAppController
 
 	private $input = null;
 
+	/**
+	 * The API is reached only through api.php (route allow-list, CORS, client address): a direct call of
+	 * index.php?controller=pjJabbApi is refused. api.php signs every call with a key derived from PJ_SALT.
+	 */
+	public static function proxyKey()
+	{
+		return hash_hmac('sha256', 'pjJabbApi-proxy-v1', PJ_SALT);
+	}
+
+	public function beforeFilter()
+	{
+		$ok = parent::beforeFilter();
+		$p = $this->params();
+		$sent = isset($p['api_proxy_key']) && is_string($p['api_proxy_key']) ? $p['api_proxy_key'] : '';
+		if (!hash_equals(self::proxyKey(), $sent))
+		{
+			header('HTTP/1.1 403 Forbidden');
+			header('Content-Type: application/json; charset=utf-8');
+			echo json_encode(array('status' => 'ERR', 'code' => 403, 'message' => 'Forbidden. Use api.php.'));
+			exit;
+		}
+		unset($this->input['api_proxy_key']);
+		return $ok;
+	}
+
 	/* ------------------------------------------------------------------
 	 * Helpers
 	 * ------------------------------------------------------------------ */
@@ -1069,8 +1094,11 @@ class pjJabbApi extends pjAppController
 		}
 
 		$now = date('Y-m-d H:i:s');
+		// plan picked on the pricing page (?plan=code): its free trial starts when the company is created
+		$plan_code = strtolower(trim($this->param('plan')));
 		$signup_id = pjCompanySignupModel::factory(array(
 			'user_id'  => (int) $user_id,
+			'plan_code' => preg_match('/^[a-z0-9_-]{1,40}$/', $plan_code) ? $plan_code : ':NULL',
 			'step'     => 1,
 			'status'   => 'pending',
 			'ip'       => substr((string) pjUtil::getClientIp(), 0, 45),
@@ -1592,7 +1620,7 @@ class pjJabbApi extends pjAppController
 	 * Creates the company of a sign-up (same set-up as Companies > Add company) and links the login to it.
 	 * $data: company fields (values or ':NULL'). Returns the company id, or stops.
 	 */
-	private function createSignupCompany($user, $data)
+	private function createSignupCompany($user, $data, $plan_code = '')
 	{
 		$data['user_id'] = (int) $user['id'];
 		$data['status'] = 'T';
@@ -1609,10 +1637,17 @@ class pjJabbApi extends pjAppController
 		pjCompanyContext::seedFeatures($company_id);
 		pjCompanyContext::ensureNotifications($company_id);
 		pjCompanyContext::seedNewCompanyLocales($company_id);
-		// Subscriptions: the plan for new companies (without a plan a company has no full access)
-		if (class_exists('pjEntitlement'))
+		// Subscriptions: the free trial of the plan picked on the pricing page (once per company), otherwise the
+		// plan for new companies (without a plan a company has no full access)
+		if (class_exists('pjEntitlement') && pjEntitlement::isReady())
 		{
-			pjEntitlement::assignDefaultPlan($company_id, (int) $user['id']);
+			$picked = (string) $plan_code !== '' ? pjEntitlement::planByCode((string) $plan_code) : false;
+			if ($picked && $picked['status'] === 'T' && (int) $picked['is_public'] === 1 && (int) $picked['trial_days'] > 0)
+			{
+				pjEntitlement::assignPlan($company_id, (int) $picked['id'], 'trial', '', (int) $user['id'], 'Free trial chosen at sign-up');
+			} else {
+				pjEntitlement::assignDefaultPlan($company_id, (int) $user['id']);
+			}
 		}
 		return $company_id;
 	}
@@ -1788,7 +1823,7 @@ class pjJabbApi extends pjAppController
 
 		if ($is_new)
 		{
-			$company_id = $this->createSignupCompany($user, $data);
+			$company_id = $this->createSignupCompany($user, $data, isset($signup['plan_code']) ? (string) $signup['plan_code'] : '');
 		} else {
 			$data['modified'] = date('Y-m-d H:i:s');
 			pjCompanyModel::factory()->set('id', $company_id)->modify($data);
@@ -1962,7 +1997,7 @@ class pjJabbApi extends pjAppController
 				'state'          => $v['state'] !== '' ? self::cut($v['state'], 100) : ':NULL',
 				'zip'            => $v['zip'] !== '' ? self::cut($v['zip'], 20) : ':NULL',
 				'country_id'     => $country_id,
-			));
+			), isset($signup['plan_code']) ? (string) $signup['plan_code'] : '');
 			pjCompanySignupModel::factory()->set('id', (int) $signup['id'])->modify(array('company_id' => $company_id));
 			$signup['company_id'] = $company_id;
 			// New account: the default general settings, with the time zone of the property's country
@@ -2084,8 +2119,13 @@ class pjJabbApi extends pjAppController
 		$state = $this->signupState($signup);
 		if ($ical_url !== '')
 		{
-			$state['ical_import'] = $this->importIcal($calendar_id, $ical_url);
-			$state['property']['ical_urls'] = self::propertyFeeds($calendar_id);
+			if (self::icalAllowed($company_id))
+			{
+				$state['ical_import'] = $this->importIcal($calendar_id, $ical_url);
+				$state['property']['ical_urls'] = self::propertyFeeds($calendar_id);
+			} else {
+				$state['ical_import'] = array('status' => 'ERR', 'text' => self::icalLockedText(), 'plan_required' => true);
+			}
 		}
 		$this->respond(200, 'Property saved.', $state);
 	}
@@ -2110,6 +2150,17 @@ class pjJabbApi extends pjAppController
 	}
 
 	/** Calendars of the property and the link of its own calendar (to paste into Airbnb). */
+	/** Airbnb / iCal import is included in the company's plan. */
+	private static function icalAllowed($company_id)
+	{
+		return !class_exists('pjEntitlement') || !pjEntitlement::isReady() || pjEntitlement::allows((int) $company_id, 'ical_sync');
+	}
+
+	private static function icalLockedText()
+	{
+		return 'Airbnb / iCal calendar sync is not included in your plan. Upgrade your plan to import calendars.';
+	}
+
 	private static function calendarSyncState($calendar_id)
 	{
 		$names = array(1 => 'other', 2 => 'airbnb', 3 => 'vrbo', 4 => 'homeaway', 5 => 'tripadvisor', 6 => 'booking.com');
@@ -2151,6 +2202,12 @@ class pjJabbApi extends pjAppController
 		$calendar_id = (int) $calendar['id'];
 		$op = $this->param('op');
 		$import = null;
+		$allowed = self::icalAllowed((int) $calendar['company_id']);
+		if (!$allowed && ($op === 'save' || $op === 'sync'))
+		{
+			// importing calendars is a plan feature (the cron only synchronises companies whose plan has it)
+			$this->respond(402, self::icalLockedText(), array('plan_required' => true));
+		}
 
 		if ($op === 'save')
 		{
@@ -2191,6 +2248,7 @@ class pjJabbApi extends pjAppController
 		}
 
 		$data = self::calendarSyncState($calendar_id);
+		$data['sync_allowed'] = $allowed;
 		if ($import !== null)
 		{
 			$data['import'] = array('status' => $import['status'], 'text' => $import['text']);
@@ -3395,6 +3453,8 @@ class pjJabbApi extends pjAppController
 			'branding_line' => self::brandingLine(),
 			'booked'        => $booked,
 			'booking_url'   => PJ_INSTALL_URL . 'preview.php?cid=' . (int) $cal['id'],
+			// false when the company's plan has expired (the website takes no bookings)
+			'bookable'      => !(class_exists('pjEntitlement') && pjEntitlement::frontSuspended($company_id)),
 			// booking card texts (back office > Languages)
 			// page texts (System Options > Languages: book_* and site_* labels)
 			'labels'        => array_merge(array(
@@ -3407,8 +3467,9 @@ class pjJabbApi extends pjAppController
 			), self::labelList(self::$siteLabels)),
 			// Adults / children of the property's booking form (Booking options > Booking form)
 			'guests'        => array(
-				'adults'   => array('show' => (int) $opt['o_bf_adults'] !== 1, 'max' => max(1, (int) $opt['o_bf_adults_max'])),
-				'children' => array('show' => (int) $opt['o_bf_children'] !== 1, 'max' => max(0, (int) $opt['o_bf_children_max'])),
+				// never more than the property's "max guests"
+				'adults'   => array('show' => (int) $opt['o_bf_adults'] !== 1, 'max' => max(1, !empty($opt['o_max_people']) ? min((int) $opt['o_bf_adults_max'], (int) $opt['o_max_people']) : (int) $opt['o_bf_adults_max'])),
+				'children' => array('show' => (int) $opt['o_bf_children'] !== 1, 'max' => max(0, !empty($opt['o_max_people']) ? min((int) $opt['o_bf_children_max'], max(0, (int) $opt['o_max_people'] - 1)) : (int) $opt['o_bf_children_max'])),
 			),
 		);
 		$this->respond(200, 'OK', $out);
@@ -3436,7 +3497,8 @@ class pjJabbApi extends pjAppController
 				foreach ($plan['feature_list'] as $key)
 				{
 					$label = __(pjEntitlement::$features[$key], true);
-					$features[] = array('key' => $key, 'label' => is_string($label) && $label !== '' ? $label : $key);
+					$features[] = array('key' => $key, 'label' => is_string($label) && $label !== '' ? $label : $key,
+						'coming_soon' => pjEntitlement::isComingSoon($key));
 				}
 				$plans[] = array(
 					'id'               => (int) $plan['id'],
@@ -4649,6 +4711,7 @@ class pjJabbApi extends pjAppController
 		$price_types = __($opt['o_price_based_on'] === 'days' ? 'day_price_types' : 'price_types', true);
 		$this->respond(200, 'OK', array(
 			'slug' => $slug,
+			'bookable' => !(class_exists('pjEntitlement') && pjEntitlement::frontSuspended($cid)),
 			// company page link (/stays/<company>): the website checks it on a company's own domain
 			'company_slug' => self::companyLink($cid, isset($company['name']) ? $company['name'] : ''),
 			'property' => array(
@@ -4740,6 +4803,10 @@ class pjJabbApi extends pjAppController
 	{
 		$this->setAjax(true);
 		list($cal, $t, $cid, $opt) = $this->bookingProperty();
+		if (class_exists('pjEntitlement') && pjEntitlement::frontSuspended($cid))
+		{
+			$this->respond(402, self::lbl('subFrontSuspended'), array('available' => false, 'bookable' => false));
+		}
 		list($v, $error) = $this->bookingRequest($cal, $opt);
 		if ($error !== '')
 		{

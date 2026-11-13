@@ -482,6 +482,11 @@ class pjBaseAppController extends pjController
             }
             $script_option_arr = pjOptionModel::factory()->getPairs($this->getForeignId());
             $this->option_arr = array_merge($base_option_arr, $script_option_arr);
+            // A subscription payment is verified in the plan's currency, not in the currency of property 1.
+            if (class_exists('pjSubscriptionBilling') && pjSubscriptionBilling::$currencyOverride !== '')
+            {
+                $this->option_arr['o_currency'] = pjSubscriptionBilling::$currencyOverride;
+            }
             $this->set('option_arr', $this->option_arr);
             
             pjRegistry::getInstance()->set('options', $this->option_arr);
@@ -526,6 +531,12 @@ class pjBaseAppController extends pjController
                 }
                 $this->sendForbidden();
                 return false;
+            }
+
+            // Expired subscription in read-only mode: the company may look, not change (pjEntitlement).
+            if (class_exists('pjEntitlement'))
+            {
+                pjEntitlement::readOnlyGuard($this);
             }
         }
         

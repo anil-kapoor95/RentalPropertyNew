@@ -180,8 +180,8 @@ class pjAdminSubscriptions extends pjAdmin
 						{
 							$this->back('pjActionManage', 'subErrDuplicateRef', '&id=' . $hash);
 						}
-						$sub = pjEntitlement::subscription($cid);
-						$kind = ($sub && (int) $sub['plan_id'] === (int) $plan['id']) ? 'renewal' : 'new';
+						$st = pjEntitlement::state($cid);
+						$kind = $this->payKind($plan, $st['source'] === 'plan' ? $st['plan'] : false);
 						$plan['price'] = $amount; // the amount actually received
 						$txn = pjEntitlement::createTransaction($cid, $plan, $kind, 'manual', $uid);
 						$ok = $txn && pjEntitlement::applyPayment($txn['id'], $ref, $amount, $plan['currency'], $uid) === 'applied';
@@ -444,17 +444,9 @@ class pjAdminSubscriptions extends pjAdmin
 		if (!$this->requireAdmin()) { return; }
 		$this->set('all_methods', pjSubscriptionBilling::allMethods());
 		$this->set('active_methods', pjSubscriptionBilling::activeMethods());
-		$currency = pjSubscriptionBilling::gatewayCurrency();
-		$this->set('gateway_currency', $currency);
-		$other = array();
-		foreach (pjEntitlement::plans() as $p)
-		{
-			if ($p['price'] !== null && strtoupper((string) $p['currency']) !== $currency)
-			{
-				$other[] = $p['name'] . ' (' . $p['currency'] . ')';
-			}
-		}
-		$this->set('currency_mismatch', $other);
+		// every plan is charged and verified in its own currency (no dependency on a property's settings)
+		$this->set('gateway_currency', implode(', ', pjSubscriptionBilling::planCurrencies()));
+		$this->set('currency_mismatch', array());
 	}
 
 	public function pjActionGatewayOptions()
@@ -553,6 +545,12 @@ class pjAdminSubscriptions extends pjAdmin
 					{
 						$this->back('pjActionMyPlan', 'subErrPlan');
 					}
+					if (pjEntitlement::isFree($plan))
+					{
+						// a free plan needs no payment: now, or at the end of the paid period
+						$res = pjEntitlement::switchToFree($cid, $plan, $uid);
+						$this->back('pjActionMyPlan', $res === 'switched' ? 'subFreeSwitched' : ($res === 'scheduled' ? 'subDowngradeScheduled' : 'subErrPlan'));
+					}
 					$kind = $this->payKind($plan, $cur);
 					// the administrator's discount / coupon (Subscriptions > Coupons & Discounts), worked out here
 					$quote = pjEntitlement::isPurchasable($plan) ? pjSubscriptionPromos::quote($plan, $kind, $cid, $this->_post->toString('coupon_code')) : null;
@@ -583,6 +581,11 @@ class pjAdminSubscriptions extends pjAdmin
 					break;
 				case 'downgrade':
 					// takes effect at the end of the paid period (no refund, no charge now)
+					if ($plan && pjEntitlement::isFree($plan))
+					{
+						$res = pjEntitlement::switchToFree($cid, $plan, $uid);
+						$this->back('pjActionMyPlan', $res === 'switched' ? 'subFreeSwitched' : ($res === 'scheduled' ? 'subDowngradeScheduled' : 'subErrPlan'));
+					}
 					if ($plan && $sub && $cur && $state['entitled'] && (int) $plan['sort'] < (int) $cur['sort'])
 					{
 						pjEntitlement::scheduleChange($cid, $plan['id'], $uid);

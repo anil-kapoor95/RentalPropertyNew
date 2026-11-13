@@ -48,16 +48,12 @@ class pjAppController extends pjBaseAppController
 	}
 
 	/**
-	 * Coupons for a property: its company's plan includes coupons, or coupons were added to this property
-	 * (Company options > Coupons & Discounts; administrators may add them for any plan).
+	 * Coupons for a property: only when its company's plan includes coupons. Coupons that exist on a property
+	 * whose plan no longer includes them (downgrade, or added by an administrator) stay saved but do not apply.
 	 */
 	public static function couponsActive($calendar_id)
 	{
-		if (!class_exists('pjEntitlement') || pjEntitlement::allows(pjCompanyContext::companyOfCalendar($calendar_id), 'coupons'))
-		{
-			return true;
-		}
-		return (int) pjCalendarVoucherModel::factory()->where('t1.calendar_id', (int) $calendar_id)->findCount()->getData() > 0;
+		return !class_exists('pjEntitlement') || pjEntitlement::allows(pjCompanyContext::companyOfCalendar($calendar_id), 'coupons');
 	}
 
 	/**

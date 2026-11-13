@@ -48,7 +48,7 @@ $btn = function ($do, $plan_id, $label, $class = 'btn-primary', $confirm = false
 				</div>
 				<?php if ($sub && $s['entitled']) { ?>
 				<div class="m-t-md">
-					<?php if ((int) $sub['cancel_at_period_end'] === 1) { echo $btn('undo_cancel', 0, 'sub_btn_undo_cancel', 'btn-white'); } else { echo $btn('cancel', 0, 'sub_btn_cancel_end', 'btn-white', true); } ?>
+					<?php if ((int) $sub['cancel_at_period_end'] === 1) { echo $btn('undo_cancel', 0, 'sub_btn_undo_cancel', 'btn-white'); } elseif (!empty($sub['current_period_end'])) { echo $btn('cancel', 0, 'sub_btn_cancel_end', 'btn-white', true); } ?>
 					<?php if (!empty($sub['pending_plan_id'])) { echo $btn('undo_downgrade', 0, 'sub_btn_undo_downgrade', 'btn-white'); } ?>
 				</div>
 				<?php } ?>
@@ -58,7 +58,7 @@ $btn = function ($do, $plan_id, $label, $class = 'btn-primary', $confirm = false
 		<p class="m-b-xs"><strong><?php __('sub_included'); ?></strong></p>
 		<ul class="sub-features">
 			<?php foreach (pjEntitlement::$features as $f => $lbl) { $on = in_array($f, $s['features'], true); ?>
-			<li class="<?php echo $on ? 'on' : 'off'; ?>"><i class="fa <?php echo $on ? 'fa-check' : 'fa-lock'; ?>"></i> <?php __($lbl); ?></li>
+			<li class="<?php echo $on ? 'on' : 'off'; ?>"><i class="fa <?php echo $on ? 'fa-check' : 'fa-lock'; ?>"></i> <?php __($lbl); ?><?php if (pjEntitlement::isComingSoon($f)) { ?> <span class="label label-default"><?php __('sub_coming_soon'); ?></span><?php } ?></li>
 			<?php } ?>
 		</ul>
 	</div></div>
@@ -67,6 +67,7 @@ $btn = function ($do, $plan_id, $label, $class = 'btn-primary', $confirm = false
 	<?php foreach ($tpl['plans'] as $p) { if ((int) $p['is_public'] !== 1) { continue; }
 		$is_cur = $cur && (int) $cur['id'] === (int) $p['id'];
 		$buy = pjEntitlement::isPurchasable($p);
+		$free = pjEntitlement::isFree($p);
 		?>
 		<div class="col-md-4">
 			<div class="ibox sub-plan<?php echo $is_cur ? ' current' : ''; ?>"><div class="ibox-content">
@@ -86,13 +87,14 @@ $btn = function ($do, $plan_id, $label, $class = 'btn-primary', $confirm = false
 					if ($buy) { echo $btn('pay', $p['id'], 'sub_btn_renew', 'btn-primary'); }
 				} elseif ($is_cur || !$cur || !$s['entitled']) {
 					if ($buy) { echo $btn('pay', $p['id'], 'sub_btn_subscribe', 'btn-primary'); }
+					if ($free) { echo $btn('downgrade', $p['id'], 'sub_btn_choose_free', 'btn-primary', true); }
 					if ($tpl['self_trial'] && (int) $p['trial_days'] > 0 && !($sub && (int) $sub['used_trial'] === 1)) { echo $btn('trial', $p['id'], 'sub_btn_trial', 'btn-white'); }
 				} elseif ((int) $p['sort'] > (int) $cur['sort']) {
 					if ($buy) { echo $btn('pay', $p['id'], 'sub_btn_upgrade', 'btn-primary', true); }
 				} else {
 					echo $btn('downgrade', $p['id'], 'sub_btn_downgrade', 'btn-white', true);
 				}
-				if (!$buy && !$is_cur) { ?><p class="small text-muted m-t-xs"><?php __('sub_contact_admin'); ?></p><?php }
+				if (!$buy && !$free && !$is_cur) { ?><p class="small text-muted m-t-xs"><?php __('sub_contact_admin'); ?></p><?php }
 				?>
 				</div>
 			</div></div>

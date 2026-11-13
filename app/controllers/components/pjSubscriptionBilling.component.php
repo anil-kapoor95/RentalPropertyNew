@@ -21,6 +21,12 @@ class pjSubscriptionBilling
 	/** foreign_id of the platform's own gateway settings (never a property id). */
 	const FOREIGN_ID = 999999999;
 
+	/**
+	 * Currency the gateway plugin verifies a subscription payment in (set only while a subscription
+	 * payment is being confirmed; read by pjBaseAppController when the plugin loads its options).
+	 */
+	public static $currencyOverride = '';
+
 	public static function hasPayments()
 	{
 		return class_exists('pjPayments') && pjObject::getPlugin('pjPayments') !== NULL;
@@ -95,13 +101,20 @@ class pjSubscriptionBilling
 	}
 
 	/**
-	 * Currency the online gateway plugins check a payment against: the currency of the main
-	 * settings (options of foreign_id 1, as loaded when the gateway calls back).
+	 * Currencies subscription payments are taken in: each plan is charged and verified in its own currency
+	 * (see $currencyOverride), so this is the list of the priced plans' currencies.
 	 */
-	public static function gatewayCurrency()
+	public static function planCurrencies()
 	{
-		$o = array_merge(pjBaseOptionModel::factory()->getPairs(1), pjOptionModel::factory()->getPairs(1));
-		return isset($o['o_currency']) ? strtoupper((string) $o['o_currency']) : '';
+		$out = array();
+		foreach (pjEntitlement::plans() as $p)
+		{
+			if ($p['price'] !== null && $p['price'] > 0)
+			{
+				$out[strtoupper((string) $p['currency'])] = true;
+			}
+		}
+		return array_keys($out);
 	}
 
 	public static function returnUrl($txn)
@@ -131,7 +144,7 @@ class pjSubscriptionBilling
 			return array('error' => 'subErrMethod');
 		}
 		$online = self::isOnline($method);
-		if ($online && strtoupper((string) $plan['currency']) !== self::gatewayCurrency())
+		if ($online && !preg_match('/^[A-Z]{3}$/', strtoupper((string) $plan['currency'])))
 		{
 			return array('error' => 'subErrCurrency');
 		}
@@ -212,6 +225,8 @@ class pjSubscriptionBilling
 		{
 			return $back; // other gateway, or already handled (a payment is never applied twice)
 		}
+		// the plugin verifies amount AND currency with the provider: in the currency of this transaction
+		self::$currencyOverride = strtoupper((string) $txn['currency']);
 		$response = $controller->requestAction(array('controller' => $pjPlugin, 'action' => 'pjActionConfirm', 'params' => array(
 			'request' => $request,
 			'payment_method' => $method,
@@ -223,6 +238,7 @@ class pjSubscriptionBilling
 			'cancel_hash' => self::cancelHash($txn),
 			'key' => md5(@$controller->option_arr['private_key'] . PJ_SALT),
 		)), array('return'));
+		self::$currencyOverride = '';
 		$status = is_array($response) && isset($response['status']) ? $response['status'] : 'FAIL';
 		if ($status === 'OK')
 		{
