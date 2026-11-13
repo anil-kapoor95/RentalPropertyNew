@@ -184,6 +184,8 @@ class pjAdminOptions extends pjAdmin
 	    // Platform notifications of the administrator (company_id 0), used for every company.
 	    // "Sign-up (new hosts)" tab: welcome email to new hosts
 	    $this->set('show_signup', $this->isAdmin());
+	    // "Subscriptions (companies)" tab: reminder e-mails (pjSubscriptionMail), platform notifications too
+	    $this->set('show_subscription', $this->isAdmin() && class_exists('pjSubscriptionMail'));
 	    $this->setLocalesData();
 	    
 	    $this->appendCss('awesome-bootstrap-checkbox.css', PJ_THIRD_PARTY_PATH . 'awesome_bootstrap_checkbox/');
@@ -220,6 +222,14 @@ class pjAdminOptions extends pjAdmin
 	        }
 	        $rows = pjSignupMail::rows();
 	        $arr = isset($rows['signup_host']) ? array($rows['signup_host']) : array();
+	    } elseif (class_exists('pjSubscriptionMail') && $this->query['recipient'] === pjSubscriptionMail::RECIPIENT) {
+	        // Subscription reminder e-mails: platform notifications, Super Admin only
+	        if (!$this->isAdmin())
+	        {
+	            $this->sendForbidden();
+	            return;
+	        }
+	        $arr = array_values(pjSubscriptionMail::rows());
 	    } else {
 	    // the administrator's messages include the "new sign-up" email (signup_admin)
 	    $arr = pjNotificationModel::factory()
@@ -263,6 +273,9 @@ class pjAdminOptions extends pjAdmin
 	    {
 	        $rows = $this->isAdmin() ? pjSignupMail::rows() : array();
 	        $arr = $this->_get->toString('variant') === 'signup_host' && isset($rows['signup_host']) ? $rows['signup_host'] : false;
+	    } elseif (class_exists('pjSubscriptionMail') && $this->_get->toString('recipient') === pjSubscriptionMail::RECIPIENT) {
+	        $rows = $this->isAdmin() ? pjSubscriptionMail::rows() : array();
+	        $arr = isset($rows[$this->_get->toString('variant')]) ? $rows[$this->_get->toString('variant')] : false;
 	    } else {
 	    $arr = pjNotificationModel::factory()
 		    ->where('t1.recipient', $this->_get->toString('recipient'))

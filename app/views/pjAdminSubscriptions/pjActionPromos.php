@@ -8,7 +8,7 @@ $url = $_SERVER['PHP_SELF'] . '?controller=pjAdminSubscriptions&amp;action=';
 $promoValue = function ($p) {
 	return $p['type'] === 'percent'
 		? pjSanitize::html(rtrim(rtrim($p['value'], '0'), '.')) . '%'
-		: pjSanitize::html(number_format((float) $p['value'], 2) . ' ' . $p['currency']);
+		: pjSanitize::html(pjMoney::format($p['value'], $p['currency']));
 };
 $segments = array(
 	'discount' => array('icon' => 'fa-percent', 'label' => 'sub_promo_tab_discounts'),

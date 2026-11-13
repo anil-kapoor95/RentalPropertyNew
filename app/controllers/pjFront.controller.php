@@ -1615,8 +1615,11 @@ class pjFront extends pjAppController
 			$pjCalendarModel = pjCalendarModel::factory();
 			
 			$user =pjAuthUserModel::factory()->find($user_id)->getData();
-			if($user['role_id'] != 1)
+			if ((int) $user['role_id'] === 1)
 			{
+				// Super Admin: no company data
+				$pjCalendarModel->where('t1.id', 0);
+			} elseif ((int) $user['role_id'] !== 6) {
 				$pjCalendarModel->where('t1.user_id', $user_id);
 			}			
 			if(isset($get['calendar_id']) && !empty($get['calendar_id']))

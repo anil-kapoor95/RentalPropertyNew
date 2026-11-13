@@ -67,8 +67,125 @@ class pjAdminVouchers extends pjAdmin
 		return trim((string) $code) !== '' && (int) $m->findCount()->getData() === 0;
 	}
 
+	/* ------------------------------------------------------------------
+	 * Page form (same layout as the Super Admin's Coupons & Discounts). The Ajax popup below stays for
+	 * older callers.
+	 * ------------------------------------------------------------------ */
+
+	/** Coupon row from the page form, or an error label key. */
+	private function couponFromPost()
+	{
+		$apply_on = $this->_post->toString('apply_on');
+		$condition = $this->_post->toString('condition');
+		$data = array(
+			'code' => trim((string) $this->_post->toString('code')),
+			'discount' => (float) str_replace(',', '.', (string) $this->_post->toString('discount')),
+			'type' => $this->_post->toString('type') === 'amount' ? 'amount' : 'percent',
+			'condition' => in_array($condition, array('period', 'made', 'both'), true) ? $condition : 'period',
+			'apply_on' => in_array($apply_on, array('room', 'extra', 'both'), true) ? $apply_on : 'room',
+			'used_count' => max(1, $this->_post->toInt('used_count')),
+			'date_from' => $this->cdDate($this->_post->toString('date_from')),
+			'date_to' => $this->cdDate($this->_post->toString('date_to')),
+		);
+		if ($data['code'] === '' || strlen($data['code']) > 100)
+		{
+			return 'cdErrCode';
+		}
+		if ($data['discount'] <= 0 || ($data['type'] === 'percent' && $data['discount'] > 100)
+			|| $data['date_from'] === '' || $data['date_to'] === '' || $data['date_from'] > $data['date_to']
+			|| count($this->filterCompanyCalendarIds($this->_post->toArray('calendar_id'))) === 0)
+		{
+			return 'cdErrFields';
+		}
+		$data['discount'] = number_format($data['discount'], 2, '.', '');
+		return $data;
+	}
+
+	/** Links of a coupon to the properties this user manages (links to other owners' properties stay). */
+	private function saveCouponCalendars($id, $ids)
+	{
+		$m = pjCalendarVoucherModel::factory();
+		$managed = $this->getCompanyCalendarIds();
+		if (!empty($managed))
+		{
+			$m->where('voucher_id', (int) $id)->whereIn('calendar_id', $managed)->eraseAll();
+		}
+		$ids = $this->filterCompanyCalendarIds($ids);
+		if (!empty($ids))
+		{
+			$m->reset();
+			foreach ($ids as $calendar_id)
+			{
+				$m->addBatchRow(array((int) $id, (int) $calendar_id));
+			}
+			$m->setBatchFields(array('voucher_id', 'calendar_id'))->insertBatch();
+		}
+	}
+
+	/** Add / edit a coupon on its own page (GET form, POST save or delete). */
+	private function couponPage($id)
+	{
+		$this->checkLogin();
+		$id = (int) $id;
+		if ($id > 0 && !$this->isCompanyRecord(pjVoucherModel::factory(), $id))
+		{
+			$this->denyCompanyAccess();
+		}
+		$back = '&id=' . $id;
+		if (self::isPost())
+		{
+			if ($this->_post->toString('do') === 'delete')
+			{
+				if ($id <= 0 || !pjAuth::factory('pjAdminVouchers', 'pjActionDeleteVoucher')->hasAccess())
+				{
+					$this->sendForbidden();
+					return;
+				}
+				pjVoucherModel::factory()->set('id', $id)->erase();
+				pjCalendarVoucherModel::factory()->where('voucher_id', $id)->eraseAll();
+				$this->cdBack('pjAdminVouchers', 'pjActionIndex', 'cdDeleted');
+			}
+			$data = $this->couponFromPost();
+			$action = $id > 0 ? 'pjActionUpdate' : 'pjActionCreate';
+			if (!is_array($data))
+			{
+				$this->cdBack('pjAdminVouchers', $action, $data, $back);
+			}
+			if (!$this->isCodeFree($data['code'], $id))
+			{
+				$this->cdBack('pjAdminVouchers', $action, 'cdErrCode', $back);
+			}
+			$data['company_id'] = $this->getCompanyId();
+			if ($id > 0)
+			{
+				pjVoucherModel::factory()->where('id', $id)->limit(1)->modifyAll($data);
+			} else {
+				$id = (int) pjVoucherModel::factory($data)->insert()->getInsertId();
+				if ($id <= 0)
+				{
+					$this->cdBack('pjAdminVouchers', $action, 'cdErrSave');
+				}
+			}
+			$this->saveCouponCalendars($id, $this->_post->toArray('calendar_id'));
+			$this->cdBack('pjAdminVouchers', 'pjActionIndex', 'cdSaved');
+		}
+		$this->setTemplate('pjAdminVouchers', 'pjActionForm');
+		$this->set('arr', $id > 0 ? pjVoucherModel::factory()->find($id)->getData() : false);
+		$this->set('calendar_names', $this->cdCalendarNames());
+		$this->set('calendar_id_arr', $id > 0 ? array_map('intval', pjCalendarVoucherModel::factory()->where('voucher_id', $id)->findAll()->getDataPair(null, 'calendar_id')) : array());
+		$this->set('has_delete', pjAuth::factory('pjAdminVouchers', 'pjActionDeleteVoucher')->hasAccess());
+		$this->set('cd', $this->cdPageData('coupon'));
+		$this->appendCss('subscriptions.css?v=' . @filemtime(PJ_INSTALL_PATH . 'app/web/css/subscriptions.css'));
+		$this->appendJs('pjAdminCoupons.js?v=' . @filemtime(PJ_INSTALL_PATH . 'app/web/js/pjAdminCoupons.js'));
+	}
+
 	public function pjActionCreate()
 	{
+		if (!$this->isXHR())
+		{
+			$this->couponPage(0);
+			return;
+		}
 		$this->setAjax(true);
 		if ($this->isXHR()) {
 			if ($this->_post->check('voucher_create'))
@@ -257,14 +374,34 @@ class pjAdminVouchers extends pjAdmin
 	    $this->set('has_export', pjAuth::factory('pjAdminVouchers', 'pjActionExportVoucher')->hasAccess());
 	    $this->set('has_delete', pjAuth::factory('pjAdminVouchers', 'pjActionDeleteVoucher')->hasAccess());
 	    $this->set('has_delete_bulk', pjAuth::factory('pjAdminVouchers', 'pjActionDeleteVoucherBulk')->hasAccess());
-	    
-	    $this->appendCss('awesome-bootstrap-checkbox.css', PJ_THIRD_PARTY_PATH . 'awesome_bootstrap_checkbox/');
-		$this->appendCss('datepicker3.css', PJ_THIRD_PARTY_PATH . 'bootstrap_datepicker/');
-		$this->appendJs('bootstrap-datepicker.js', PJ_THIRD_PARTY_PATH . 'bootstrap_datepicker/');
-	    $this->appendCss('css/select2.min.css', PJ_THIRD_PARTY_PATH . 'select2/');
-        $this->appendJs('js/select2.full.min.js', PJ_THIRD_PARTY_PATH . 'select2/');
-		$this->appendJs('jquery.datagrid.js', PJ_FRAMEWORK_LIBS_PATH . 'pj/js/');
-		$this->appendJs('pjAdminVouchers.js');
+
+	    // the list (same layout as the Super Admin's Coupons & Discounts)
+	    $cid = $this->getCompanyId();
+	    $rows = pjVoucherModel::factory()->where('t1.company_id', $cid)->orderBy('t1.date_to DESC, t1.code ASC')->findAll()->getData();
+	    $links = array();
+	    if (!empty($rows))
+	    {
+	    	foreach (pjCalendarVoucherModel::factory()->whereIn('voucher_id', array_map(function ($r) { return (int) $r['id']; }, $rows))->findAll()->getData() as $l)
+	    	{
+	    		$links[(int) $l['voucher_id']][] = (int) $l['calendar_id'];
+	    	}
+	    }
+	    // times each code was used: confirmed bookings of this company's properties (the same count the booking check uses)
+	    $uses = pjReservationModel::factory()->select('t1.promo_code, COUNT(*) AS `cnt`')->where('t1.status', 'Confirmed')->where("t1.promo_code <> ''")
+	    	->where(sprintf("t1.calendar_id IN (SELECT `id` FROM `%s` WHERE `company_id` = %u)", pjCalendarModel::factory()->getTable(), $cid))
+	    	->groupBy('t1.promo_code')->findAll()->getDataPair('promo_code', 'cnt');
+	    $uses_ci = array();
+	    foreach ($uses as $code => $cnt)
+	    {
+	    	$uses_ci[strtolower((string) $code)] = (isset($uses_ci[strtolower((string) $code)]) ? $uses_ci[strtolower((string) $code)] : 0) + (int) $cnt;
+	    }
+	    $this->set('rows', $rows);
+	    $this->set('links', $links);
+	    $this->set('uses', $uses_ci);
+	    $this->set('calendar_names', $this->cdCalendarNames());
+	    $this->set('cd', $this->cdPageData('coupon'));
+	    $this->appendCss('subscriptions.css?v=' . @filemtime(PJ_INSTALL_PATH . 'app/web/css/subscriptions.css'));
+	    $this->appendJs('pjAdminCoupons.js?v=' . @filemtime(PJ_INSTALL_PATH . 'app/web/js/pjAdminCoupons.js'));
 	}
 	
 	public function pjActionSaveVoucher()
@@ -318,6 +455,11 @@ class pjAdminVouchers extends pjAdmin
 	
 	public function pjActionUpdate()
 	{
+		if (!$this->isXHR())
+		{
+			$this->couponPage(self::isPost() ? $this->_post->toInt('id') : $this->_get->toInt('id'));
+			return;
+		}
 		$this->setAjax(true);
 		if ($this->isXHR()) {
 			if ($this->_post->check('voucher_update'))

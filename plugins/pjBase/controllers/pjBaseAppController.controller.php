@@ -38,6 +38,18 @@ class pjBaseAppController extends pjController
         return isset($store[$const]) ? $store[$const] : NULL;
     }
     
+    /** Super Admin: platform features only (role 1, see pjCompanyContext). */
+    public function isSuperAdmin()
+    {
+        return (int) $this->getRoleId() === 1;
+    }
+
+    /** Companies Admin: every company and its data, with the company switcher (role 6). */
+    public function isCompaniesAdmin()
+    {
+        return (int) $this->getRoleId() === 6;
+    }
+
     public static function isPost()
     {
         if (($method = getenv('REQUEST_METHOD')) === false)
@@ -521,9 +533,10 @@ class pjBaseAppController extends pjController
                 return false;
             }
 
-            // Platform pages (System Options, Options, Display, Install...) are for administrators only.
-            if ($this->isLoged() && (int) $this->getRoleId() !== 1 && class_exists('pjCompanyContext')
-                && pjCompanyContext::isPlatformPage($this->_get->toString('controller'), $this->_get->toString('action')))
+            // Role separation (pjCompanyContext::pageScope): platform pages are for the Super Admin only, company
+            // pages never for the Super Admin, company subscriptions / display / install for the Companies Admin.
+            if ($this->isLoged() && class_exists('pjCompanyContext')
+                && !pjCompanyContext::roleMayOpen($this->getRoleId(), pjCompanyContext::pageScope($this->_get->toString('controller'), $this->_get->toString('action'))))
             {
                 if ($this->isXHR())
                 {

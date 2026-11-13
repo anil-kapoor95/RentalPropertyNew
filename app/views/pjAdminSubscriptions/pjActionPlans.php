@@ -26,7 +26,10 @@ $price = function ($p) use ($subInterval, $t) {
 	{
 		return '<span class="sub-pc-price">' . $t('sub_plan_free') . '</span>';
 	}
-	return '<span class="sub-pc-price">' . pjSanitize::html(number_format((float) $p['price'], 2)) . ' <small>' . pjSanitize::html($p['currency']) . '</small></span>'
+	// big number, small currency symbol on the side the settings put it (pjMoney)
+	list($sign, $number, $place) = pjMoney::parts($p['price'], $p['currency']);
+	$sign_html = '<small>' . pjSanitize::html($sign) . '</small>';
+	return '<span class="sub-pc-price">' . ($place === 'front' ? $sign_html . ' ' . pjSanitize::html($number) : pjSanitize::html($number) . ' ' . $sign_html) . '</span>'
 		. '<span class="sub-pc-per">/ ' . $subInterval($p) . '</span>';
 };
 ?>

@@ -132,18 +132,18 @@ class pjAdmin extends pjAppController
 			// checked inside the action (admin: any company; company user: his own)
 			'pjAdminCompanies::pjActionDeleteLogo' => 'pjAdmin::pjActionIndex',
 			'pjAdminCompanies::pjActionCheckPassword' => 'pjAdmin::pjActionIndex',
-			// Subscriptions: the company return page belongs to "My plan"; the admin pages
-			// check the Administrator role in the controller.
+			// Subscriptions: the company return page belongs to "My plan". Company subscriptions (Index, Manage,
+			// Billing) are the Companies Admin's, plans / plan coupons / gateways the Super Admin's
+			// (pjCompanyContext::pageScope; the roles are checked in the controller as well).
 			'pjAdminSubscriptions::pjActionCheckoutReturn' => 'pjAdminSubscriptions::pjActionMyPlan',
 			'pjAdminSubscriptions::pjActionPay' => 'pjAdminSubscriptions::pjActionMyPlan',
-			'pjAdminSubscriptions::pjActionGateways' => 'pjAdminSubscriptions::pjActionIndex',
-			'pjAdminSubscriptions::pjActionGatewayOptions' => 'pjAdminSubscriptions::pjActionIndex',
 			'pjAdminSubscriptions::pjActionManage' => 'pjAdminSubscriptions::pjActionIndex',
-			'pjAdminSubscriptions::pjActionPlans' => 'pjAdminSubscriptions::pjActionIndex',
-			'pjAdminSubscriptions::pjActionPlan' => 'pjAdminSubscriptions::pjActionIndex',
 			'pjAdminSubscriptions::pjActionBilling' => 'pjAdminSubscriptions::pjActionIndex',
-			'pjAdminSubscriptions::pjActionPromos' => 'pjAdminSubscriptions::pjActionIndex',
-			'pjAdminSubscriptions::pjActionPromo' => 'pjAdminSubscriptions::pjActionIndex',
+			'pjAdminSubscriptions::pjActionGateways' => 'pjAdminSubscriptions::pjActionPlans',
+			'pjAdminSubscriptions::pjActionGatewayOptions' => 'pjAdminSubscriptions::pjActionPlans',
+			'pjAdminSubscriptions::pjActionPlan' => 'pjAdminSubscriptions::pjActionPlans',
+			'pjAdminSubscriptions::pjActionPromos' => 'pjAdminSubscriptions::pjActionPlans',
+			'pjAdminSubscriptions::pjActionPromo' => 'pjAdminSubscriptions::pjActionPlans',
 			'pjAdminSubscriptions::pjActionCheckPromo' => 'pjAdminSubscriptions::pjActionMyPlan',
 
 			'pjAdminVouchers::pjActionGetVoucher' => 'pjAdminVouchers::pjActionIndex',
@@ -285,6 +285,34 @@ class pjAdmin extends pjAppController
 	    exit;
 	}
 
+	/** Dashboard of the Super Admin: how many companies, subscriptions per plan / status and users per role. */
+	private function platformDashboard()
+	{
+		$this->setTemplate('pjAdmin', 'pjActionPlatform');
+		// one period for every figure of the page (presets end today; custom: from..to, validated)
+		list($from, $to, $key, $days, $range_error) = pjPlatformDashboard::range($this->_get->toString('range'), $this->_get->toString('from'), $this->_get->toString('to'));
+		list($prev_from, $prev_to) = pjPlatformDashboard::previous($from, $to);
+		$this->set('range', array('from' => $from, 'to' => $to, 'key' => $key, 'days' => $days, 'error' => $range_error,
+			'prev_from' => $prev_from, 'prev_to' => $prev_to,
+			'requested_from' => $this->_get->toString('from'), 'requested_to' => $this->_get->toString('to')));
+		$user = pjAuthUserModel::factory()->find($this->getUserId())->getData();
+		$this->set('admin_name', !empty($user['name']) ? $user['name'] : (!empty($user['email']) ? $user['email'] : ''));
+		$this->set('stats', pjPlatformDashboard::stats($from, $to));
+		$this->set('overview', pjPlatformDashboard::overview($to));
+		$this->set('trends', pjPlatformDashboard::trends($from, $to));
+		$this->set('activity', pjPlatformDashboard::activity($from, $to, 12));
+		$this->set('billing', pjPlatformDashboard::billing($from, $to, 4));
+		// billing transactions of the period; the section is left out when the platform has no billing records at all
+		$this->set('transactions', pjPlatformDashboard::transactions(0, 5, $from, $to));
+		$this->set('has_transactions', class_exists('pjEntitlement') && pjEntitlement::isReady()
+			&& (int) pjBillingTransactionModel::factory()->findCount()->getData() > 0);
+		$health = pjPlatformDashboard::health();
+		$this->set('health', $health);
+		$this->set('overall', pjPlatformDashboard::overall($health));
+		$this->appendCss('platform-dashboard.css?v=' . @filemtime(PJ_INSTALL_PATH . 'app/web/css/platform-dashboard.css'));
+		$this->appendJs('platform-dashboard.js?v=' . @filemtime(PJ_INSTALL_PATH . 'app/web/js/platform-dashboard.js'));
+	}
+
 	public function pjActionIndex()
 	{
 		$this->checkLogin();
@@ -293,7 +321,13 @@ class pjAdmin extends pjAppController
 	        $this->sendForbidden();
 	        return;
 	    }
-	
+			// Super Admin: platform totals only (counts, no company names or records)
+		if ($this->isSuperAdmin())
+		{
+			$this->platformDashboard();
+			return;
+		}
+
 		$pjCalendarModel = pjCalendarModel::factory();
 		$pjReservationModel = pjReservationModel::factory();
 		$pjAuthUserModel = pjAuthUserModel::factory();
@@ -356,6 +390,37 @@ class pjAdmin extends pjAppController
 		}
 		$latest_reservation_arr = $pjReservationModel->findAll()->getData();		
 		$this->set('latest_reservation_arr', $latest_reservation_arr);
+
+		// bookings of last month up to the same day (change badge of "this month")
+		$prev_first = date('Y-m-01', strtotime(date('Y-m-01') . ' -1 month'));
+		$prev_last = date('Y-m-d', min(strtotime(date('Y-m-t', strtotime($prev_first))), strtotime($prev_first . ' +' . ((int) date('j') - 1) . ' days')));
+		$pjReservationModel->reset()
+			->join('pjCalendar', 't2.id=t1.calendar_id', 'left')
+			->where('DATE(t1.created) BETWEEN "' . $prev_first . '" AND "' . $prev_last . '"')
+			->whereIn('t1.status', array('Confirmed', 'Pending'))
+			->where('t2.company_id', $this->getCompanyId());
+		if ($this->isRestrictedUser())
+		{
+			$pjReservationModel->where('t2.user_id', $this->getUserId());
+		}
+		$this->set('cnt_bookings_prev_month', (int) $pjReservationModel->findCount()->getData());
+
+		// header and billing overview (the plan of the company: the company login and the Companies Admin only)
+		$me = pjAuthUserModel::factory()->find($this->getUserId())->getData();
+		$company = $this->getCurrentCompany();
+		$this->set('dash_user_name', !empty($me['name']) ? $me['name'] : (!empty($me['email']) ? $me['email'] : ''));
+		$this->set('dash_company_name', !empty($company['name']) ? (string) $company['name'] : '');
+		$show_billing = in_array((int) $this->getRoleId(), array(4, 6), true) && $this->getCompanyId() > 0;
+		$billing = $show_billing ? pjPlatformDashboard::companyBilling($this->getCompanyId()) : null;
+		if ($billing !== null && class_exists('pjCompanyContext') && pjCompanyContext::isAdminWorkspace($this->getCompanyId()))
+		{
+			$billing['source'] = 'admin';
+		}
+		$this->set('billing', $billing);
+		// the company's latest billing transactions: same people as the billing overview
+		$this->set('transactions', $billing !== null && $billing['source'] !== 'admin' ? pjPlatformDashboard::transactions($this->getCompanyId(), 5) : array());
+		$this->set('dash_can_manage_plan', (int) $this->getRoleId() === 4 && pjAuth::factory('pjAdminSubscriptions', 'pjActionMyPlan')->hasAccess());
+		$this->appendCss('platform-dashboard.css?v=' . @filemtime(PJ_INSTALL_PATH . 'app/web/css/platform-dashboard.css'));
 		
 		$pjReservationModel->reset()
 			->select('t1.*, IF(t1.price_based_on="nights", DATEDIFF(t1.date_to, t1.date_from), DATEDIFF(t1.date_to, t1.date_from) + 1) AS nights, ' . pjAppController::calendarNameSql('t3', 't1.calendar_id') . ' AS `calendar_name`')

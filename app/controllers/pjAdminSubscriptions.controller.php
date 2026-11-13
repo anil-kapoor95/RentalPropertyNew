@@ -24,10 +24,16 @@ class pjAdminSubscriptions extends pjAdmin
 	 * Helpers
 	 * ------------------------------------------------------------------ */
 
+	/**
+	 * Company subscriptions and billing history (Index, Manage, Billing), plans, plan coupons / discounts and the
+	 * payment gateways are platform administration: Super Admin (pjCompanyContext::pageScope 'platform').
+	 */
 	private function requireAdmin()
 	{
 		$this->checkLogin();
-		if (!$this->isAdmin() || !pjEntitlement::isReady())
+		$scope = pjCompanyContext::pageScope('pjAdminSubscriptions', $this->_get->toString('action'));
+		$ok = $scope === 'admin' ? $this->isCompaniesAdmin() : ($scope === 'platform' && $this->isSuperAdmin());
+		if (!$ok || !pjEntitlement::isReady())
 		{
 			$this->sendForbidden();
 			return false;
@@ -646,7 +652,7 @@ class pjAdminSubscriptions extends pjAdmin
 		}
 		$state = pjEntitlement::state($cid);
 		$q = pjSubscriptionPromos::quote($plan, $this->payKind($plan, $state['plan']), $cid, $this->_get->toString('code'));
-		$money = function ($v) use ($plan) { return number_format((float) $v, 2) . ' ' . $plan['currency']; };
+		$money = function ($v) use ($plan) { return pjMoney::format($v, $plan['currency']); };
 		self::jsonResponse(array(
 			'status' => $q['error'] === '' ? 'OK' : 'ERR',
 			'text' => $q['error'] !== '' ? __($q['error'], true) : ($q['coupon_code'] !== '' ? __('sub_coupon_ok', true) : ''),

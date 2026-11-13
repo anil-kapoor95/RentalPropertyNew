@@ -16,6 +16,9 @@
         </div><!-- /.row -->
 
         <p class="m-b-none"><i class="fa fa-info-circle"></i> <?php __('plugin_base_infobox_user_permissions_desc');?></p>
+        <?php if (!empty($tpl['is_restricted'])) { ?>
+        <p class="m-b-none m-t-xs"><i class="fa fa-lock"></i> <?php __('plugin_base_user_perm_own_only'); ?></p>
+        <?php } ?>
     </div><!-- /.col-md-12 -->
 </div>
 

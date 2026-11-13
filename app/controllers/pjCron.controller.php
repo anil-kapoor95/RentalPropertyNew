@@ -55,7 +55,17 @@ class pjCron extends pjAppController
 		{
 			return 'Runs once for the whole system.';
 		}
-		return class_exists('pjEntitlement') ? pjEntitlement::runTransitions() : 'Subscriptions are not installed.';
+		if (!class_exists('pjEntitlement'))
+		{
+			return 'Subscriptions are not installed.';
+		}
+		// status changes first, then the reminder e-mails (trial ending, renewal due, expired)
+		$report = pjEntitlement::runTransitions();
+		if (class_exists('pjSubscriptionMail'))
+		{
+			$report .= ' ' . pjSubscriptionMail::run();
+		}
+		return $report;
 	}
 
 	public function pjActionSyncIcalUrls()

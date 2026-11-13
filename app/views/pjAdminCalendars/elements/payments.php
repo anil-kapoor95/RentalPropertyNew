@@ -40,7 +40,7 @@
 	            }
 	            // Subscription plan: only the payment methods the company may use can be added (administrators: all)
 	            $locked_methods = 0;
-	            if (!$controller->isAdmin() && class_exists('pjEntitlement'))
+	            if (!$controller->isCompaniesAdmin() && class_exists('pjEntitlement'))
 	            {
 	                foreach (array_keys($other_methods) as $m)
 	                {

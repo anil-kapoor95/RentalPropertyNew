@@ -12,7 +12,8 @@ $subMoney = function ($amount, $currency) {
 	{
 		return '<span class="text-muted">' . __('sub_price_not_set', true) . '</span>';
 	}
-	return pjSanitize::html(number_format((float) $amount, 2) . ' ' . $currency);
+	// currency symbol, decimals and separators from the saved settings (pjMoney)
+	return pjSanitize::html(pjMoney::format($amount, $currency));
 };
 $subDate = function ($dt) use ($tpl) {
 	if (empty($dt)) { return '&mdash;'; }

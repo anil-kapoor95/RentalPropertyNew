@@ -64,16 +64,18 @@ $hasAccessScriptFeatures          = pjAuth::factory('pjAdminFeatures', 'pjAction
 // Subscriptions: the plan of the active company decides what is shown (and allowed, see pjEntitlement).
 $pjPlanCid = (int) pjCompanyContext::activeId($controller->getRoleId(), $controller->getUserId());
 $pjPlanOn = function ($feature) use ($pjPlanCid) { return !class_exists('pjEntitlement') || pjEntitlement::allows($pjPlanCid, $feature); };
-$hasAccessScriptSubscriptions     = $controller->isAdmin() && class_exists('pjEntitlement') && pjEntitlement::isReady();
+// Company subscriptions + billing history, plans, plan coupons and gateways: Super Admin.
+$hasAccessScriptSubscriptions     = $controller->isSuperAdmin() && class_exists('pjEntitlement') && pjEntitlement::isReady();
+$hasAccessScriptPlans             = $controller->isSuperAdmin() && class_exists('pjEntitlement') && pjEntitlement::isReady();
 $hasAccessScriptMyPlan            = (int) $controller->getRoleId() === 4 && class_exists('pjEntitlement') && pjEntitlement::isReady() && pjAuth::factory('pjAdminSubscriptions', 'pjActionMyPlan')->hasAccess();
 $isScriptSubPayments              = $controller->_get->toString('controller') == 'pjAdminSubscriptions' && in_array($controller->_get->toString('action'), array('pjActionGateways', 'pjActionGatewayOptions'), true);
 $isScriptSubscriptions            = $controller->_get->toString('controller') == 'pjAdminSubscriptions' && !$isScriptSubPayments;
-$hasAccessScriptVouchers          = pjAuth::factory('pjAdminVouchers', 'pjActionIndex')->hasAccess() && ($controller->isAdmin() || $pjPlanOn('coupons'));
+$hasAccessScriptVouchers          = pjAuth::factory('pjAdminVouchers', 'pjActionIndex')->hasAccess() && ($controller->isCompaniesAdmin() || $pjPlanOn('coupons'));
 
 // Permissions - Discounts
-$hasAccessScriptDiscounts          = pjAuth::factory('pjAdminDiscounts', 'pjActionIndex')->hasAccess() && ($controller->isAdmin() || $pjPlanOn('coupons'));
+$hasAccessScriptDiscounts          = pjAuth::factory('pjAdminDiscounts', 'pjActionIndex')->hasAccess() && ($controller->isCompaniesAdmin() || $pjPlanOn('coupons'));
 
-$hasDemoData = pjCalendarModel::factory()->reset()->where('t1.uuid LIKE', 'rpbcd%')->where('t1.company_id', pjCompanyContext::activeId($controller->getRoleId(), $controller->getUserId()))->findCount()->getData() > 0;
+$hasDemoData = !$controller->isSuperAdmin() && pjCalendarModel::factory()->reset()->where('t1.uuid LIKE', 'rpbcd%')->where('t1.company_id', pjCompanyContext::activeId($controller->getRoleId(), $controller->getUserId()))->findCount()->getData() > 0;
 
 ?>
 
@@ -87,15 +89,20 @@ $pjcsToken = pjAppController::getCsrfToken();
 ?>
 <li class="pjcs-workspace">
     <div class="pjcs-card">
+        <?php if ($pjcsRole === 1): ?>
+            <span class="pjcs-eyebrow"><?php __('lblSuperAdminArea'); ?></span>
+            <span class="pjcs-name"><?php __('lblPlatformSettings'); ?></span>
+        <?php else: ?>
         <span class="pjcs-eyebrow"><?php __('lblActiveWorkspace'); ?></span>
         <?php if ($pjcsActive): ?>
             <span class="pjcs-name" title="<?php echo pjSanitize::html($pjcsActive['name']); ?>"><?php echo pjSanitize::html($pjcsActive['name']); ?></span>
         <?php else: ?>
             <span class="pjcs-name pjcs-empty"><?php __('lblNoCompanyYet'); ?></span>
         <?php endif; ?>
+        <?php endif; ?>
     </div>
 </li>
-<?php if (class_exists('pjEntitlement') && (int) $pjcsRole !== 1 && $pjcsActive && pjEntitlement::backOfficeReadOnly((int) $pjcsActive['id'])): ?>
+<?php if (class_exists('pjEntitlement') && !in_array((int) $pjcsRole, array(1, 6), true) && $pjcsActive && pjEntitlement::backOfficeReadOnly((int) $pjcsActive['id'])): ?>
     <li class="pj-plan-readonly" style="padding: 10px 20px;">
         <div class="alert alert-danger m-b-none" style="font-size: 12px;">
             <i class="fa fa-lock m-r-xs"></i><?php __('subReadOnlyShort'); ?>
@@ -166,9 +173,7 @@ $pjcsToken = pjAppController::getCsrfToken();
         'sub_tab_companies' => array('pjActionIndex', array('pjActionIndex', 'pjActionManage')),
         'sub_tab_billing'   => array('pjActionBilling', array('pjActionBilling')),
     );
-    $isScriptSubPlans  = $isScriptSubscriptions && in_array($subAction, array('pjActionPlans', 'pjActionPlan'), true);
-    $isScriptSubPromos = $isScriptSubscriptions && in_array($subAction, array('pjActionPromos', 'pjActionPromo'), true);
-    $isScriptSubGroup  = $isScriptSubscriptions && !$isScriptSubPlans && !$isScriptSubPromos;
+    $isScriptSubGroup  = $isScriptSubscriptions && in_array($subAction, array('pjActionIndex', 'pjActionManage', 'pjActionBilling'), true);
     ?>
     <li<?php echo $isScriptSubGroup ? ' class="active"' : NULL; ?>>
         <a href="#"><i class="fa fa-credit-card"></i> <span class="nav-label"><?php __('sub_menu');?></span><span class="fa arrow"></span></a>
@@ -178,6 +183,13 @@ $pjcsToken = pjAppController::getCsrfToken();
             <?php endforeach; ?>
         </ul>
     </li>
+<?php endif; ?>
+
+<?php if ($hasAccessScriptPlans):
+    $subAction = $controller->_get->toString('action');
+    $isScriptSubPlans  = $isScriptSubscriptions && in_array($subAction, array('pjActionPlans', 'pjActionPlan'), true);
+    $isScriptSubPromos = $isScriptSubscriptions && in_array($subAction, array('pjActionPromos', 'pjActionPromo'), true);
+    ?>
     <li<?php echo $isScriptSubPlans ? ' class="active"' : NULL; ?>>
         <a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminSubscriptions&amp;action=pjActionPlans"><i class="fa fa-cubes"></i> <span class="nav-label"><?php __('sub_tab_plans');?></span></a>
     </li>
@@ -225,14 +237,14 @@ $isScriptCoupons = $isScriptVouchers || $isScriptDiscounts;
     </li>
 <?php endif; ?>
 
-<?php if ($hasAccessScriptOptionsNotifications || $hasAccessScriptSubscriptions || $hasAccessScriptOptionsAi): ?>
+<?php if ($hasAccessScriptOptionsNotifications || $hasAccessScriptPlans || $hasAccessScriptOptionsAi): ?>
     <li<?php echo $isScriptOptionsNotifications || $isScriptSubPayments || $isScriptOptionsAi || $isScriptOptionsSignup ? ' class="active"' : NULL; ?>>
         <a href="#"><i class="fa fa-cogs"></i> <span class="nav-label"><?php __('menuOptions');?></span><span class="fa arrow"></span></a>
         <ul class="nav nav-second-level collapse<?php echo $isScriptOptionsNotifications || $isScriptSubPayments || $isScriptOptionsAi || $isScriptOptionsSignup ? ' in' : NULL; ?>">
             <?php if ($hasAccessScriptOptionsNotifications): ?>
                 <li<?php echo $isScriptOptionsNotifications ? ' class="active"' : NULL; ?>><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminOptions&amp;action=pjActionNotifications"><?php __('menuNotifications');?></a></li>
             <?php endif; ?>
-            <?php if ($hasAccessScriptSubscriptions): ?>
+            <?php if ($hasAccessScriptPlans): ?>
                 <li<?php echo $isScriptSubPayments ? ' class="active"' : NULL; ?>><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminSubscriptions&amp;action=pjActionGateways"><?php __('sub_menu_payments');?></a></li>
             <?php endif; ?>
             <?php if ($hasAccessScriptOptionsAi): ?>

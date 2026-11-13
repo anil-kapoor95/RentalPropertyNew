@@ -48,6 +48,12 @@ $bodies = __('error_bodies', true);
 							<label for="recipient_signup"><?php __('recipients_ARRAY_signup'); ?></label>
 						</div>
 						<?php endif; ?>
+						<?php if (!empty($tpl['show_subscription'])): ?>
+						<div class="radio radio-primary">
+							<input type="radio" id="recipient_subscription" name="recipient" value="<?php echo pjSubscriptionMail::RECIPIENT; ?>">
+							<label for="recipient_subscription"><?php __('recipients_ARRAY_subscription'); ?></label>
+						</div>
+						<?php endif; ?>
 					</div>
 				</div>
 
@@ -74,6 +80,11 @@ $bodies = __('error_bodies', true);
 					<?php if (!empty($tpl['show_signup'])): ?>
 					<div class="notifyTokens signupTokens" style="display: none">
 						<?php __('lblSignupTokens'); ?>
+					</div>
+					<?php endif; ?>
+					<?php if (!empty($tpl['show_subscription'])): ?>
+					<div class="notifyTokens subscriptionTokens" style="display: none">
+						<?php __('lblSubscriptionTokens'); ?>
 					</div>
 					<?php endif; ?>
 					<div class="notifyTokens reservationTokens">

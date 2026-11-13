@@ -13,10 +13,18 @@ class pjBaseUsers extends pjBase
 		return class_exists('pjCompanyContext') ? (int) pjCompanyContext::activeId($this->getRoleId(), $this->getUserId()) : 0;
 	}
 
-	/** Administrators manage the users of every company. */
+	const ROLE_SUPER_ADMIN = 1;
+	const ROLE_COMPANIES_ADMIN = 6;
+
+	/** Super Admin or Companies Admin: manages the admin-side users (see usersScopeSql). */
 	private function isUsersAdmin()
 	{
-		return !class_exists('pjCompanyContext') || pjCompanyContext::isAdmin($this->getRoleId(), $this->getUserId());
+		return !class_exists('pjCompanyContext') || in_array((int) $this->getRoleId(), array(self::ROLE_SUPER_ADMIN, self::ROLE_COMPANIES_ADMIN), true);
+	}
+
+	private function isSuperUsersAdmin()
+	{
+		return !class_exists('pjCompanyContext') || (int) $this->getRoleId() === self::ROLE_SUPER_ADMIN;
 	}
 
 	/**
@@ -49,7 +57,9 @@ class pjBaseUsers extends pjBase
 
 	/**
 	 * SQL condition: the users this user may see and manage in Users.
-	 * - Administrators: the system users (no company, no Company / Company user role).
+	 * - Super Admin: the platform staff only (Super Admins and Companies Admins).
+	 * - Companies Admin: the admin-side users of the companies (every role except the two administrator
+	 *   roles and the Company / Company user logins, which belong to the companies themselves).
 	 * - A company login: only the "Company user" users of its own company.
 	 * - Other roles: the users of their company, never administrators, company logins or company users.
 	 */
@@ -59,10 +69,14 @@ class pjBaseUsers extends pjBase
 		{
 			return '1 = 1';
 		}
+		if ($this->isSuperUsersAdmin())
+		{
+			return sprintf("(%1\$s.`role_id` IN (%2\$u, %3\$u))", $alias, self::ROLE_SUPER_ADMIN, self::ROLE_COMPANIES_ADMIN);
+		}
 		if ($this->isUsersAdmin())
 		{
 			// every admin-side user, also users an older version tied to a company
-			return sprintf("(%1\$s.`role_id` NOT IN (%2\$u, %3\$u))", $alias, self::ROLE_COMPANY, self::ROLE_COMPANY_USER);
+			return sprintf("(%1\$s.`role_id` NOT IN (%2\$u, %3\$u, %4\$u, %5\$u))", $alias, self::ROLE_COMPANY, self::ROLE_COMPANY_USER, self::ROLE_SUPER_ADMIN, self::ROLE_COMPANIES_ADMIN);
 		}
 		$cid = $this->usersCompanyId();
 		if ($this->isCompanyLogin())
@@ -72,27 +86,65 @@ class pjBaseUsers extends pjBase
 		return sprintf("(%s AND %s.`role_id` NOT IN (%u, %u))", pjCompanyContext::userScopeSql($cid, $alias, false), $alias, self::ROLE_COMPANY, self::ROLE_COMPANY_USER);
 	}
 
-	/** May the logged-in user give this role in Users? */
-	private function canGiveRole($role_id)
+	/**
+	 * May the logged-in user give this role in Users (also used by the add / edit forms)?
+	 * Super Admin: Super Admin, Companies Admin. Companies Admin: the admin-side company roles (Regular User,
+	 * Owner). Company login: Company user. Others: their own company's roles, never an administrator role.
+	 */
+	public function canGiveRole($role_id)
 	{
 		$role_id = (int) $role_id;
 		if ($this->isCompanyLogin())
 		{
 			return $role_id === self::ROLE_COMPANY_USER;
 		}
-		return $this->isRoleAllowed($role_id) && !in_array($role_id, array(self::ROLE_COMPANY, self::ROLE_COMPANY_USER), true);
+		if ($this->isSuperUsersAdmin())
+		{
+			return in_array($role_id, array(self::ROLE_SUPER_ADMIN, self::ROLE_COMPANIES_ADMIN), true);
+		}
+		return !in_array($role_id, array(self::ROLE_SUPER_ADMIN, self::ROLE_COMPANIES_ADMIN, self::ROLE_COMPANY, self::ROLE_COMPANY_USER), true);
+	}
+
+	/** The user's rights do not go beyond the logged-in user's (see pjPermissionGuard). */
+	private function mayManageUser($user_id)
+	{
+		return !class_exists('pjPermissionGuard') || pjPermissionGuard::mayManage($this->getRoleId(), $this->getUserId(), $user_id);
+	}
+
+	/** A new user, or a user with a new role, gets only the permissions of the role that the logged-in user has. */
+	private function seedPermissions($user_id, $role_id)
+	{
+		if (class_exists('pjPermissionGuard'))
+		{
+			pjPermissionGuard::seed($this->getRoleId(), $this->getUserId(), $user_id, $role_id);
+		} else {
+			pjAuthUserPermissionModel::factory()->where('user_id', (int) $user_id)->eraseAll();
+		}
 	}
 
 	/** Stop unless the user is one this user may manage (see usersScopeSql). */
 	private function assertCompanyUser($user_id)
 	{
-		if ($this->isUsersAdmin())
+		if ($this->isSuperUsersAdmin())
 		{
-			// administrators manage every user except the users that a company created
+			// the Super Admin manages the platform staff only
 			$row = pjAuthUserModel::factory()->select('t1.role_id')->find((int) $user_id)->getData();
-			$ok = empty($row) || (int) $row['role_id'] !== self::ROLE_COMPANY_USER;
+			$ok = !empty($row) && in_array((int) $row['role_id'], array(self::ROLE_SUPER_ADMIN, self::ROLE_COMPANIES_ADMIN), true);
+		} elseif ($this->isUsersAdmin()) {
+			// the Companies Admin: every user except the administrators and the users that a company created
+			$row = pjAuthUserModel::factory()->select('t1.role_id')->find((int) $user_id)->getData();
+			$ok = empty($row) || !in_array((int) $row['role_id'], array(self::ROLE_COMPANY_USER, self::ROLE_SUPER_ADMIN, self::ROLE_COMPANIES_ADMIN), true);
 		} else {
 			$ok = (int) pjAuthUserModel::factory()->where('t1.id', (int) $user_id)->where($this->usersScopeSql('t1'))->findCount()->getData() > 0;
+		}
+		if ($ok && (int) $user_id !== (int) $this->getUserId() && !$this->mayManageUser($user_id))
+		{
+			// the user has rights the logged-in user does not have: no editing, status change or delete
+			if ($this->isXHR())
+			{
+				self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => __('plugin_base_user_more_rights', true)));
+			}
+			pjUtil::redirect(PJ_INSTALL_URL . "index.php?controller=pjBaseUsers&action=pjActionIndex&err=PU09");
 		}
 		if (!$ok)
 		{
@@ -104,10 +156,10 @@ class pjBaseUsers extends pjBase
 		}
 	}
 
-	/** Only administrators may give the Administrator role. */
+	/** The administrator roles are given by the Super Admin only. */
 	private function isRoleAllowed($role_id)
 	{
-		return (int) $role_id !== 1 || $this->isUsersAdmin();
+		return !in_array((int) $role_id, array(self::ROLE_SUPER_ADMIN, self::ROLE_COMPANIES_ADMIN), true) || $this->isSuperUsersAdmin();
 	}
 
 	/** True when $user_id is the only active administrator left. */
@@ -130,7 +182,7 @@ class pjBaseUsers extends pjBase
 	{
 		if ((int) $old_role_id !== (int) $new_role_id)
 		{
-			pjAuthUserPermissionModel::factory()->where('user_id', (int) $user_id)->eraseAll();
+			$this->seedPermissions($user_id, $new_role_id);
 		}
 	}
 
@@ -142,13 +194,14 @@ class pjBaseUsers extends pjBase
 			return array();
 		}
 		$m = pjAuthUserModel::factory()->whereIn('t1.id', $ids);
-		if ($this->isUsersAdmin())
+		if ($this->isUsersAdmin() && !$this->isSuperUsersAdmin())
 		{
-			$m->where('t1.role_id !=', self::ROLE_COMPANY_USER);
+			$m->whereNotIn('t1.role_id', array(self::ROLE_COMPANY_USER, self::ROLE_SUPER_ADMIN, self::ROLE_COMPANIES_ADMIN));
 		} else {
 			$m->where($this->usersScopeSql('t1'));
 		}
-		return array_map('intval', $m->findAll()->getDataPair(null, 'id'));
+		$ids = array_map('intval', $m->findAll()->getDataPair(null, 'id'));
+		return array_values(array_filter($ids, array($this, 'mayManageUser')));
 	}
 
 	public function pjActionCheckEmail()
@@ -269,14 +322,18 @@ class pjBaseUsers extends pjBase
 			$role_arr = __('plugin_base_role_arr', true);
 			foreach($data as $k => $v) {
 				$data[$k]['role'] = $role_arr[$v['role_id']];
-				// Which company the user belongs to (administrators work for all companies)
-				if ((int) $v['role_id'] === 1)
+				// Which company the user belongs to (the Companies Admin works for all companies, the Super Admin for none)
+				if ((int) $v['role_id'] === self::ROLE_COMPANIES_ADMIN)
 				{
 					$data[$k]['company'] = __('lblUserAllCompanies', true);
+				} elseif ((int) $v['role_id'] === self::ROLE_SUPER_ADMIN) {
+					$data[$k]['company'] = __('lblUserPlatformOnly', true);
 				} else {
 					$data[$k]['company'] = !empty($v['company']) ? pjSanitize::clean($v['company']) : '—';
 				}
 				unset($data[$k]['company_id']);
+				// rights beyond the logged-in user's: no edit, permissions or delete (checked again on the server)
+				$data[$k]['manageable'] = (int) $v['id'] === (int) $this->getUserId() || $this->mayManageUser($v['id']) ? 1 : 0;
 				$data[$k]['name'] = pjSanitize::clean($v['name']);
 				$data[$k]['email'] = pjSanitize::clean($v['email']);
 			}
@@ -315,11 +372,29 @@ class pjBaseUsers extends pjBase
 				$data['company_id'] = $this->postedCompanyId($data['role_id']);
 			}
 
-			$response = pjAuth::init(array_merge($this->_post->raw(),$data))->createUser();
+			// only the fields of the form (no other user columns from the request)
+			$post = array();
+			foreach (array('email', 'password', 'name', 'phone') as $field)
+			{
+				if ($this->_post->has($field))
+				{
+					$post[$field] = $this->_post->toString($field);
+				}
+			}
+			$response = pjAuth::init(array_merge($post, $data))->createUser();
+			if (isset($response['status']) && $response['status'] === 'OK' && isset($post['email']))
+			{
+				$new = pjAuthUserModel::factory()->select('t1.id')->where('t1.email', $post['email'])->orderBy('t1.id DESC')->limit(1)->findAll()->getDataIndex(0);
+				if (!empty($new))
+				{
+					$this->seedPermissions((int) $new['id'], $data['role_id']);
+				}
+			}
 			pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjBaseUsers&action=pjActionIndex&err=" . $response['code']);
 		}
 		if (self::isGet())
 		{
+			$this->set('is_restricted', class_exists('pjPermissionGuard') && !pjPermissionGuard::isUnrestricted($this->getRoleId()));
 			$this->appendJs('pjBaseUsers.js', $this->getConst('PLUGIN_JS_PATH'));
 		}
 	}
@@ -346,6 +421,7 @@ class pjBaseUsers extends pjBase
 		        || !$this->isRoleAllowed($new_role_id)
 		        || ($new_role_id === 4 && (int) $current['role_id'] !== 4)
 		        || ($new_role_id !== (int) $current['role_id'] && !$this->canGiveRole($new_role_id))
+		        || ($new_role_id !== (int) $current['role_id'] && $user_id === (int) $this->getUserId() && !$this->isSuperUsersAdmin())
 		        || ($this->isLastAdmin($user_id) && ($new_role_id !== 1 || $goes_inactive)))
 		    {
 		        // never give the Administrator role from a company account, never leave the system without an active administrator

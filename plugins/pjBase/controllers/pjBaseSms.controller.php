@@ -142,10 +142,12 @@ class pjBaseSms extends pjBase
         }
         
         $pjBaseSmsModel = pjBaseSmsModel::factory();
-        // a company sees the SMS it sent; administrators also the ones of no company
-        if (class_exists('pjCompanyContext') && ($sms_cid = (int) pjCompanyContext::activeId($this->getRoleId(), $this->getUserId())) > 0)
+        // a company sees the SMS it sent; the Super Admin only the platform's own (no company: no guest data)
+        if (class_exists('pjCompanyContext') && pjCompanyContext::isSuperAdmin($this->getRoleId()))
         {
-            $pjBaseSmsModel->where(pjCompanyContext::smsScopeSql($sms_cid, (int) $this->getRoleId() === 1));
+            $pjBaseSmsModel->where(pjCompanyContext::smsScopeSql(0, true));
+        } elseif (class_exists('pjCompanyContext') && ($sms_cid = (int) pjCompanyContext::activeId($this->getRoleId(), $this->getUserId())) > 0) {
+            $pjBaseSmsModel->where(pjCompanyContext::smsScopeSql($sms_cid, false));
         }
         
         if ($q = $this->_get->toString('q'))

@@ -414,7 +414,8 @@ class pjAdminCalendars extends pjAdmin
 		    {
 		        $q = $pjCalendarModel->escapeStr(trim($q));
 		        $q = str_replace(array('%', '_'), array('\%', '\_'), $q);
-		        $pjCalendarModel->where('(t1.uuid LIKE "%'.$q.'%" OR t2.content LIKE "%'.$q.'%")');
+		        // the name in the back-office language, or in any language that has it
+		        $pjCalendarModel->where('(t1.uuid LIKE "%'.$q.'%" OR ' . pjAppController::calendarNameSql('t2', 't1.id') . ' LIKE "%'.$q.'%")');
 		        
 		    }
 		    
@@ -438,13 +439,15 @@ class pjAdminCalendars extends pjAdmin
 			}
 
 			$data = $pjCalendarModel
-				->select("t1.id, t1.uuid, t1.status, t2.content AS name,
+				// property name: back-office language, else any language that has it (a property made on the
+				// website, or by a company in another language, has no name in the administrator's language)
+				->select("t1.id, t1.uuid, t1.status, " . pjAppController::calendarNameSql('t2', 't1.id') . " AS name,
 					(SELECT CONCAT(`TR`.`id`,'~:~',IFNULL(`TR`.`c_name`, ''),'~:~',IFNULL(`TR`.`c_email`, ''),'~:~',`TR`.`created`) FROM `".pjReservationModel::factory()->getTable()."` AS `TR` WHERE `TR`.`calendar_id`=t1.id ORDER BY `TR`.`created` DESC LIMIT 1) AS `latest_booking`, 
 					(SELECT `TR`.`created` FROM `".pjReservationModel::factory()->getTable()."` AS `TR` WHERE `TR`.`calendar_id`=t1.id ORDER BY `TR`.`created` DESC LIMIT 1) AS `latest_booking_created`")
 				->orderBy("$column $direction")->limit($rowCount, $offset)->findAll()->getData();
 			foreach ($data as $k => $v) {
+				$data[$k]['name'] = pjSanitize::clean((string) $v['name']);
 				if (!empty($v['latest_booking'])) {
-					$data[$k]['name'] = pjSanitize::clean($v['name']);
 					$latest_booking = explode('~:~', pjSanitize::clean($v['latest_booking']));
 					$latest_booking[3] = __('label_on', true).' '.date($this->option_arr['o_date_format'].', '.$this->option_arr['o_time_format'], strtotime($latest_booking[3]));
 					$data[$k]['latest_booking'] = implode('~:~', $latest_booking);
@@ -1162,7 +1165,7 @@ class pjAdminCalendars extends pjAdmin
         // Subscription plan: which payment methods the company may use (administrators: all).
         // PayPal and cash always; the other gateways need "Choice of payment gateways" in the plan.
         $method_allowed = function ($method) {
-            return $this->isAdmin() || !class_exists('pjEntitlement') || pjEntitlement::allowsPaymentMethod($this->getCompanyId(), $method);
+            return $this->isCompaniesAdmin() || !class_exists('pjEntitlement') || pjEntitlement::allowsPaymentMethod($this->getCompanyId(), $method);
         };
         // A gateway that is already switched on can still be opened (to switch it off), even when the plan no longer allows it.
         if ($foreign_id !== NULL && !$this->_post->check('options_update') && $this->_get->check('payment_method') && !$method_allowed($this->_get->toString('payment_method'))
@@ -1745,7 +1748,7 @@ class pjAdminCalendars extends pjAdmin
         if ($total)
         {
             $data = $pjFeedModel
-            ->select(sprintf('t1.id, t1.provider_id, t1.calendar_id, t3.content AS property,
+            ->select(sprintf('t1.id, t1.provider_id, t1.calendar_id, ' . pjAppController::calendarNameSql('t3', 't2.id') . ' AS property,
     					(SELECT COUNT(*) FROM `%s` AS t3 WHERE t3.calendar_id = t1.calendar_id AND t3.provider_id = t1.provider_id AND t3.date_to >= "%s") AS `cnt`
     					', pjReservationModel::factory()->getTable(), date('Y-m-d')))
 			->orderBy("$column $direction")

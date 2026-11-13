@@ -18,10 +18,10 @@ class pjBaseBackup extends pjBase
         return $this->hasCompanies() ? (int) pjCompanyContext::activeId($this->getRoleId(), $this->getUserId()) : 0;
     }
 
-    /** Only administrators may create / see backups of the whole system (all companies). */
+    /** Only the Super Admin may create / see backups of the whole system (all companies). */
     private function canSystemBackup()
     {
-        return !$this->hasCompanies() || pjCompanyContext::isAdmin($this->getRoleId(), $this->getUserId());
+        return !$this->hasCompanies() || pjCompanyContext::isSuperAdmin($this->getRoleId());
     }
 
     /**

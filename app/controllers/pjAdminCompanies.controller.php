@@ -159,7 +159,7 @@ class pjAdminCompanies extends pjAdmin
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'Company not found.'));
 		}
-		$allowed = ($this->isAdmin() && pjAuth::factory('pjAdminCompanies', 'pjActionUpdate')->hasAccess())
+		$allowed = ($this->isCompaniesAdmin() && pjAuth::factory('pjAdminCompanies', 'pjActionUpdate')->hasAccess())
 			|| ((int) $arr['user_id'] === (int) $this->getUserId() && pjAuth::factory('pjAdminCompanies', 'pjActionProfile')->hasAccess());
 		if (!$allowed)
 		{
@@ -360,7 +360,7 @@ class pjAdminCompanies extends pjAdmin
 		{
 			self::jsonResponse(array('status' => 'ERR', 'code' => 101, 'text' => 'Company not found.'));
 		}
-		$allowed = ($this->isAdmin() && pjAuth::factory('pjAdminCompanies', 'pjActionUpdate')->hasAccess())
+		$allowed = ($this->isCompaniesAdmin() && pjAuth::factory('pjAdminCompanies', 'pjActionUpdate')->hasAccess())
 			|| ((int) $arr['user_id'] === (int) $this->getUserId() && pjAuth::factory('pjAdminCompanies', 'pjActionProfile')->hasAccess());
 		if (!$allowed)
 		{

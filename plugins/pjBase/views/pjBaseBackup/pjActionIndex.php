@@ -102,15 +102,17 @@
                         <input type="hidden" name="backup" value="1" />
                         <?php if (class_exists('pjCompanyContext')):
                             $bkActive = pjCompanyContext::activeCompany($controller->getRoleId(), $controller->getUserId());
-                            $bkAdmin = pjCompanyContext::isAdmin($controller->getRoleId(), $controller->getUserId()); ?>
+                            $bkAdmin = pjCompanyContext::isSuperAdmin($controller->getRoleId()); ?>
                         <div class="form-group">
                             <label class="control-label"><?php __('lblBackupScope'); ?>:</label>
+                            <?php if ($bkActive): ?>
                             <div class="radio m-t-xs m-b-none">
-                                <label><input type="radio" name="backup_scope" value="company" checked> <?php __('lblBackupScopeCompany'); ?>: <strong><?php echo $bkActive ? pjSanitize::html($bkActive['name']) : '-'; ?></strong></label>
+                                <label><input type="radio" name="backup_scope" value="company" checked> <?php __('lblBackupScopeCompany'); ?>: <strong><?php echo pjSanitize::html($bkActive['name']); ?></strong></label>
                             </div>
+                            <?php endif; ?>
                             <?php if ($bkAdmin): ?>
                             <div class="radio m-t-none">
-                                <label><input type="radio" name="backup_scope" value="system"> <?php __('lblBackupScopeSystem'); ?></label>
+                                <label><input type="radio" name="backup_scope" value="system"<?php echo $bkActive ? '' : ' checked'; ?>> <?php __('lblBackupScopeSystem'); ?></label>
                             </div>
                             <?php endif; ?>
                         </div>

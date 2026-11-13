@@ -118,12 +118,8 @@ if (isset($tpl['query']['change']))
     								<?php
     								foreach (__('plugin_base_role_arr', true) as $k => $v)
     								{
-    								    // only administrators may give the Administrator role
-    								    if ((int) $k === 1 && !$controller->isAdmin()) { continue; }
-    								    // Company logins are created with the company (Companies > Add company)
-    								    if ((int) $k === 4 && (int) $tpl['arr']['role_id'] !== 4) { continue; }
-    								    // "Company user": given by a company only (and kept for such a user)
-    								    if ((int) $controller->getRoleId() === 4 ? (int) $k !== 5 : ((int) $k === 5 && (int) $tpl['arr']['role_id'] !== 5)) { continue; }
+    								    // the roles this user may give, plus the user's current role (kept)
+    								    if (!$controller->canGiveRole($k) && (int) $tpl['arr']['role_id'] !== (int) $k) { continue; }
     								    ?><option value="<?php echo $k; ?>"<?php echo $tpl['arr']['role_id'] == $k ? ' selected="selected"' : NULL;?>><?php echo pjSanitize::html($v); ?></option><?php
     								}
     								?>

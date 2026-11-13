@@ -14,3 +14,10 @@ error_log
 # Runtime data written by the API (log-in throttle counters)
 /app/web/upload/api_throttle/
 app/web/upload/13_pending_end.jpg
+/Claude outputs
+*.zip
+Claude outputs/audit-fixes.zip
+Claude outputs/coupons-discounts-company.zip
+/app/web/backup
+/Claude outputs
+*.zip

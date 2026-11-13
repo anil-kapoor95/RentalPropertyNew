@@ -1,95 +1,62 @@
-<?php 
-$months = __('months', true);
-ksort($months);
-$short_days = __('short_days', true);
-?>
-<div id="datePickerOptions" style="display:none;" data-wstart="<?php echo (int) $tpl['option_arr']['o_week_start']; ?>" data-format="<?php echo pjUtil::toBootstrapDate($tpl['option_arr']['o_date_format']); ?>" data-months="<?php echo implode("_", $months);?>" data-days="<?php echo implode("_", $short_days);?>"></div>
-<div class="row wrapper border-bottom white-bg page-heading">
-	<div class="col-sm-12">
-		<div class="row">
-			<div class="col-sm-10">
-				<h2><?php __('infoVoucherListTitle');?></h2>
-			</div>
-		</div><!-- /.row -->
-
-		<p class="m-b-none"><i class="fa fa-info-circle"></i><?php __('infoVoucherListDesc');?></p>
-	</div><!-- /.col-md-12 -->
-</div>
-<div class="row wrapper wrapper-content animated fadeInRight">
-	<div class="col-lg-12">
-		<div class="tabs-container">
-			<ul class="nav nav-tabs">
-				<?php if (pjAuth::factory('pjAdminDiscounts', 'pjActionIndex')->hasAccess()) { ?>
-					<li><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminDiscounts&amp;action=pjActionIndex"><?php __('tabDiscounts'); ?></a></li>
-				<?php } ?>
-				<li class="active"><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminVouchers&amp;action=pjActionIndex"><?php __('tabCoupons'); ?></a></li>
-			</ul>
-			<div class="tab-content">
-				<div role="tabpanel" class="tab-pane active" id="tab11">
-					<div class="panel-body">
-						<div class="ibox float-e-margins">
-							<div class="ibox-content">
-								<div class="row">
-									<?php if ($tpl['has_create']) { ?>
-										<div class="col-lg-4 col-md-3 col-sm-3">
-											<div class="form-group">
-												<a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminVouchers&amp;action=pjActionCreate" class="btn btn-primary m-r-xs btnAddVoucher"><i class="fa fa-plus m-r-xs"></i><?php __('btnAddCoupon');?></a>
-											</div>
-										</div>
-									<?php } ?>
-									<div class="col-lg-5 col-md-6 col-sm-6">
-										<form action="" method="get" class="form-horizontal frm-filter">
-											<div class="input-group">
-												<input type="text" name="q" placeholder="<?php __('btnSearch', false, true); ?>" class="form-control">
-												<div class="input-group-btn">
-													<button class="btn btn-primary" type="submit">
-														<i class="fa fa-search"></i>
-													</button>
-												</div>
-											</div>
-										</form>
-									</div><!-- /.col-lg-6 -->
-								</div><!-- /.row -->
-								<div id="grid"></div>
-							</div>			
-						</div>
-					</div>
-				</div>
-			</div>
-		</div>
-	</div>
-</div>
-
-<!-- Modal -->
-<div class="modal fade" id="myModalVoucher" role="dialog" aria-labelledby="myModalVoucherLabel">
-  <div class="modal-dialog" role="document">
-    <div class="modal-content">
-      
-    </div>
-  </div>
-</div>
-
-<script type="text/javascript">	
-var pjGrid = pjGrid || {};
-pjGrid.queryString = "";
 <?php
-if ($controller->_get->check('calendar_id') && $controller->_get->toInt('calendar_id') > 0)
-{
-	?>pjGrid.queryString += "&calendar_id=<?php echo $controller->_get->toInt('calendar_id'); ?>";<?php
-}
+/**
+ * Coupons of the active company (Company options > Coupons & Discounts).
+ * Same layout as the Super Admin's Coupons & Discounts (views/pjAdminSubscriptions/pjActionPromos.php).
+ */
+include PJ_VIEWS_PATH . 'pjLayouts/elements/coupons-helpers.php';
+$cd_add = !empty($tpl['has_create']);
+include PJ_VIEWS_PATH . 'pjLayouts/elements/coupons-bar.php';
+$edit_url = $_SERVER['PHP_SELF'] . '?controller=pjAdminVouchers&amp;action=pjActionUpdate&amp;id=';
 ?>
-var myLabel = myLabel || {};
-myLabel.code = <?php x__encode('lblVoucherCode', false, true); ?>;
-myLabel.discount = <?php x__encode('lblDiscount', false, true); ?>;
-myLabel.validity_from = <?php x__encode('lblValidityFrom', false, true); ?>;
-myLabel.validity_to = <?php x__encode('lblValidityTo', false, true); ?>;
-myLabel.applied_on = <?php x__encode('lblVoucherAppliedOn', false, true); ?>;
-myLabel.usage = <?php x__encode('lblVoucherUsage', false, true); ?>;
-myLabel.exported = <?php x__encode('lblExport', false, true); ?>;
-myLabel.delete_selected = <?php x__encode('plugin_base_delete_selected'); ?>;
-myLabel.delete_confirmation = <?php x__encode('plugin_base_delete_confirmation'); ?>;
-myLabel.has_update = <?php echo (int) $tpl['has_update']; ?>;
-myLabel.has_export = <?php echo (int) $tpl['has_export']; ?>;
-myLabel.has_delete = <?php echo (int) $tpl['has_delete']; ?>;
-myLabel.has_delete_bulk = <?php echo (int) $tpl['has_delete_bulk']; ?>;
-</script>
+		<?php if (empty($tpl['rows'])) { ?>
+		<div class="sub-empty">
+			<div class="sub-empty-icon"><i class="fa fa-ticket"></i></div>
+			<p><?php __('sub_promo_empty'); ?></p>
+			<?php if ($cd_add) { ?><a class="btn btn-primary btn-outline" href="<?php echo $cd_add_url; ?>"><i class="fa fa-plus m-r-xs"></i><?php __($cd_add_label); ?></a><?php } ?>
+		</div>
+		<?php } else { ?>
+		<div class="table-responsive">
+		<table class="table sub-table sub-promo-table">
+			<thead><tr>
+				<th><?php __('sub_promo_code'); ?></th>
+				<th><?php __('sub_promo_value'); ?></th><th><?php __('cd_col_properties'); ?></th><th><?php __('cd_col_conditions'); ?></th>
+				<th><?php __('sub_promo_validity'); ?></th><th><?php __('sub_promo_used'); ?></th><th><?php __('sub_col_status'); ?></th><th></th>
+			</tr></thead>
+			<tbody>
+			<?php foreach ($tpl['rows'] as $row) {
+				$rid = (int) $row['id'];
+				$used = isset($tpl['uses'][strtolower((string) $row['code'])]) ? (int) $tpl['uses'][strtolower((string) $row['code'])] : 0;
+				$limit = (int) $row['used_count'];
+				$status = pjAppController::cdStatus($row['date_from'], $row['date_to']);
+				?>
+				<tr class="<?php echo $status === 'expired' ? 'sub-row-off' : ''; ?>">
+					<td>
+						<?php if (!empty($tpl['has_update'])) { ?><a class="sub-code" href="<?php echo $edit_url . $rid; ?>"><?php echo pjSanitize::html($row['code']); ?></a><?php } else { ?><span class="sub-code"><?php echo pjSanitize::html($row['code']); ?></span><?php } ?>
+					</td>
+					<td class="text-nowrap"><span class="sub-off"><?php echo $cdValue($row); ?></span></td>
+					<td><?php echo $cdPropertyTags(isset($tpl['links'][$rid]) ? $tpl['links'][$rid] : array()); ?></td>
+					<td>
+						<?php if (isset($cdConditions[$row['condition']])) { ?><span class="sub-tag"><?php echo pjSanitize::html($cdConditions[$row['condition']]); ?></span><?php } ?>
+						<?php if (isset($cdApplyOn[$row['apply_on']])) { ?><span class="sub-tag sub-tag-all"><?php echo pjSanitize::html($cdApplyOn[$row['apply_on']]); ?></span><?php } ?>
+					</td>
+					<td class="text-nowrap"><?php echo $cdDate($row['date_from']) . ' &ndash; ' . $cdDate($row['date_to']); ?></td>
+					<td class="sub-usage-cell">
+						<strong><?php echo $used; ?></strong><span class="text-muted"> / <?php echo $limit > 0 ? $limit : '&infin;'; ?></span>
+						<?php if ($limit > 0) { ?><div class="sub-meter"><span style="width:<?php echo min(100, round($used * 100 / $limit)); ?>%"></span></div><?php } ?>
+					</td>
+					<td><?php echo $cdStatus($row); ?></td>
+					<td class="text-right"><?php if (!empty($tpl['has_update'])) { ?><a class="btn btn-white btn-sm sub-icon-btn" href="<?php echo $edit_url . $rid; ?>" title="<?php __('sub_btn_manage', false, true); ?>"><i class="fa fa-pencil"></i></a><?php } ?></td>
+				</tr>
+			<?php } ?>
+			</tbody>
+		</table>
+		</div>
+		<?php if (!empty($tpl['has_export'])) { ?>
+		<form method="post" action="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminVouchers&amp;action=pjActionExportVoucher" class="m-t-sm">
+			<?php echo $cdCsrf; foreach ($tpl['rows'] as $row) { ?><input type="hidden" name="record[]" value="<?php echo (int) $row['id']; ?>"><?php } ?>
+			<button type="submit" class="btn btn-white btn-sm"><i class="fa fa-download m-r-xs"></i><?php __('cd_btn_export'); ?></button>
+		</form>
+		<?php } ?>
+		<?php } ?>
+	</div></div>
+</div>

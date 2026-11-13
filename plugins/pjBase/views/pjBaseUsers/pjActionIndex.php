@@ -28,7 +28,7 @@
     			</div>
     			<?php 
     			break;
-            case in_array($error_code, array('PU04', 'PU08')):	
+            case in_array($error_code, array('PU04', 'PU08', 'PU09')):	
     			?>
     			<div class="alert alert-danger">
     				<i class="fa fa-exclamation-triangle m-r-xs"></i>
@@ -122,4 +122,5 @@ myLabel.has_update = <?php echo (int) $tpl['has_update']; ?>;
 myLabel.has_delete = <?php echo (int) $tpl['has_delete']; ?>;
 myLabel.has_delete_bulk = <?php echo (int) $tpl['has_delete_bulk']; ?>;
 myLabel.has_user_permission = <?php echo (int) $tpl['has_user_permission']; ?>;
+myLabel.is_unrestricted = <?php echo class_exists('pjPermissionGuard') && !pjPermissionGuard::isUnrestricted($controller->getRoleId()) ? 0 : 1; ?>;
 </script>

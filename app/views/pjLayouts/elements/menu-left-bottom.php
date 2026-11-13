@@ -6,8 +6,8 @@ $isScriptPreview = $controller_name == 'pjAdminOptions' && $action_name == 'pjAc
 $isScriptColors  = $controller_name == 'pjAdminOptions' && $action_name == 'pjActionColors';
 $isScriptInstall = $controller_name == 'pjAdminOptions' && $action_name == 'pjActionInstall';
 
-// Display and Install: administrators only (for the active company)
-$pjIsAdminRole = (int) $controller->getRoleId() === 1;
+// Display and Install: the Companies Admin (for the active company)
+$pjIsAdminRole = (int) $controller->getRoleId() === 6;
 $hasAccessScriptPreview = $pjIsAdminRole && pjAuth::factory('pjAdminOptions', 'pjActionPreview')->hasAccess();
 $hasAccessScriptColors  = $pjIsAdminRole && pjAuth::factory('pjAdminOptions', 'pjActionColors')->hasAccess()
 	&& (!class_exists('pjEntitlement') || pjEntitlement::allows(pjCompanyContext::activeId($controller->getRoleId(), $controller->getUserId()), 'themes'));

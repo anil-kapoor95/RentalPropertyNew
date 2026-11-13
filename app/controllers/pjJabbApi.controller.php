@@ -1166,8 +1166,13 @@ class pjJabbApi extends pjAppController
 	}
 
 	/** Sign of a currency (Currencies data in the back office), or its code. */
+	/** Currency symbol for the website: the same currency table the back office uses (pjMoney); the code when none. */
 	private static function currencySign($code)
 	{
+		if (class_exists('pjMoney'))
+		{
+			return pjMoney::symbol($code);
+		}
 		$row = pjBaseCurrencyDataModel::factory()->where('t1.code', (string) $code)->limit(1)->findAll()->getDataIndex(0);
 		$sign = !empty($row['sign']) ? trim(html_entity_decode((string) $row['sign'], ENT_QUOTES, 'UTF-8')) : '';
 		return $sign !== '' ? $sign : (string) $code;
@@ -4788,7 +4793,7 @@ class pjJabbApi extends pjAppController
 		'book_title_stay', 'book_desc_stay', 'book_title_extras', 'book_desc_extras', 'book_title_details', 'book_desc_details',
 		'book_title_payment', 'book_desc_payment', 'book_continue', 'book_continue_payment', 'book_back', 'book_back_to_property',
 		'book_available', 'book_checking', 'book_confirm_pay', 'book_confirm', 'book_pay_now', 'book_total', 'book_coupon',
-		'book_coupon_applied', 'book_add', 'book_remove', 'book_included', 'book_err_required', 'book_err_email', 'book_err_terms',
+		'book_coupon_applied', 'book_coupon_required', 'book_add', 'book_remove', 'book_included', 'book_err_required', 'book_err_email', 'book_err_terms',
 		'book_err_payment', 'book_choose_dates', 'book_confirmed_title', 'book_pending_title', 'book_confirmed_desc', 'book_pending_desc',
 		'book_reference', 'book_paid_now', 'book_message_host', 'book_payment_failed', 'book_redirecting', 'book_guests',
 		'book_no_payment_needed', 'book_adults_hint', 'book_children_hint', 'book_extras_none', 'book_dates', 'book_extras_summary',

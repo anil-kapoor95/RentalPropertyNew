@@ -933,11 +933,17 @@ class pjAuth extends pjAuthAppController
         {
             return false;
         }else{
-            // The Administrator role has every permission. Decided by the role,
-            // not by user #1, so moving a user to another role really limits them.
-            if((int) $this->getRoleId() === 1)
+            // The two administrator roles have every permission of their side (decided by the role, not by
+            // user #1): the Super Admin the platform pages, the Companies Admin every company page.
+            $role_id = (int) $this->getRoleId();
+            if ($role_id === 1 || $role_id === 6)
             {
-                return true;
+                if (!class_exists('pjCompanyContext'))
+                {
+                    return $role_id === 1;
+                }
+                $scope = pjCompanyContext::pageScope(isset($params['controller']) ? $params['controller'] : '', isset($params['action']) ? $params['action'] : '');
+                return pjCompanyContext::roleMayOpen($role_id, $scope);
             }
             if(isset($params['controller']) && !empty($params['controller']))
             {

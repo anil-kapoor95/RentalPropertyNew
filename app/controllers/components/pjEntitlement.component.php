@@ -78,6 +78,8 @@ class pjEntitlement
 		'unassigned_mode' => 'restricted', 'expired_mode' => 'suspend', 'self_trial' => '0',
 		// Plan every new company gets (Subscriptions > Plans: "Plan for new companies"), '' = none
 		'default_plan_id' => '',
+		// reminder e-mails (pjSubscriptionMail): days before the trial end / the renewal date
+		'reminder_trial_days' => '3', 'reminder_renewal_days' => '7',
 	);
 
 	/** The update that creates the subscription tables has run. */
@@ -359,7 +361,7 @@ class pjEntitlement
 	 */
 	public static function readOnlyGuard($controller)
 	{
-		if (!self::isReady() || !class_exists('pjCompanyContext') || !is_object($controller) || !$controller->isLoged() || $controller->isAdmin())
+		if (!self::isReady() || !class_exists('pjCompanyContext') || !is_object($controller) || !$controller->isLoged() || $controller->isAdmin() || (int) $controller->getRoleId() === 6)
 		{
 			return;
 		}

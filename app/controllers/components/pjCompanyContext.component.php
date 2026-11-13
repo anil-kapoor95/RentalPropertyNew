@@ -7,7 +7,11 @@ if (!defined("ROOT_PATH"))
 /**
  * Active company ("workspace") for the back-office.
  *
- * - Administrator (role 1, incl. super admin user #1): any company and can switch.
+ * - Super Admin (role 1): the platform only (System Options, plans, platform users...). Never a company:
+ *   no active company, no company switcher, no company data (see pageScope()).
+ * - Companies Admin (role 6): every company, with the company switcher; manages companies, their data
+ *   and their subscriptions. No platform settings.
+ * - Admin-side users of the other roles without a company: every company (switcher), with their role's rights.
  * - Everyone else is locked to ONE company and cannot switch:
  *     Company (role 4): the company linked to the user.
  *     Owner (role 3) / Editor (role 2): the company that holds their properties.
@@ -18,7 +22,9 @@ class pjCompanyContext
 {
 	const SESSION_KEY = 'admin_company_id';
 
-	const ROLE_ADMIN = 1;
+	const ROLE_ADMIN = 1; // = Super Admin (kept for older callers)
+	const ROLE_SUPER_ADMIN = 1;
+	const ROLE_COMPANIES_ADMIN = 6;
 	const ROLE_EDITOR = 2;
 	const ROLE_OWNER = 3;
 	const ROLE_COMPANY = 4;
@@ -67,11 +73,14 @@ class pjCompanyContext
 		if ($user_id > 0)
 		{
 			$model = pjCompanyModel::factory()->select('t1.id, t1.name, t1.logo, t1.status, t1.user_id');
-			$aws = self::isAdmin($role_id, $user_id) ? self::adminWorkspaceId() : self::adminWorkspaceId(false);
-			if (self::isAdmin($role_id, $user_id))
+			$aws = self::adminWorkspaceId(false);
+			if (self::isSuperAdmin($role_id))
 			{
-				// administrator: the Admin workspace first, then every company
-				$arr = $model->orderBy(sprintf('(t1.id = %u) DESC, t1.name ASC', $aws), false)->findAll()->getDataPair('id');
+				// Super Admin: platform only, never a company
+				$arr = array();
+			} elseif (self::isAdmin($role_id, $user_id)) {
+				// Companies Admin: every company
+				$arr = $model->orderBy('t1.name ASC')->findAll()->getDataPair('id');
 			} elseif (self::isGlobalUser($role_id, $user_id)) {
 				// admin-side users (no company): every company, never the Admin workspace
 				if ($aws > 0) { $model->where('t1.id !=', $aws); }
@@ -140,12 +149,28 @@ class pjCompanyContext
 	}
 
 	/**
-	 * Only administrators may work across companies. Decided by the role alone:
-	 * user #1 moved to another role is treated like any other user of that role.
+	 * The administrator who works across companies: the Companies Admin (role 6). Decided by the role alone.
+	 * (The Super Admin is NOT a company administrator: it has no company data at all.)
 	 */
-	public static function isAdmin($role_id, $user_id)
+	public static function isAdmin($role_id, $user_id = 0)
 	{
-		return (int) $role_id === self::ROLE_ADMIN;
+		return (int) $role_id === self::ROLE_COMPANIES_ADMIN;
+	}
+
+	public static function isSuperAdmin($role_id)
+	{
+		return (int) $role_id === self::ROLE_SUPER_ADMIN;
+	}
+
+	public static function isCompaniesAdmin($role_id)
+	{
+		return (int) $role_id === self::ROLE_COMPANIES_ADMIN;
+	}
+
+	/** Super Admin or Companies Admin: platform staff, never tied to a company. */
+	public static function isStaffRole($role_id)
+	{
+		return in_array((int) $role_id, array(self::ROLE_SUPER_ADMIN, self::ROLE_COMPANIES_ADMIN), true);
 	}
 
 	/**
@@ -160,7 +185,7 @@ class pjCompanyContext
 		{
 			return true;
 		}
-		if (in_array($role_id, array(self::ROLE_COMPANY, self::ROLE_COMPANY_USER), true) || (int) $user_id <= 0)
+		if (in_array($role_id, array(self::ROLE_SUPER_ADMIN, self::ROLE_COMPANY, self::ROLE_COMPANY_USER), true) || (int) $user_id <= 0)
 		{
 			return false;
 		}
@@ -259,11 +284,11 @@ class pjCompanyContext
 	{
 		if (!$with_admins)
 		{
-			return sprintf("(%1\$s.`company_id` = %2\$u AND %1\$s.`role_id` <> %3\$u)", $alias, (int) $company_id, self::ROLE_ADMIN);
+			return sprintf("(%1\$s.`company_id` = %2\$u AND %1\$s.`role_id` NOT IN (%3\$u, %4\$u))", $alias, (int) $company_id, self::ROLE_SUPER_ADMIN, self::ROLE_COMPANIES_ADMIN);
 		}
-		// company users + administrators + admin-side users (no company, not a company role)
-		return sprintf("(%1\$s.`company_id` = %2\$u OR %1\$s.`role_id` = %3\$u OR (%1\$s.`company_id` IS NULL AND %1\$s.`role_id` NOT IN (%4\$u, %5\$u)))",
-			$alias, (int) $company_id, self::ROLE_ADMIN, self::ROLE_COMPANY, self::ROLE_COMPANY_USER);
+		// company users + Companies Admins + admin-side users (no company, not a company role); never the Super Admin
+		return sprintf("(%1\$s.`company_id` = %2\$u OR %1\$s.`role_id` = %3\$u OR (%1\$s.`company_id` IS NULL AND %1\$s.`role_id` NOT IN (%4\$u, %5\$u, %6\$u)))",
+			$alias, (int) $company_id, self::ROLE_COMPANIES_ADMIN, self::ROLE_COMPANY, self::ROLE_COMPANY_USER, self::ROLE_SUPER_ADMIN);
 	}
 
 	public static function filterUserIds($ids, $company_id)
@@ -285,7 +310,7 @@ class pjCompanyContext
 	/** company_id to store for a user with the given role (administrators have none). */
 	public static function companyForRole($role_id, $company_id)
 	{
-		return (int) $role_id === self::ROLE_ADMIN || (int) $company_id <= 0 ? ':NULL' : (int) $company_id;
+		return self::isStaffRole($role_id) || (int) $company_id <= 0 ? ':NULL' : (int) $company_id;
 	}
 
 	/* ------------------------------------------------------------------
@@ -398,6 +423,89 @@ class pjCompanyContext
 		return false;
 	}
 
+	/**
+	 * Who may open a back-office page (checked on every request in pjBaseAppController::beforeFilter and by
+	 * pjAuth::hasAccess for the two administrator roles):
+	 *   'platform' - Super Admin only (System Options, plans, company subscriptions, platform notifications, installer...)
+	 *   'admin'    - Companies Admin only (theme colours / preview / install code)
+	 *   'company'  - company data: everybody except the Super Admin (the role's permissions decide)
+	 *   'shared'   - everybody logged in (dashboard, users, profile, login, front-end and API calls)
+	 */
+	public static function pageScope($controller, $action)
+	{
+		$c = (string) $controller;
+		$a = (string) $action;
+		if ($c === '' || in_array($c, array('pjFront', 'pjFrontEnd', 'pjFrontPublic', 'pjJabbApi', 'pjCron', 'pjListings', 'pjBase', 'pjBaseUsers'), true))
+		{
+			return 'shared';
+		}
+		switch ($c)
+		{
+			case 'pjAdmin':
+				// dashboard (the Super Admin gets the platform totals) and the language switch
+				if (in_array($a, array('', 'pjActionIndex', 'pjActionSetLocale'), true))
+				{
+					return 'shared';
+				}
+				return $a === 'pjActionVerifyAPIKey' ? 'platform' : 'company';
+			case 'pjAdminSubscriptions':
+				// company subscriptions and billing history are platform administration: Super Admin
+				if (in_array($a, array('pjActionIndex', 'pjActionManage', 'pjActionBilling'), true))
+				{
+					return 'platform';
+				}
+				if (in_array($a, array('pjActionMyPlan', 'pjActionPay', 'pjActionCheckoutReturn', 'pjActionCheckPromo'), true))
+				{
+					return 'company';
+				}
+				return 'platform';
+			case 'pjAdminOptions':
+				// the active company's theme colours, display preview and install code
+				if (in_array($a, array('pjActionColors', 'pjActionSaveThemeColors', 'pjActionPreview', 'pjActionInstall'), true))
+				{
+					return 'admin';
+				}
+				return 'platform';
+			case 'pjBasePermissions':
+				// role permissions: platform; the permissions of one user: company side (checked inside)
+				if (in_array($a, array('pjActionUserPermission', 'pjActionResetPermission'), true))
+				{
+					return 'company';
+				}
+				return $a === 'pjActionAjaxSet' ? 'shared' : 'platform';
+			case 'pjInstaller':
+			case 'pjBaseLog':
+			case 'pjPayments':
+				return 'platform';
+		}
+		if (self::isPlatformPage($c, $a))
+		{
+			return 'platform';
+		}
+		// helpers of the platform controllers used inside company pages (language flags, SMS, cron, backup)
+		if (in_array($c, array('pjBaseSms', 'pjBaseLocale', 'pjBaseCountries', 'pjBaseCron', 'pjBaseBackup'), true))
+		{
+			return 'shared';
+		}
+		return 'company';
+	}
+
+	/** May a user of this role open a page of this scope (see pageScope)? */
+	public static function roleMayOpen($role_id, $scope)
+	{
+		$role_id = (int) $role_id;
+		switch ($scope)
+		{
+			case 'platform':
+				return $role_id === self::ROLE_SUPER_ADMIN;
+			case 'admin':
+				return $role_id === self::ROLE_COMPANIES_ADMIN;
+			case 'company':
+				return $role_id !== self::ROLE_SUPER_ADMIN;
+		}
+		return true;
+	}
+
 	/** foreign_id to store a given option key in, for the active company fid. */
 	public static function fidForKey($key, $company_fid)
 	{
@@ -429,7 +537,7 @@ class pjCompanyContext
 	public static function companyOfUser($user_id)
 	{
 		$row = pjAuthUserModel::factory()->select('t1.company_id, t1.role_id')->find((int) $user_id)->getData();
-		if (empty($row) || (int) $row['role_id'] === self::ROLE_ADMIN)
+		if (empty($row) || self::isStaffRole($row['role_id']))
 		{
 			return 0;
 		}
@@ -587,7 +695,8 @@ class pjCompanyContext
 		$pjNotificationModel = pjNotificationModel::factory();
 		$templates = $pjNotificationModel->reset()
 			->where('t1.company_id', 0)->where('t1.foreign_id', 0)->where('t1.is_general', 1)
-			->whereNotIn('t1.variant', array_keys(pjSignupMail::$variants))
+			// platform e-mails (sign-up, subscription reminders) are never copied to the companies
+			->whereNotIn('t1.variant', array_merge(array_keys(pjSignupMail::$variants), class_exists('pjSubscriptionMail') ? pjSubscriptionMail::$variants : array()))
 			->orderBy('t1.id ASC')->findAll()->getData();
 		if (empty($templates))
 		{

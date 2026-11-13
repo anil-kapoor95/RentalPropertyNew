@@ -110,18 +110,23 @@ var jQuery_1_8_2 = jQuery_1_8_2 || jQuery.noConflict();
 			}
 			
 			function onBeforeShow (obj) {
-				if (parseInt(obj.id, 10) === pjGrid.currentUserId || parseInt(obj.id, 10) === 1) {
+				if (parseInt(obj.id, 10) === pjGrid.currentUserId || parseInt(obj.id, 10) === 1 || parseInt(obj.manageable, 10) === 0) {
 					return false;
 				}
 				return true;
 			}
 			function onBeforeShowPermissions (obj) {
-				if (parseInt(obj.id, 10) === 1) {
+				// never user #1, never a user with more rights; only the Super Admin sets his own permissions
+				if (parseInt(obj.id, 10) === 1 || parseInt(obj.manageable, 10) === 0
+					|| (parseInt(obj.id, 10) === pjGrid.currentUserId && !myLabel.is_unrestricted)) {
 					return false;
 				}
 				return true;
 			}
 			function onBeforeShowEdit (obj) {
+				if (parseInt(obj.manageable, 10) === 0) {
+					return false;
+				}
 				if (parseInt(obj.id, 10) === 1 && pjGrid.currentUserId != 1) {
 					return false;
 				}

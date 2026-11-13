@@ -47,6 +47,76 @@ class pjAppController extends pjBaseAppController
 		}
 	}
 
+	/* ------------------------------------------------------------------
+	 * Coupons & Discounts of a company (pjAdminVouchers, pjAdminDiscounts): the pages share the layout of the
+	 * Super Admin's plan Coupons & Discounts (views/pjAdminSubscriptions/pjActionPromos.php / pjActionPromo.php).
+	 * ------------------------------------------------------------------ */
+
+	/** Y-m-d from a date field (type=date sends Y-m-d; the older forms the back-office date format), or ''. */
+	public function cdDate($value)
+	{
+		$value = trim((string) $value);
+		if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) && strtotime($value) !== false)
+		{
+			return $value;
+		}
+		if ($value !== '')
+		{
+			$d = pjDateTime::formatDate($value, $this->option_arr['o_date_format']);
+			if (is_string($d) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $d))
+			{
+				return $d;
+			}
+		}
+		return '';
+	}
+
+	/** active | scheduled | expired by the dates of a coupon / discount. */
+	public static function cdStatus($date_from, $date_to)
+	{
+		$today = date('Y-m-d');
+		if (!empty($date_from) && $today < $date_from)
+		{
+			return 'scheduled';
+		}
+		if (!empty($date_to) && $today > $date_to)
+		{
+			return 'expired';
+		}
+		return 'active';
+	}
+
+	/** The page data both lists share: counts of the two kinds and who may see / add what. */
+	public function cdPageData($active)
+	{
+		$cid = $this->getCompanyId();
+		$show_d = pjAuth::factory('pjAdminDiscounts', 'pjActionIndex')->hasAccess();
+		$show_c = pjAuth::factory('pjAdminVouchers', 'pjActionIndex')->hasAccess();
+		return array(
+			'active' => $active,
+			'show' => array('discount' => $show_d, 'coupon' => $show_c),
+			'counts' => array(
+				'discount' => $show_d ? (int) pjDiscountModel::factory()->where('t1.company_id', $cid)->findCount()->getData() : 0,
+				'coupon' => $show_c ? (int) pjVoucherModel::factory()->where('t1.company_id', $cid)->findCount()->getData() : 0,
+			),
+		);
+	}
+
+	/** Property names of the active company: id => name (back-office language, else any saved language). */
+	public function cdCalendarNames()
+	{
+		return pjCalendarModel::factory()->where('t1.company_id', $this->getCompanyId())
+			->select('t1.id, ' . self::calendarNameSql('t2', 't1.id') . ' AS `name`')
+			->join('pjMultiLang', "t2.model='pjCalendar' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='" . (int) $this->getLocaleId() . "'", 'left outer')
+			->orderBy('`name` ASC')->findAll()->getDataPair('id', 'name');
+	}
+
+	/** Back to a Coupons & Discounts page with a message (cd* label key). */
+	public function cdBack($controller, $action, $msg, $extra = '')
+	{
+		pjUtil::redirect($_SERVER['PHP_SELF'] . '?controller=' . $controller . '&action=' . $action . '&msg=' . $msg . $extra);
+	}
+
 	/**
 	 * Coupons for a property: only when its company's plan includes coupons. Coupons that exist on a property
 	 * whose plan no longer includes them (downgrade, or added by an administrator) stay saved but do not apply.
@@ -555,8 +625,8 @@ class pjAppController extends pjBaseAppController
 	 */
 	public function requirePlanFeature($feature)
 	{
-		// Administrators always manage Coupons & Discounts of the active company (Company options).
-		if ($feature === 'coupons' && $this->isAdmin())
+		// The Companies Admin always manages Coupons & Discounts of the active company (Company options).
+		if ($feature === 'coupons' && $this->isCompaniesAdmin())
 		{
 			return true;
 		}
@@ -577,10 +647,6 @@ class pjAppController extends pjBaseAppController
 		if ((int) $this->getRoleId() === 4)
 		{
 			pjUtil::redirect($_SERVER['PHP_SELF'] . '?controller=pjAdminSubscriptions&action=pjActionMyPlan&msg=subLocked');
-		}
-		if ($this->isAdmin())
-		{
-			pjUtil::redirect($_SERVER['PHP_SELF'] . '?controller=pjAdminSubscriptions&action=pjActionManage&id=' . pjCompanyContext::hashOf($this->getCompanyId()) . '&msg=subLocked');
 		}
 		pjUtil::redirect($_SERVER['PHP_SELF'] . '?controller=pjAdmin&action=pjActionIndex');
 		exit;

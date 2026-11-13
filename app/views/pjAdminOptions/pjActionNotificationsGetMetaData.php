@@ -9,6 +9,8 @@
 				__('notifications_msg_to_admin');
 			} elseif ($tpl['query']['recipient'] == pjSignupMail::RECIPIENT) {
 				__('notifications_msg_to_signup');
+			} elseif (class_exists('pjSubscriptionMail') && $tpl['query']['recipient'] == pjSubscriptionMail::RECIPIENT) {
+				__('notifications_msg_to_subscription');
 			} else {
 				__('notifications_msg_to_default');
 			}

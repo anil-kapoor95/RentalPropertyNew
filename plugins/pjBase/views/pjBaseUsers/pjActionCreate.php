@@ -50,16 +50,17 @@
     								<?php
     								foreach (__('plugin_base_role_arr', true) as $k => $v)
     								{
-    								    // only administrators may give the Administrator role
-    								    if ((int) $k === 1 && !$controller->isAdmin()) { continue; }
-    								    // Company logins are created with the company (Companies > Add company).
-    								    // A company creates "Company user" users only; nobody else gives that role.
+    								    // only the roles this user may give (Super Admin: the administrator roles; Companies Admin: the
+    								    // admin-side company roles; a company: "Company user"). Company logins come with the company.
     								    $is_company_login = (int) $controller->getRoleId() === 4;
-    								    if ((int) $k === 4 || ($is_company_login ? (int) $k !== 5 : (int) $k === 5)) { continue; }
+    								    if (!$controller->canGiveRole($k)) { continue; }
     									?><option value="<?php echo $k; ?>"<?php echo $is_company_login ? ' selected="selected"' : NULL; ?>><?php echo pjSanitize::html($v); ?></option><?php
     								}
     								?>
     							</select>
+    							<?php if (!empty($tpl['is_restricted'])) { ?>
+    							<small class="help-block m-b-none"><i class="fa fa-lock m-r-xs"></i><?php __('plugin_base_user_perm_hint'); ?></small>
+    							<?php } ?>
                             </div>
                         </div><!-- /.col-md-3 -->
                     </div><!-- /.row -->

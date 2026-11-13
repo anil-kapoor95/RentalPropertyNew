@@ -202,6 +202,9 @@ var jQuery = jQuery || $.noConflict();
 				if (String($checked.val()).indexOf('signup_') === 0)
 				{
 					$('.signupTokens').show();
+				}else if (String($checked.val()).indexOf('sub_') === 0)
+				{
+					$('.subscriptionTokens').show();
 				}else if($checked.val() == 'new_property')
 				{
 					$('.propertyTokens').show();

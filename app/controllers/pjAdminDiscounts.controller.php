@@ -29,8 +29,146 @@ class pjAdminDiscounts extends pjAdmin
 			->getData();
 	}
 
+	/* ------------------------------------------------------------------
+	 * Page form (same layout as the Super Admin's Coupons & Discounts). The Ajax popup below stays for
+	 * older callers.
+	 * ------------------------------------------------------------------ */
+
+	/** Discount row from the page form, or an error label key. */
+	private function discountFromPost()
+	{
+		$condition = $this->_post->toString('condition');
+		$options = $this->_post->toString('options');
+		$data = array(
+			'discount' => (float) str_replace(',', '.', (string) $this->_post->toString('discount')),
+			'type' => $this->_post->toString('type') === 'amount' ? 'amount' : 'percent',
+			'condition' => in_array($condition, array('period', 'made', 'both'), true) ? $condition : 'period',
+			'options' => in_array($options, array('early', 'persons', 'family', 'duration'), true) ? $options : '',
+			'date_from' => $this->cdDate($this->_post->toString('date_from')),
+			'date_to' => $this->cdDate($this->_post->toString('date_to')),
+			'early_days' => ':NULL', 'min_persons' => ':NULL', 'max_persons' => ':NULL', 'min_duration' => ':NULL', 'max_duration' => ':NULL',
+		);
+		$name_ok = false;
+		foreach ((array) $this->_post->toI18n('i18n') as $f)
+		{
+			if (isset($f['name']) && trim((string) $f['name']) !== '') { $name_ok = true; }
+		}
+		if (!$name_ok || $data['discount'] <= 0 || ($data['type'] === 'percent' && $data['discount'] > 100) || $data['options'] === ''
+			|| $data['date_from'] === '' || $data['date_to'] === '' || $data['date_from'] > $data['date_to']
+			|| count($this->filterCompanyCalendarIds($this->_post->toArray('calendar_id'))) === 0)
+		{
+			return 'cdErrFields';
+		}
+		if ($data['options'] === 'early')
+		{
+			$data['early_days'] = max(0, $this->_post->toInt('early_days'));
+		} elseif ($data['options'] === 'persons' || $data['options'] === 'duration') {
+			$p = $data['options'] === 'persons' ? 'persons' : 'duration';
+			$min = max(0, $this->_post->toInt('min_' . $p));
+			$max = max(0, $this->_post->toInt('max_' . $p));
+			if ($min <= 0 || ($max > 0 && $max < $min))
+			{
+				return 'cdErrRule';
+			}
+			$data['min_' . $p] = $min;
+			$data['max_' . $p] = $max > 0 ? $max : $min;
+		}
+		$data['discount'] = number_format($data['discount'], 2, '.', '');
+		return $data;
+	}
+
+	/** Links of a discount to the properties this user manages (links to other owners' properties stay). */
+	private function saveDiscountCalendars($id, $ids)
+	{
+		$m = pjCalendarDiscountModel::factory();
+		$managed = $this->getCompanyCalendarIds();
+		if (!empty($managed))
+		{
+			$m->where('discount_id', (int) $id)->whereIn('calendar_id', $managed)->eraseAll();
+		}
+		$ids = $this->filterCompanyCalendarIds($ids);
+		if (!empty($ids))
+		{
+			$m->reset();
+			foreach ($ids as $calendar_id)
+			{
+				$m->addBatchRow(array((int) $id, (int) $calendar_id));
+			}
+			$m->setBatchFields(array('discount_id', 'calendar_id'))->insertBatch();
+		}
+	}
+
+	/** Add / edit a discount on its own page (GET form, POST save or delete). */
+	private function discountPage($id)
+	{
+		$this->checkLogin();
+		$id = (int) $id;
+		if ($id > 0 && !$this->isCompanyRecord(pjDiscountModel::factory(), $id))
+		{
+			$this->denyCompanyAccess();
+		}
+		$back = '&id=' . $id;
+		if (self::isPost())
+		{
+			if ($this->_post->toString('do') === 'delete')
+			{
+				if ($id <= 0 || !pjAuth::factory('pjAdminDiscounts', 'pjActionDeleteDiscount')->hasAccess())
+				{
+					$this->sendForbidden();
+					return;
+				}
+				pjDiscountModel::factory()->set('id', $id)->erase();
+				pjMultiLangModel::factory()->where('model', 'pjDiscount')->where('foreign_id', $id)->eraseAll();
+				pjCalendarDiscountModel::factory()->where('discount_id', $id)->eraseAll();
+				$this->cdBack('pjAdminDiscounts', 'pjActionIndex', 'cdDeleted');
+			}
+			$data = $this->discountFromPost();
+			$action = $id > 0 ? 'pjActionUpdate' : 'pjActionCreate';
+			if (!is_array($data))
+			{
+				$this->cdBack('pjAdminDiscounts', $action, $data, $back);
+			}
+			$data['company_id'] = $this->getCompanyId();
+			$i18n = $this->_post->toI18n('i18n');
+			if ($id > 0)
+			{
+				pjDiscountModel::factory()->set('id', $id)->modify($data);
+				if (!empty($i18n)) { pjMultiLangModel::factory()->updateMultiLang($i18n, $id, 'pjDiscount'); }
+			} else {
+				$id = (int) pjDiscountModel::factory($data)->insert()->getInsertId();
+				if ($id <= 0)
+				{
+					$this->cdBack('pjAdminDiscounts', $action, 'cdErrSave');
+				}
+				if (!empty($i18n)) { pjMultiLangModel::factory()->saveMultiLang($i18n, $id, 'pjDiscount'); }
+			}
+			$this->saveDiscountCalendars($id, $this->_post->toArray('calendar_id'));
+			$this->cdBack('pjAdminDiscounts', 'pjActionIndex', 'cdSaved');
+		}
+		$arr = false;
+		if ($id > 0)
+		{
+			$arr = pjDiscountModel::factory()->find($id)->getData();
+			$arr['i18n'] = pjMultiLangModel::factory()->getMultiLang($id, 'pjDiscount');
+		}
+		$this->setTemplate('pjAdminDiscounts', 'pjActionForm');
+		$this->set('arr', $arr);
+		$this->setLocalesData();
+		$this->set('calendar_names', $this->cdCalendarNames());
+		$this->set('calendar_id_arr', $id > 0 ? array_map('intval', pjCalendarDiscountModel::factory()->where('discount_id', $id)->findAll()->getDataPair(null, 'calendar_id')) : array());
+		$this->set('has_delete', pjAuth::factory('pjAdminDiscounts', 'pjActionDeleteDiscount')->hasAccess());
+		$this->set('cd', $this->cdPageData('discount'));
+		$this->appendCss('subscriptions.css?v=' . @filemtime(PJ_INSTALL_PATH . 'app/web/css/subscriptions.css'));
+		$this->appendJs('pjAdminCoupons.js?v=' . @filemtime(PJ_INSTALL_PATH . 'app/web/js/pjAdminCoupons.js'));
+	}
+
 	public function pjActionCreate()
 	{
+		if (!$this->isXHR())
+		{
+			$this->discountPage(0);
+			return;
+		}
 		$this->setAjax(true);
 		if ($this->isXHR()) {
 			if ($this->_post->check('discount_create'))
@@ -244,15 +382,26 @@ class pjAdminDiscounts extends pjAdmin
 	    $this->set('has_export', pjAuth::factory('pjAdminDiscounts', 'pjActionExportDiscount')->hasAccess());
 	    $this->set('has_delete', pjAuth::factory('pjAdminDiscounts', 'pjActionDeleteDiscount')->hasAccess());
 	    $this->set('has_delete_bulk', pjAuth::factory('pjAdminDiscounts', 'pjActionDeleteDiscountBulk')->hasAccess());
-	    
-	    $this->appendCss('awesome-bootstrap-checkbox.css', PJ_THIRD_PARTY_PATH . 'awesome_bootstrap_checkbox/');
-		$this->appendCss('datepicker3.css', PJ_THIRD_PARTY_PATH . 'bootstrap_datepicker/');
-		$this->appendJs('bootstrap-datepicker.js', PJ_THIRD_PARTY_PATH . 'bootstrap_datepicker/');
-	    $this->appendCss('css/select2.min.css', PJ_THIRD_PARTY_PATH . 'select2/');
-        $this->appendJs('js/select2.full.min.js', PJ_THIRD_PARTY_PATH . 'select2/');
-		$this->appendJs('jquery.multilang.js', PJ_FRAMEWORK_LIBS_PATH . 'pj/js/');
-		$this->appendJs('jquery.datagrid.js', PJ_FRAMEWORK_LIBS_PATH . 'pj/js/');
-		$this->appendJs('pjAdminDiscounts.js');
+
+	    // the list (same layout as the Super Admin's Coupons & Discounts)
+	    $rows = pjDiscountModel::factory()->where('t1.company_id', $this->getCompanyId())
+	    	->select('t1.*, ' . sprintf("COALESCE(NULLIF(t2.content, ''), (SELECT `ml`.`content` FROM `%s` AS `ml` WHERE `ml`.`model` = 'pjDiscount' AND `ml`.`foreign_id` = t1.id AND `ml`.`field` = 'name' AND `ml`.`content` <> '' ORDER BY `ml`.`locale` LIMIT 1))", pjMultiLangModel::factory()->getTable()) . ' AS `name`')
+	    	->join('pjMultiLang', "t2.model='pjDiscount' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='" . (int) $this->getLocaleId() . "'", 'left outer')
+	    	->orderBy('t1.date_to DESC, `name` ASC')->findAll()->getData();
+	    $links = array();
+	    if (!empty($rows))
+	    {
+	    	foreach (pjCalendarDiscountModel::factory()->whereIn('discount_id', array_map(function ($r) { return (int) $r['id']; }, $rows))->findAll()->getData() as $l)
+	    	{
+	    		$links[(int) $l['discount_id']][] = (int) $l['calendar_id'];
+	    	}
+	    }
+	    $this->set('rows', $rows);
+	    $this->set('links', $links);
+	    $this->set('calendar_names', $this->cdCalendarNames());
+	    $this->set('cd', $this->cdPageData('discount'));
+	    $this->appendCss('subscriptions.css?v=' . @filemtime(PJ_INSTALL_PATH . 'app/web/css/subscriptions.css'));
+	    $this->appendJs('pjAdminCoupons.js?v=' . @filemtime(PJ_INSTALL_PATH . 'app/web/js/pjAdminCoupons.js'));
 	}
 	
 	public function pjActionSaveDiscount()
@@ -302,6 +451,11 @@ class pjAdminDiscounts extends pjAdmin
 	
 	public function pjActionUpdate()
 	{
+		if (!$this->isXHR())
+		{
+			$this->discountPage(self::isPost() ? $this->_post->toInt('id') : $this->_get->toInt('id'));
+			return;
+		}
 		$this->setAjax(true);
 		if ($this->isXHR()) {
 			if ($this->_post->check('discount_update'))
