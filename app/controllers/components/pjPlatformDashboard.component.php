@@ -23,7 +23,7 @@ class pjPlatformDashboard
 	public static function range($key, $from, $to)
 	{
 		$today = date('Y-m-d');
-		$key = in_array($key, array('7', '30', '90', 'month', 'custom'), true) ? $key : '30';
+		$key = in_array($key, array('7', '30', '90', '12m', 'month', 'custom'), true) ? $key : '30';
 		$error = false;
 		if ($key === 'custom')
 		{
@@ -47,6 +47,12 @@ class pjPlatformDashboard
 		if ($key === 'month')
 		{
 			return array(date('Y-m-01'), $today, 'month', (int) date('j'), $error);
+		}
+		if ($key === '12m')
+		{
+			// the current month and the 11 before it
+			$f = date('Y-m-01', strtotime(date('Y-m-01') . ' -11 months'));
+			return array($f, $today, '12m', self::days($f, $today), $error);
 		}
 		$days = (int) $key;
 		return array(date('Y-m-d', strtotime($today . ' -' . ($days - 1) . ' days')), $today, $key, $days, $error);
@@ -194,22 +200,43 @@ class pjPlatformDashboard
 	 */
 	public static function statusAt($sub, $time)
 	{
+		$r = self::stateAt($sub, $time);
+		return $r === null ? null : array($r[0], $r[1]);
+	}
+
+	private static $planIdsByName = null;
+
+	/**
+	 * Like statusAt, with the plan in force: array(status, entitled, plan_id) or null. For an earlier time the plan
+	 * is read from the log ("Plan X assigned ...", "... plan X active until ...").
+	 */
+	public static function stateAt($sub, $time)
+	{
 		if (self::existedAt($sub, $time))
 		{
 			$r = pjEntitlement::effectiveStatus($sub, $time);
-			return array($r[0], $r[1]);
+			return array($r[0], $r[1], (int) $sub['plan_id']);
 		}
 		if (self::$events === null)
 		{
 			self::$events = array();
 			foreach (pjSubscriptionEventModel::factory()->select('t1.company_id, t1.type, t1.message, t1.created')
-				->whereIn('t1.type', array('assigned', 'payment', 'extended', 'status', 'removed'))
+				->whereIn('t1.type', array('assigned', 'payment', 'extended', 'status', 'removed', 'plan_changed'))
 				->orderBy('t1.created ASC, t1.id ASC')->findAll()->getData() as $e)
 			{
 				self::$events[(int) $e['company_id']][] = $e;
 			}
 		}
-		$state = null; // array(status, end)
+		if (self::$planIdsByName === null)
+		{
+			self::$planIdsByName = array();
+			foreach (pjEntitlement::plans() as $p) { self::$planIdsByName[mb_strtolower(trim((string) $p['name']))] = (int) $p['id']; }
+		}
+		$byName = function ($name) {
+			$k = mb_strtolower(trim((string) $name));
+			return isset(self::$planIdsByName[$k]) ? self::$planIdsByName[$k] : 0;
+		};
+		$state = null; // array(status, end, plan_id)
 		$cid = (int) $sub['company_id'];
 		foreach (isset(self::$events[$cid]) ? self::$events[$cid] : array() as $e)
 		{
@@ -218,15 +245,19 @@ class pjPlatformDashboard
 			switch ($e['type'])
 			{
 				case 'assigned':
+					$plan = preg_match('/^Plan (.+?) (?:assigned|chosen)/', $msg, $pm) ? $byName($pm[1]) : 0;
 					if (preg_match('/assigned \((trial|active)\) until (\d{4}-\d{2}-\d{2}[ \d:]*)/', $msg, $m)) {
-						$state = array($m[1], trim($m[2]));
+						$state = array($m[1], trim($m[2]), $plan);
 					} else {
 						// plan for new companies / free plan chosen: no end date
-						$state = array('active', null);
+						$state = array('active', null, $plan);
 					}
 					break;
 				case 'payment':
-					if (preg_match('/active until (\d{4}-\d{2}-\d{2}[ \d:]*)/', $msg, $m)) { $state = array('active', trim($m[1])); }
+					if (preg_match('/plan (.+?) active until (\d{4}-\d{2}-\d{2}[ \d:]*)/', $msg, $m)) { $state = array('active', trim($m[2]), $byName($m[1])); }
+					break;
+				case 'plan_changed':
+					if ($state !== null && preg_match('/-> (.+)$/', $msg, $m)) { $state[2] = $byName($m[1]); }
 					break;
 				case 'extended':
 					if ($state !== null && preg_match('/set to (\d{4}-\d{2}-\d{2}[ \d:]*)/', $msg, $m)) { $state[1] = trim($m[1]); }
@@ -245,13 +276,13 @@ class pjPlatformDashboard
 			if (!empty($sub['created']) && strtotime($sub['created']) <= $time)
 			{
 				$r = pjEntitlement::effectiveStatus($sub, $time);
-				return array($r[0], $r[1]);
+				return array($r[0], $r[1], (int) $sub['plan_id']);
 			}
 			return null;
 		}
 		$row = array('status' => $state[0], 'current_period_end' => $state[1], 'trial_ends_at' => $state[0] === 'trial' ? $state[1] : null, 'cancel_at_period_end' => 0);
 		$r = pjEntitlement::effectiveStatus($row, $time);
-		return array($r[0], $r[1]);
+		return array($r[0], $r[1], $state[2] > 0 ? $state[2] : (int) $sub['plan_id']);
 	}
 	/**
 	 * Latest billing transactions (all companies, or one company): newest first; with $from / $to only those of the
@@ -359,6 +390,332 @@ class pjPlatformDashboard
 			'usage' => pjEntitlement::usage($company_id),
 			'limits' => $s['limits'],
 			'grace_ends_at' => $s['grace_ends_at'],
+		);
+	}
+
+	/* ------------------------------------------------------------------ redesigned dashboard: one snapshot per period */
+
+	/**
+	 * Steps of the charts for from..to: per day up to 31 days, per week up to 124 days, per month beyond.
+	 * Returns array(bucket, steps[] {start, end (Y-m-d), label, tip}).
+	 */
+	public static function buckets($from, $to)
+	{
+		$days = self::days($from, $to);
+		$bucket = $days <= 31 ? 'day' : ($days <= 124 ? 'week' : 'month');
+		$steps = array();
+		$t = strtotime($from . ' 12:00:00');
+		$end = strtotime($to . ' 12:00:00');
+		while ($t <= $end)
+		{
+			if ($bucket === 'day') {
+				$next = strtotime('+1 day', $t);
+			} elseif ($bucket === 'week') {
+				$next = strtotime('+7 days', $t);
+			} else {
+				$next = strtotime(date('Y-m-01', $t) . ' 12:00:00 +1 month');
+			}
+			$steps[] = array('start' => date('Y-m-d', $t), 'end' => date('Y-m-d', min($end, $next - 86400)));
+			$t = $next;
+		}
+		return array($bucket, $steps);
+	}
+
+	/** Index of the step a date (Y-m-d H:i:s) falls in, or -1. */
+	private static function stepOf($steps, $datetime)
+	{
+		$d = substr((string) $datetime, 0, 10);
+		foreach ($steps as $i => $s)
+		{
+			if ($d >= $s['start'] && $d <= $s['end']) { return $i; }
+		}
+		return -1;
+	}
+
+	/** Price of a plan per month (yearly plans / 12, plans of several months / months); 0 for free plans. */
+	private static function monthly($plan)
+	{
+		if (empty($plan) || $plan['price'] === null || (float) $plan['price'] <= 0) { return 0.0; }
+		$months = max(1, (int) $plan['interval_count']) * ($plan['billing_interval'] === 'year' ? 12 : 1);
+		return round((float) $plan['price'] / $months, 2);
+	}
+
+	/**
+	 * Everything the Super Admin dashboard shows for the period from..to (real data only). Counts of things are taken
+	 * at the end of each step / of the period; events (revenue, sign-ups, trials, payments) inside it.
+	 * Also the JSON answer of pjAdmin::pjActionPlatformData.
+	 */
+	public static function snapshot($from, $to)
+	{
+		$ready = class_exists('pjEntitlement') && pjEntitlement::isReady();
+		list($pf, $pt) = self::previous($from, $to);
+		list($bucket, $steps) = self::buckets($from, $to);
+		$n = count($steps);
+		$zero = array_fill(0, $n, 0);
+		$now = time();
+		$endTs = self::asOf($to);
+		$prevEndTs = self::asOf($pt);
+		$stepEnd = array();
+		$stepStart = array();
+		foreach ($steps as $i => $s)
+		{
+			$stepEnd[$i] = min($now, strtotime($s['end'] . ' 23:59:59'));
+			$stepStart[$i] = strtotime($s['start'] . ' 00:00:00') - 1;
+		}
+
+		$plans = $ready ? pjEntitlement::plans() : array();
+		$companies = pjCompanyModel::factory()->select('t1.id, t1.name, t1.status, t1.created')->findAll()->getData();
+		$created = array();
+		foreach ($companies as $c) { $created[(int) $c['id']] = !empty($c['created']) ? strtotime($c['created']) : 0; }
+		$existsAt = function ($cid, $ts) use ($created) { return isset($created[$cid]) && $created[$cid] <= $ts; };
+
+		// ---- revenue: paid payments in the period (and the period before), per currency, plan and kind
+		$paidRows = $ready ? pjBillingTransactionModel::factory()->select('t1.company_id, t1.plan_id, t1.kind, t1.amount, t1.currency, t1.paid_at, t1.coupon_code')
+			->where('t1.status', 'paid')->where(self::between('t1.paid_at', $pf, $to))->findAll()->getData() : array();
+		$revenue = array();
+		$revenuePrev = array();
+		foreach ($paidRows as $t)
+		{
+			$cur = strtoupper((string) $t['currency']);
+			$day = substr($t['paid_at'], 0, 10);
+			if ($day >= $from) { $revenue[$cur] = (isset($revenue[$cur]) ? $revenue[$cur] : 0) + (float) $t['amount']; }
+			elseif ($day <= $pt) { $revenuePrev[$cur] = (isset($revenuePrev[$cur]) ? $revenuePrev[$cur] : 0) + (float) $t['amount']; }
+		}
+		// main currency: the one with the most revenue, else the platform currency, else the currency of the plans
+		$main = '';
+		if (!empty($revenue)) { arsort($revenue); $main = key($revenue); }
+		if ($main === '')
+		{
+			$o = pjRegistry::getInstance()->is('options') ? pjRegistry::getInstance()->get('options') : array();
+			foreach ($plans as $p) { if ($p['price'] !== null && (float) $p['price'] > 0) { $main = strtoupper((string) $p['currency']); break; } }
+			if ($main === '' && !empty($o['o_currency'])) { $main = strtoupper($o['o_currency']); }
+		}
+		ksort($revenue);
+
+		// revenue per step: by plan (the four largest plans, then "Other") and by kind, in the main currency
+		$byPlan = array();
+		$byKind = array('new' => $zero, 'upgrade' => $zero, 'renewal' => $zero);
+		$revSeries = $zero;
+		$otherCurrency = false;
+		foreach ($paidRows as $t)
+		{
+			if (substr($t['paid_at'], 0, 10) < $from) { continue; }
+			if (strtoupper((string) $t['currency']) !== $main) { $otherCurrency = true; continue; }
+			$i = self::stepOf($steps, $t['paid_at']);
+			if ($i < 0) { continue; }
+			$pid = (int) $t['plan_id'];
+			if (!isset($byPlan[$pid])) { $byPlan[$pid] = $zero; }
+			$byPlan[$pid][$i] += (float) $t['amount'];
+			$k = isset($byKind[$t['kind']]) ? $t['kind'] : 'new';
+			$byKind[$k][$i] += (float) $t['amount'];
+			$revSeries[$i] += (float) $t['amount'];
+		}
+		uasort($byPlan, function ($a, $b) { return array_sum($b) <=> array_sum($a); });
+		$planSeries = array();
+		$other = $zero;
+		$k = 0;
+		foreach ($byPlan as $pid => $vals)
+		{
+			if ($k < 4) {
+				$planSeries[] = array('name' => isset($plans[$pid]) ? $plans[$pid]['name'] : '#' . $pid, 'values' => array_map(function ($v) { return round($v, 2); }, $vals));
+			} else {
+				foreach ($vals as $i => $v) { $other[$i] += $v; }
+			}
+			$k++;
+		}
+		if (array_sum($other) > 0) { $planSeries[] = array('name' => __('dash_other', true), 'values' => $other, 'other' => true); }
+		$kindSeries = array();
+		foreach (array('new' => 'dash_kind_new', 'upgrade' => 'dash_kind_upgrade', 'renewal' => 'dash_kind_renewal') as $kk => $lbl)
+		{
+			$kindSeries[] = array('name' => __($lbl, true), 'values' => array_map(function ($v) { return round($v, 2); }, $byKind[$kk]));
+		}
+
+		// ---- companies: total at each step end, new and left per step
+		$companiesAt = function ($ts) use ($created) { $c = 0; foreach ($created as $t) { if ($t <= $ts) { $c++; } } return $c; };
+		$newSeries = $zero;
+		foreach ($created as $cid => $ts)
+		{
+			if ($ts === 0) { continue; }
+			$i = self::stepOf($steps, date('Y-m-d', $ts));
+			if ($i >= 0) { $newSeries[$i]++; }
+		}
+		$totalSeries = array();
+		foreach ($stepEnd as $i => $ts) { $totalSeries[$i] = $companiesAt($ts); }
+
+		// ---- subscriptions: active / trial / MRR at the end of each step, and companies that lost their plan per step
+		$subs = $ready ? pjCompanySubscriptionModel::factory()->findAll()->getData() : array();
+		foreach ($subs as $k2 => $sub) { $subs[$k2] = pjEntitlement::applyDueChange($sub); }
+		$activeSeries = $zero;
+		$mrrSeries = $zero;
+		$trialSeries = $zero;
+		$leftSeries = $zero;
+		$at = function ($ts) use ($subs, $plans, $existsAt, $main) {
+			$o = array('active' => 0, 'trial' => 0, 'paying' => 0, 'mrr' => array(), 'ended' => 0, 'plans' => array());
+			foreach ($subs as $sub)
+			{
+				$cid = (int) $sub['company_id'];
+				if (!$existsAt($cid, $ts)) { continue; }
+				$st = self::stateAt($sub, $ts);
+				if ($st === null) { continue; }
+				list($status, $entitled, $pid) = $st;
+				if (!$entitled) { $o['ended']++; continue; }
+				$o['active']++;
+				if (!isset($o['plans'][$pid])) { $o['plans'][$pid] = array('count' => 0, 'trial' => 0, 'mrr' => 0.0); }
+				$o['plans'][$pid]['count']++;
+				if ($status === 'trial') { $o['trial']++; $o['plans'][$pid]['trial']++; continue; }
+				$plan = isset($plans[$pid]) ? $plans[$pid] : null;
+				$m = self::monthly($plan);
+				if ($m > 0)
+				{
+					$o['paying']++;
+					$cur = strtoupper((string) $plan['currency']);
+					$o['mrr'][$cur] = (isset($o['mrr'][$cur]) ? $o['mrr'][$cur] : 0) + $m;
+					$o['plans'][$pid]['mrr'] += $m;
+				}
+			}
+			return $o;
+		};
+		foreach ($stepEnd as $i => $ts)
+		{
+			$a = $at($ts);
+			$activeSeries[$i] = $a['active'];
+			$trialSeries[$i] = $a['trial'];
+			$mrrSeries[$i] = round(isset($a['mrr'][$main]) ? $a['mrr'][$main] : 0, 2);
+		}
+		foreach ($subs as $sub)
+		{
+			foreach ($steps as $i => $s)
+			{
+				$before = self::stateAt($sub, $stepStart[$i]);
+				$after = self::stateAt($sub, $stepEnd[$i]);
+				if ($before !== null && $before[1] && ($after === null || !$after[1])) { $leftSeries[$i]--; }
+			}
+		}
+		$end = $at($endTs);
+		$prevEnd = $at($prevEndTs);
+
+		// ---- plan mix at the end of the period
+		$companiesEnd = $companiesAt($endTs);
+		$withSub = 0;
+		foreach ($subs as $sub) { if ($existsAt((int) $sub['company_id'], $endTs) && self::stateAt($sub, $endTs) !== null) { $withSub++; } }
+		$mix = array();
+		foreach ($end['plans'] as $pid => $v)
+		{
+			$plan = isset($plans[$pid]) ? $plans[$pid] : null;
+			$mix[] = array('name' => $plan ? $plan['name'] : '#' . $pid, 'count' => $v['count'], 'trial' => $v['trial'],
+				'free' => !$plan || self::monthly($plan) <= 0, 'mrr' => round($v['mrr'], 2), 'currency' => $plan ? strtoupper((string) $plan['currency']) : $main,
+				'mrr_text' => pjMoney::format(round($v['mrr'], 2), $plan ? $plan['currency'] : $main),
+				'price' => $plan && $plan['price'] !== null && (float) $plan['price'] > 0 ? pjMoney::format($plan['price'], $plan['currency']) : '', 'sort' => $plan ? (int) $plan['sort'] : 999);
+		}
+		usort($mix, function ($a, $b) { return $a['free'] === $b['free'] ? $b['count'] <=> $a['count'] : ($a['free'] ? 1 : -1); });
+
+		// ---- trial -> paid: trials started in a period that were followed by a paid payment
+		$events = $ready ? pjSubscriptionEventModel::factory()->select('t1.company_id, t1.created')->where('t1.type', 'assigned')
+			->where("t1.message LIKE '%(trial)%'")->where(self::between('t1.created', $pf, $to))->findAll()->getData() : array();
+		$allPaid = $ready ? pjBillingTransactionModel::factory()->select('t1.company_id, t1.paid_at')->where('t1.status', 'paid')->findAll()->getData() : array();
+		$conv = function ($f, $t) use ($events, $allPaid, $steps) {
+			$trials = array();
+			foreach ($events as $e)
+			{
+				$d = substr($e['created'], 0, 10);
+				if ($d < $f || $d > $t) { continue; }
+				$cid = (int) $e['company_id'];
+				if (!isset($trials[$cid]) || $e['created'] < $trials[$cid]) { $trials[$cid] = $e['created']; }
+			}
+			$converted = 0;
+			foreach ($trials as $cid => $start)
+			{
+				foreach ($allPaid as $p) { if ((int) $p['company_id'] === $cid && $p['paid_at'] >= $start) { $converted++; break; } }
+			}
+			return array(count($trials), $converted);
+		};
+		list($trialsN, $convertedN) = $conv($from, $to);
+		list($trialsP, $convertedP) = $conv($pf, $pt);
+		$trialsStarted = $zero;
+		foreach ($events as $e)
+		{
+			if (substr($e['created'], 0, 10) < $from) { continue; }
+			$i = self::stepOf($steps, $e['created']);
+			if ($i >= 0) { $trialsStarted[$i]++; }
+		}
+
+		// ---- funnel: the companies that signed up in the period (one cohort), and how far each of them got by the end
+		// of the period. Every step is a part of the step before it: chose a plan (trial or paid) -> paid -> renewed.
+		$cohort = array();
+		foreach ($created as $cid => $ts) { if ($ts && date('Y-m-d', $ts) >= $from && date('Y-m-d', $ts) <= $to) { $cohort[$cid] = 1; } }
+		$withPlan = array();
+		$paying = array();
+		$renewed = array();
+		foreach ($subs as $sub)
+		{
+			$cid = (int) $sub['company_id'];
+			if (isset($cohort[$cid]) && self::stateAt($sub, $endTs) !== null) { $withPlan[$cid] = 1; }
+		}
+		foreach ($allPaid as $p)
+		{
+			$cid = (int) $p['company_id'];
+			if (isset($cohort[$cid]) && !empty($p['paid_at']) && substr($p['paid_at'], 0, 10) <= $to) { $paying[$cid] = 1; $withPlan[$cid] = 1; }
+		}
+		foreach ($paidRows as $t)
+		{
+			$cid = (int) $t['company_id'];
+			if ($t['kind'] === 'renewal' && isset($paying[$cid]) && substr($t['paid_at'], 0, 10) <= $to) { $renewed[$cid] = 1; }
+		}
+		$signups = count($cohort);
+		$planN = count($withPlan);
+
+		// ---- payments started in the period
+		$pay = array('paid' => 0, 'failed' => 0, 'pending' => 0, 'rate' => null);
+		if ($ready)
+		{
+			foreach (pjBillingTransactionModel::factory()->select('t1.status, COUNT(*) AS `cnt`')->where(self::between('t1.created', $from, $to))
+				->groupBy('t1.status')->findAll()->getDataPair('status', 'cnt') as $st => $c)
+			{
+				if ($st === 'paid') { $pay['paid'] += (int) $c; }
+				elseif ($st === 'pending') { $pay['pending'] += (int) $c; }
+				elseif (in_array($st, array('failed', 'cancelled'), true)) { $pay['failed'] += (int) $c; }
+			}
+			$tried = $pay['paid'] + $pay['failed'];
+			$pay['rate'] = $tried > 0 ? (int) round($pay['paid'] * 100 / $tried) : null;
+		}
+
+		$money = array('code' => $main);
+		list($money['decimals'], $money['thousands'], $money['place']) = pjMoney::style($main);
+		$money['symbol'] = pjMoney::symbol($main);
+
+		return array(
+			'ready' => $ready,
+			'money' => $money,
+			'bucket' => $bucket,
+			'steps' => $steps,
+			'kpi' => array(
+				'revenue' => array('value' => round(isset($revenue[$main]) ? $revenue[$main] : 0, 2), 'prev' => round(isset($revenuePrev[$main]) ? $revenuePrev[$main] : 0, 2),
+					'text' => pjMoney::formatMany($revenue, null, pjMoney::format(0, $main)), 'prev_text' => pjMoney::formatMany($revenuePrev, null, pjMoney::format(0, $main)),
+					'multi' => count($revenue) > 1, 'payments' => count(array_filter($paidRows, function ($t) use ($from) { return substr($t['paid_at'], 0, 10) >= $from; }))),
+				'companies' => array('value' => $companiesEnd, 'new' => array_sum($newSeries), 'left' => -array_sum($leftSeries)),
+				'subs' => array('value' => $end['active'], 'prev' => $prevEnd['active'], 'trial' => $end['trial']),
+				'mrr' => array('value' => round(isset($end['mrr'][$main]) ? $end['mrr'][$main] : 0, 2), 'prev' => round(isset($prevEnd['mrr'][$main]) ? $prevEnd['mrr'][$main] : 0, 2),
+					'text' => pjMoney::formatMany($end['mrr'], null, pjMoney::format(0, $main)), 'paying' => $end['paying']),
+				'conversion' => array('trials' => $trialsN, 'converted' => $convertedN, 'rate' => $trialsN > 0 ? (int) round($convertedN * 100 / $trialsN) : null,
+					'prev_rate' => $trialsP > 0 ? (int) round($convertedP * 100 / $trialsP) : null),
+			),
+			'series' => array(
+				'revenue' => array_map(function ($v) { return round($v, 2); }, $revSeries),
+				'by_plan' => $planSeries,
+				'by_kind' => $kindSeries,
+				'companies' => $totalSeries,
+				'new' => $newSeries,
+				'left' => $leftSeries,
+				'active' => $activeSeries,
+				'trial' => $trialSeries,
+				'mrr' => $mrrSeries,
+				'trials_started' => $trialsStarted,
+			),
+			'other_currency' => $otherCurrency,
+			'plan_mix' => array('plans' => $mix, 'ended' => $end['ended'], 'no_plan' => max(0, $companiesEnd - $withSub), 'total' => $companiesEnd,
+				'mrr_text' => pjMoney::formatMany($end['mrr'], null, pjMoney::format(0, $main))),
+			'funnel' => array('signups' => $signups, 'trials' => $planN, 'paying' => count($paying), 'renewed' => count($renewed)),
+			'payments' => $pay,
 		);
 	}
 

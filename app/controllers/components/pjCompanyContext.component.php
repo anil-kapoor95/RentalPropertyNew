@@ -447,7 +447,8 @@ class pjCompanyContext
 				{
 					return 'shared';
 				}
-				return $a === 'pjActionVerifyAPIKey' ? 'platform' : 'company';
+				// the Super Admin dashboard's data (JSON) and the API key check are platform pages
+				return in_array($a, array('pjActionVerifyAPIKey', 'pjActionPlatformData'), true) ? 'platform' : 'company';
 			case 'pjAdminSubscriptions':
 				// company subscriptions and billing history are platform administration: Super Admin
 				if (in_array($a, array('pjActionIndex', 'pjActionManage', 'pjActionBilling'), true))

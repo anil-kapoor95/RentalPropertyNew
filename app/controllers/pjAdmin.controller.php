@@ -286,31 +286,134 @@ class pjAdmin extends pjAppController
 	}
 
 	/** Dashboard of the Super Admin: how many companies, subscriptions per plan / status and users per role. */
+	/**
+	 * Everything the Super Admin dashboard shows for the requested period (GET range = 7|30|90|12m|month|custom,
+	 * from / to for custom). Real data only (pjPlatformDashboard); texts and amounts are ready to show.
+	 */
+	private function platformPayload()
+	{
+		list($from, $to, $key, $days, $range_error) = pjPlatformDashboard::range($this->_get->toString('range'), $this->_get->toString('from'), $this->_get->toString('to'));
+		list($prev_from, $prev_to) = pjPlatformDashboard::previous($from, $to);
+		$df = !empty($this->option_arr['o_date_format']) ? $this->option_arr['o_date_format'] : 'd.m.Y';
+		$mon = array_map('trim', explode(',', (string) __('dash_months_short', true)));
+		if (count($mon) !== 12) { $mon = array('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'); }
+		$short = function ($ymd) use ($mon) { $t = strtotime($ymd); return (int) date('j', $t) . ' ' . $mon[(int) date('n', $t) - 1]; };
+
+		$snap = pjPlatformDashboard::snapshot($from, $to);
+		$labels = array();
+		$tips = array();
+		foreach ($snap['steps'] as $st)
+		{
+			if ($snap['bucket'] === 'month') {
+				$t = strtotime($st['start']);
+				$labels[] = $mon[(int) date('n', $t) - 1] . ' ' . date('y', $t);
+				$tips[] = $st['start'] === $st['end'] ? date($df, $t) : date($df, $t) . ' – ' . date($df, strtotime($st['end']));
+			} elseif ($snap['bucket'] === 'week') {
+				$labels[] = $short($st['start']);
+				$tips[] = date($df, strtotime($st['start'])) . ' – ' . date($df, strtotime($st['end']));
+			} else {
+				$labels[] = $short($st['start']);
+				$tips[] = date($df, strtotime($st['start']));
+			}
+		}
+		unset($snap['steps']);
+
+		// coming up (next 30 days from today) and companies past due at the end of the period
+		$bill = pjPlatformDashboard::billing($from, $to, 5);
+		$up = array();
+		foreach ($bill['renewals_list'] as $r)
+		{
+			$t = strtotime($r['date']);
+			$up[] = array('day' => (int) date('j', $t), 'mon' => $mon[(int) date('n', $t) - 1], 'date' => date($df, $t), 'company' => $r['company'], 'plan' => $r['plan'],
+				'trial' => $r['status'] === 'trial', 'amount' => $r['amount']);
+		}
+		$upcoming = array('list' => $up, 'renewals' => $bill['renewals'], 'renewals_text' => pjMoney::formatMany($bill['renewals_amount']),
+			'trials' => $bill['trials_ending'], 'trials_text' => pjMoney::formatMany($bill['trials_amount']), 'past_due' => $bill['past_due']);
+
+		// latest billing of the period
+		$billing = array();
+		foreach (pjPlatformDashboard::transactions(0, 5, $from, $to) as $tx)
+		{
+			$billing[] = array('date' => date($df, strtotime($tx['date'])), 'company' => $tx['company'], 'plan' => $tx['plan'], 'kind' => __('sub_kind_' . $tx['kind'], true),
+				'amount' => $tx['amount'], 'status' => $tx['status'], 'status_label' => __('sub_tx_' . $tx['status'], true), 'coupon' => $tx['coupon']);
+		}
+
+		// recent activity of the period
+		$titles = array('registration' => 'dash_act_t_registration', 'purchase' => 'dash_act_t_purchase', 'upgrade' => 'dash_act_t_upgrade', 'coupon' => 'dash_act_t_coupon', 'change' => 'dash_act_t_change');
+		$activity = array();
+		foreach (pjPlatformDashboard::activity($from, $to, 5) as $a)
+		{
+			$sec = max(0, time() - strtotime($a['date']));
+			if ($sec < 60) { $ago = __('dash_ago_now', true); }
+			elseif ($sec < 3600) { $ago = sprintf(__('dash_ago_minutes', true), floor($sec / 60)); }
+			elseif ($sec < 7200) { $ago = __('dash_ago_hour', true); }
+			elseif ($sec < 86400) { $ago = sprintf(__('dash_ago_hours', true), floor($sec / 3600)); }
+			elseif ($sec < 2 * 86400) { $ago = __('dash_ago_day', true); }
+			elseif ($sec < 7 * 86400) { $ago = sprintf(__('dash_ago_days', true), floor($sec / 86400)); }
+			else { $ago = date($df, strtotime($a['date'])); }
+			$sub = $a['type'] === 'coupon' ? sprintf(__('dash_act_s_coupon', true), $a['code'], $a['company'])
+				: ($a['type'] === 'registration' ? $a['company'] : $a['company'] . ($a['plan'] !== '' ? ' · ' . $a['plan'] : ''));
+			$activity[] = array('type' => $a['type'], 'title' => __($titles[$a['type']], true), 'sub' => $sub . ($a['amount'] !== '' ? ' · ' . $a['amount'] : ''), 'ago' => $ago,
+				'date' => date($df . ', H:i', strtotime($a['date'])));
+		}
+
+		// platform health (now)
+		$health = pjPlatformDashboard::health();
+		$hdef = array(
+			'gateway' => array('dash_h_gateway', 'pjAdminSubscriptions&action=pjActionGateways', 'dash_h_ok_gateway'),
+			'email' => array('dash_h_email', 'pjBaseOptions&action=pjActionEmailSettings', 'dash_h_ok_email'),
+			'tasks' => array('dash_h_tasks', 'pjBaseCron&action=pjActionIndex', 'dash_h_ok_tasks'),
+			'jobs' => array('dash_h_jobs', 'pjBaseCron&action=pjActionIndex', 'dash_h_ok_jobs'),
+		);
+		$hstate = array('warning' => 'dash_state_warning', 'error' => 'dash_state_error', 'unknown' => 'dash_state_unknown');
+		$hrows = array();
+		foreach ($hdef as $k => $d)
+		{
+			$c = isset($health[$k]) ? $health[$k] : array('state' => 'unknown', 'detail' => '');
+			$hrows[] = array('title' => __($d[0], true), 'state' => $c['state'], 'state_label' => __($c['state'] === 'ok' ? $d[2] : $hstate[$c['state']], true),
+				'detail' => $c['detail'] . (!empty($c['items']) ? ' (' . implode(', ', $c['items']) . ')' : ''), 'url' => $_SERVER['PHP_SELF'] . '?controller=' . $d[1]);
+		}
+		$overall = pjPlatformDashboard::overall($health);
+
+		$range_label = sprintf(__('dash_range_showing', true), date($df, strtotime($from)), date($df, strtotime($to)));
+		return array(
+			'range' => array('key' => $key, 'from' => $from, 'to' => $to, 'days' => $days, 'error' => $range_error, 'to_label' => date($df, strtotime($to)),
+				'label' => $range_label, 'days_label' => $days === 1 ? __('dash_day_count', true) : sprintf(__('dash_days_count', true), $days),
+				'compare' => sprintf(__('dash_compared_with', true), date($df, strtotime($prev_from)), date($df, strtotime($prev_to))),
+				'bucket' => $snap['bucket'], 'bucket_label' => __('dash_per_' . $snap['bucket'], true)),
+			'labels' => $labels,
+			'tips' => $tips,
+			'data' => $snap,
+			'upcoming' => $upcoming,
+			'billing' => $billing,
+			'has_billing' => class_exists('pjEntitlement') && pjEntitlement::isReady() && (int) pjBillingTransactionModel::factory()->findCount()->getData() > 0,
+			'activity' => $activity,
+			'health' => $hrows,
+			'overall' => $overall,
+			'overall_label' => __(array('ok' => 'dash_status_ok', 'warning' => 'dash_status_warning', 'error' => 'dash_status_error')[$overall], true),
+		);
+	}
+
 	private function platformDashboard()
 	{
 		$this->setTemplate('pjAdmin', 'pjActionPlatform');
-		// one period for every figure of the page (presets end today; custom: from..to, validated)
-		list($from, $to, $key, $days, $range_error) = pjPlatformDashboard::range($this->_get->toString('range'), $this->_get->toString('from'), $this->_get->toString('to'));
-		list($prev_from, $prev_to) = pjPlatformDashboard::previous($from, $to);
-		$this->set('range', array('from' => $from, 'to' => $to, 'key' => $key, 'days' => $days, 'error' => $range_error,
-			'prev_from' => $prev_from, 'prev_to' => $prev_to,
-			'requested_from' => $this->_get->toString('from'), 'requested_to' => $this->_get->toString('to')));
 		$user = pjAuthUserModel::factory()->find($this->getUserId())->getData();
 		$this->set('admin_name', !empty($user['name']) ? $user['name'] : (!empty($user['email']) ? $user['email'] : ''));
-		$this->set('stats', pjPlatformDashboard::stats($from, $to));
-		$this->set('overview', pjPlatformDashboard::overview($to));
-		$this->set('trends', pjPlatformDashboard::trends($from, $to));
-		$this->set('activity', pjPlatformDashboard::activity($from, $to, 12));
-		$this->set('billing', pjPlatformDashboard::billing($from, $to, 4));
-		// billing transactions of the period; the section is left out when the platform has no billing records at all
-		$this->set('transactions', pjPlatformDashboard::transactions(0, 5, $from, $to));
-		$this->set('has_transactions', class_exists('pjEntitlement') && pjEntitlement::isReady()
-			&& (int) pjBillingTransactionModel::factory()->findCount()->getData() > 0);
-		$health = pjPlatformDashboard::health();
-		$this->set('health', $health);
-		$this->set('overall', pjPlatformDashboard::overall($health));
+		$this->set('payload', $this->platformPayload());
 		$this->appendCss('platform-dashboard.css?v=' . @filemtime(PJ_INSTALL_PATH . 'app/web/css/platform-dashboard.css'));
 		$this->appendJs('platform-dashboard.js?v=' . @filemtime(PJ_INSTALL_PATH . 'app/web/js/platform-dashboard.js'));
+	}
+
+	/** JSON of the Super Admin dashboard for a period (the page switches periods without reloading). Super Admin only. */
+	public function pjActionPlatformData()
+	{
+		$this->setAjax(true);
+		if (!$this->isLoged() || !$this->isSuperAdmin())
+		{
+			header('HTTP/1.1 403 Forbidden');
+			self::jsonResponse(array('status' => 'ERR', 'code' => 403, 'text' => 'Access denied.'));
+		}
+		self::jsonResponse(array('status' => 'OK', 'code' => 200, 'payload' => $this->platformPayload()));
 	}
 
 	public function pjActionIndex()
