@@ -69,7 +69,8 @@ $hasAccessScriptSubscriptions     = $controller->isSuperAdmin() && class_exists(
 $hasAccessScriptPlans             = $controller->isSuperAdmin() && class_exists('pjEntitlement') && pjEntitlement::isReady();
 $hasAccessScriptMyPlan            = (int) $controller->getRoleId() === 4 && class_exists('pjEntitlement') && pjEntitlement::isReady() && pjAuth::factory('pjAdminSubscriptions', 'pjActionMyPlan')->hasAccess();
 $isScriptSubPayments              = $controller->_get->toString('controller') == 'pjAdminSubscriptions' && in_array($controller->_get->toString('action'), array('pjActionGateways', 'pjActionGatewayOptions'), true);
-$isScriptSubscriptions            = $controller->_get->toString('controller') == 'pjAdminSubscriptions' && !$isScriptSubPayments;
+$isScriptSubCurrency              = $controller->_get->toString('controller') == 'pjAdminSubscriptions' && $controller->_get->toString('action') === 'pjActionCurrency';
+$isScriptSubscriptions            = $controller->_get->toString('controller') == 'pjAdminSubscriptions' && !$isScriptSubPayments && !$isScriptSubCurrency;
 $hasAccessScriptVouchers          = pjAuth::factory('pjAdminVouchers', 'pjActionIndex')->hasAccess() && ($controller->isCompaniesAdmin() || $pjPlanOn('coupons'));
 
 // Permissions - Discounts
@@ -238,14 +239,15 @@ $isScriptCoupons = $isScriptVouchers || $isScriptDiscounts;
 <?php endif; ?>
 
 <?php if ($hasAccessScriptOptionsNotifications || $hasAccessScriptPlans || $hasAccessScriptOptionsAi): ?>
-    <li<?php echo $isScriptOptionsNotifications || $isScriptSubPayments || $isScriptOptionsAi || $isScriptOptionsSignup ? ' class="active"' : NULL; ?>>
+    <li<?php echo $isScriptOptionsNotifications || $isScriptSubPayments || $isScriptSubCurrency || $isScriptOptionsAi || $isScriptOptionsSignup ? ' class="active"' : NULL; ?>>
         <a href="#"><i class="fa fa-cogs"></i> <span class="nav-label"><?php __('menuOptions');?></span><span class="fa arrow"></span></a>
-        <ul class="nav nav-second-level collapse<?php echo $isScriptOptionsNotifications || $isScriptSubPayments || $isScriptOptionsAi || $isScriptOptionsSignup ? ' in' : NULL; ?>">
+        <ul class="nav nav-second-level collapse<?php echo $isScriptOptionsNotifications || $isScriptSubPayments || $isScriptSubCurrency || $isScriptOptionsAi || $isScriptOptionsSignup ? ' in' : NULL; ?>">
             <?php if ($hasAccessScriptOptionsNotifications): ?>
                 <li<?php echo $isScriptOptionsNotifications ? ' class="active"' : NULL; ?>><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminOptions&amp;action=pjActionNotifications"><?php __('menuNotifications');?></a></li>
             <?php endif; ?>
             <?php if ($hasAccessScriptPlans): ?>
                 <li<?php echo $isScriptSubPayments ? ' class="active"' : NULL; ?>><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminSubscriptions&amp;action=pjActionGateways"><?php __('sub_menu_payments');?></a></li>
+                <li<?php echo $isScriptSubCurrency ? ' class="active"' : NULL; ?>><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminSubscriptions&amp;action=pjActionCurrency"><?php __('sub_menu_currency');?></a></li>
             <?php endif; ?>
             <?php if ($hasAccessScriptOptionsAi): ?>
                 <li<?php echo $isScriptOptionsAi ? ' class="active"' : NULL; ?>><a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminOptions&amp;action=pjActionAi"><?php __('ai_menu');?></a></li>

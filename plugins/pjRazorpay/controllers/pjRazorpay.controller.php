@@ -263,8 +263,9 @@ class pjRazorpay extends pjRazorpayAppController
                 'key' => md5($this->option_arr['private_key'] . PJ_SALT),
             	'public_key' => (int) $options['is_test_mode'] === 1 ? $options['test_public_key'] : $options['public_key'],
             	'private_key' => (int) $options['is_test_mode'] === 1 ? $options['test_private_key'] : $options['private_key'],
-                'amount' => self::toSubUnits($params['amount'], $this->option_arr['o_currency']),
-                'currency' => $this->option_arr['o_currency'],
+                // the currency the payment was made in (sent by the caller), else the one of this request
+                'amount' => self::toSubUnits($params['amount'], !empty($params['currency_code']) ? $params['currency_code'] : $this->option_arr['o_currency']),
+                'currency' => !empty($params['currency_code']) ? $params['currency_code'] : $this->option_arr['o_currency'],
                 'item_name' => pjSanitize::html(@$params['uuid']),
                 'foreign_id' => $params['order_id'],
             	'payment_id' => @$request['razorpay_payment_id'],

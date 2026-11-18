@@ -325,7 +325,8 @@ class pjStripe extends pjStripeAppController
             	'public_key' => (int) $options['is_test_mode'] === 1 ? $options['test_public_key'] : $options['public_key'],
             	'private_key' => (int) $options['is_test_mode'] === 1 ? $options['test_private_key'] : $options['private_key'],
                 'amount' => $params['amount'] * 100,
-                'currency' => $this->option_arr['o_currency'],
+                // the currency the payment was made in (sent by the caller), else the one of this request
+                'currency' => !empty($params['currency_code']) ? $params['currency_code'] : $this->option_arr['o_currency'],
                 'description' => pjSanitize::html(@$params['uuid']),
                 'foreign_id' => $params['order_id'],
             	'session_id' => $request['stripesessid'], // Stripe session_id

@@ -952,10 +952,11 @@ class pjJabbApi extends pjAppController
 		{
 			return 'Logo could not be uploaded';
 		}
-		$ext = strtolower(pathinfo($_FILES['logo']['name'], PATHINFO_EXTENSION));
-		if (!in_array($ext, array('jpg', 'jpeg', 'png', 'gif', 'webp'), true) || @getimagesize($_FILES['logo']['tmp_name']) === false)
+		// the real picture type decides, not the file name; WEBP / AVIF become PNG when the server can convert them
+		// (kept as they are otherwise: browsers show them), and the name follows the real type for handleLogo()
+		if (pjImageGuard::prepareUpload($_FILES['logo'], true, true, 1000) === false || !pjImageGuard::isImage($_FILES['logo']['tmp_name'], true))
 		{
-			return 'Logo must be a JPG, PNG, GIF or WEBP image';
+			return 'Logo must be a JPG, PNG, GIF, WEBP or AVIF image';
 		}
 		return null;
 	}
@@ -976,12 +977,13 @@ class pjJabbApi extends pjAppController
 		{
 			return array(null, 'Logo could not be saved');
 		}
+		pjImageGuard::prepareUpload($_FILES['logo'], true, true, 1000);
 		$handle = new pjUpload();
-		$handle->setAllowedExt(array('jpg', 'jpeg', 'png', 'gif', 'webp'));
-		$handle->setAllowedTypes(array('image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/x-png', 'image/gif', 'image/webp'));
+		$handle->setAllowedExt(array('jpg', 'jpeg', 'png', 'gif', 'webp', 'avif'));
+		$handle->setAllowedTypes(array('image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/x-png', 'image/gif', 'image/webp', 'image/avif'));
 		if (!$handle->load($_FILES['logo']))
 		{
-			return array(null, in_array($handle->getErrorCode(), array('121', '122'), true) ? 'Logo file is too big' : 'Logo must be a JPG, PNG, GIF or WEBP image');
+			return array(null, in_array($handle->getErrorCode(), array('121', '122'), true) ? 'Logo file is too big' : 'Logo must be a JPG, PNG, GIF, WEBP or AVIF image');
 		}
 		$ext = strtolower($handle->getExtension());
 		$ext = $ext === 'jpeg' ? 'jpg' : $ext;
@@ -991,10 +993,10 @@ class pjJabbApi extends pjAppController
 			return array(null, 'Logo could not be saved');
 		}
 		@chmod($path, 0644);
-		if (@getimagesize($path) === false)
+		if (!pjImageGuard::isImage($path, true))
 		{
 			@unlink($path);
-			return array(null, 'Logo must be a JPG, PNG, GIF or WEBP image');
+			return array(null, 'Logo must be a JPG, PNG, GIF, WEBP or AVIF image');
 		}
 		if (!empty($current))
 		{
@@ -2086,6 +2088,14 @@ class pjJabbApi extends pjAppController
 				->orderBy('t1.sort ASC')->findAll()->getData();
 			$pjOptionModel = pjOptionModel::factory();
 			$pjOptionModel->init($calendar_id);
+			// The website asks the host for a "price per night": charge per night (the back-office default, per day,
+			// charged a 3-night stay as 4 days). Tax, tourist tax and security deposit are not asked on the website,
+			// so a guest is not charged amounts the host never set; the host can set them in the back office.
+			foreach (array('o_price_based_on' => 'days|nights::nights', 'o_tax' => '0', 'o_tourist_tax' => '0', 'o_security' => '0') as $opt_key => $opt_value)
+			{
+				$pjOptionModel->reset()->where('foreign_id', $calendar_id)->where('`key`', $opt_key)->limit(1)->modifyAll(array('value' => $opt_value));
+			}
+			$pjOptionModel->reset();
 			$pjOptionModel->initConfirmation($calendar_id, $locale_arr);
 			pjMultiLangModel::factory()->saveMultiLang($i18n, $calendar_id, 'pjCalendar');
 			pjUtil::pjActionGenerateImages($calendar_id, $pjOptionModel->reset()->getAllPairs($calendar_id));
@@ -2372,9 +2382,13 @@ class pjJabbApi extends pjAppController
 					$file_errors[] = array('file' => $label, 'error' => 'File is too big');
 					continue;
 				}
-				if ($file['error'] !== UPLOAD_ERR_OK || @getimagesize($file['tmp_name']) === false)
+				// WEBP / AVIF photos (often saved from websites as ".jpg") become JPG; the name follows the real type
+				if ($file['error'] !== UPLOAD_ERR_OK || pjImageGuard::prepareUpload($file) === false || !pjImageGuard::isImage($file['tmp_name']))
 				{
-					$file_errors[] = array('file' => $label, 'error' => 'Photo must be a JPG, PNG or GIF image');
+					$real = $file['error'] === UPLOAD_ERR_OK ? pjImageGuard::extension($file['tmp_name']) : '';
+					$file_errors[] = array('file' => $label, 'error' => $real === 'webp' || $real === 'avif'
+						? 'This ' . strtoupper($real) . ' photo could not be converted on this server. Please save it as JPG or PNG and try again.'
+						: 'Photo must be a JPG, PNG, GIF, WEBP or AVIF image');
 					continue;
 				}
 				// Same storage as Properties > Photos (pjAdminCalendars::uploadCalendarPhotos)
@@ -2383,7 +2397,7 @@ class pjJabbApi extends pjAppController
 				$handle->setAllowedTypes(array('image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/x-png', 'image/gif'));
 				if (!$handle->load($file))
 				{
-					$file_errors[] = array('file' => $label, 'error' => in_array($handle->getErrorCode(), array('121', '122'), true) ? 'File is too big' : 'Photo must be a JPG, PNG or GIF image');
+					$file_errors[] = array('file' => $label, 'error' => in_array($handle->getErrorCode(), array('121', '122'), true) ? 'File is too big' : 'Photo must be a JPG, PNG, GIF, WEBP or AVIF image');
 					continue;
 				}
 				$hash = md5(uniqid(rand(), true));
@@ -2406,7 +2420,7 @@ class pjJabbApi extends pjAppController
 					{
 						$small_path = $small;
 					}
-				} catch (Exception $e) {
+				} catch (\Throwable $e) {
 					$small_path = $large;
 				}
 				$pjCalendarPhotoModel->reset()->setAttributes(array(
@@ -3510,8 +3524,10 @@ class pjJabbApi extends pjAppController
 					'code'             => (string) $plan['code'],
 					'name'             => (string) $plan['name'],
 					'description'      => (string) $plan['description'],
+					// price / currency: the USD (base) price; prices: USD (international) and INR (India)
 					'price'            => $plan['price'],
 					'currency'         => (string) $plan['currency'],
+					'prices'           => array('USD' => pjEntitlement::priceIn($plan, 'USD'), 'INR' => pjEntitlement::priceIn($plan, 'INR')),
 					'billing_interval' => (string) $plan['billing_interval'],
 					'interval_count'   => (int) $plan['interval_count'],
 					'trial_days'       => (int) $plan['trial_days'],
@@ -3527,23 +3543,499 @@ class pjJabbApi extends pjAppController
 			}
 		}
 		$current = null;
+		$billing_currency = null;
 		if ($this->param('signup_token') !== '')
 		{
 			$this->requireSignupTable();
 			$signup = $this->signupFromToken();
 			if ((int) $signup['company_id'] > 0 && class_exists('pjEntitlement') && pjEntitlement::isReady())
 			{
+				$billing_currency = pjEntitlement::billingCurrency((int) $signup['company_id']);
 				$state = pjEntitlement::state((int) $signup['company_id']);
 				if ($state['source'] === 'plan' && !empty($state['plan']))
 				{
-					$current = array('code' => (string) $state['plan']['code'], 'name' => (string) $state['plan']['name'], 'status' => (string) $state['status']);
+					$current = array('code' => (string) $state['plan']['code'], 'name' => (string) $state['plan']['name'], 'status' => (string) $state['status'],
+						'trial_ends_at' => $state['status'] === 'trial' && !empty($state['subscription']['trial_ends_at']) ? (string) $state['subscription']['trial_ends_at'] : null);
+				}
+				// may this host start the plan's free trial here (once, never paid, not on a paid plan)?
+				foreach ($plans as $i => $p)
+				{
+					$plans[$i]['trial_available'] = pjEntitlement::trialAvailable((int) $signup['company_id'], pjEntitlement::plan($p['id']));
 				}
 			}
 		}
 		$this->respond(200, 'OK', array(
 			'plans'       => $plans,
 			'current'     => $current,
+			// currencies plans are sold in, and the company's own billing currency (with a signup_token)
+			'currencies'  => class_exists('pjEntitlement') ? pjEntitlement::$currencies : array('USD'),
+			'billing_currency' => $billing_currency,
 			'my_plan_url' => PJ_INSTALL_URL . 'index.php?controller=pjAdminSubscriptions&action=pjActionMyPlan',
+		));
+	}
+
+	/* ------------------------------------------------------------------
+	 * Buying a plan on the website (same purchase process as My plan in the back office:
+	 * pjSubscriptionBilling::purchase). Dual currency: INR through Razorpay only, USD through Razorpay or
+	 * Stripe (Options > Payments). The amount always comes from the server, never from the request.
+	 * ------------------------------------------------------------------ */
+
+	/**
+	 * Profile page of a logged-in host (website /account): signup_token*.
+	 * Data: state (as the sign-up steps), member_since, plan {code, name, status, is_free, trial_ends_at,
+	 * period_end, cancel_at_period_end} | null, dashboard_url, my_plan_url.
+	 */
+	public function pjActionAccountProfile()
+	{
+		$this->setAjax(true);
+		$this->requirePost();
+		$this->requireSignupTable();
+		$signup = $this->signupFromToken();
+		$this->respond(200, 'OK', $this->accountProfileData($signup));
+	}
+
+	/**
+	 * Personal details of the logged-in host: signup_token*, first_name / name*, email*, phone*, current_password
+	 * (required when the e-mail changes: it is the log-in). Data: as pjActionAccountProfile.
+	 */
+	public function pjActionAccountUpdate()
+	{
+		$this->setAjax(true);
+		$this->requirePost();
+		$this->requireSignupTable();
+		$signup = $this->signupFromToken();
+		$user = $signup['user'];
+
+		$first = $this->param('first_name');
+		$last = $this->param('last_name');
+		$name = $this->param('name');
+		if ($name === '')
+		{
+			$name = trim($first . ' ' . $last);
+		}
+		$name = trim(preg_replace('/\s+/u', ' ', $name));
+		$email = strtolower($this->param('email'));
+		$phone = $this->param('phone');
+
+		$errors = array();
+		if ($name === '')
+		{
+			$errors['name'] = 'Name is required';
+		} elseif (self::tooLong($name, 255)) {
+			$errors['name'] = 'Name is too long';
+		}
+		if ($email === '')
+		{
+			$errors['email'] = 'Email is required';
+		} elseif (!pjValidation::pjActionEmail($email) || self::tooLong($email, 255)) {
+			$errors['email'] = 'Invalid email format';
+		} elseif ($this->findUserByEmail($email, (int) $user['id'])) {
+			$errors['email'] = 'This email is already used by another account';
+		}
+		if ($phone === '')
+		{
+			$errors['phone'] = 'Phone is required';
+		} elseif (!self::validPhone($phone)) {
+			$errors['phone'] = 'Invalid phone number';
+		}
+		$email_changed = empty($errors['email']) && $email !== strtolower((string) $user['email']);
+		if ($email_changed && empty($errors))
+		{
+			$this->requireCurrentPassword($user);
+		}
+		if (!empty($errors))
+		{
+			$this->respond(422, 'Please check the highlighted fields.', array(), $errors);
+		}
+
+		pjAuthUserModel::factory()->set('id', (int) $user['id'])->modify(array('name' => $name, 'email' => $email, 'phone' => $phone));
+		$this->respond(200, $email_changed ? 'Saved. Use your new email the next time you log in.' : 'Saved.',
+			$this->accountProfileData($signup));
+	}
+
+	/**
+	 * Company of the logged-in host: signup_token*, name*, company_email*, phone*. Other company details stay as
+	 * they are (dashboard > Company). Data: as pjActionAccountProfile.
+	 */
+	public function pjActionAccountCompany()
+	{
+		$this->setAjax(true);
+		$this->requirePost();
+		$this->requireSignupTable();
+		$signup = $this->signupFromToken();
+		$company_id = (int) $signup['company_id'];
+		if ($company_id <= 0)
+		{
+			$this->respond(409, 'Your company is not created yet. Please continue the setup first.');
+		}
+
+		$data = array(
+			'name'  => trim(preg_replace('/\s+/u', ' ', $this->param('name'))),
+			'email' => strtolower($this->param('company_email')),
+			'phone' => $this->param('phone'),
+		);
+		$errors = array();
+		if ($data['name'] === '')
+		{
+			$errors['name'] = 'Company name is required';
+		} elseif (self::tooLong($data['name'], 255)) {
+			$errors['name'] = 'Maximum 255 characters allowed';
+		} elseif (self::companyNameTaken($data['name'], $company_id)) {
+			$errors['name'] = 'This company name is already taken. Please choose another name.';
+		}
+		if ($data['email'] === '')
+		{
+			$errors['company_email'] = 'Company email is required';
+		} elseif (!pjValidation::pjActionEmail($data['email']) || self::tooLong($data['email'], 255)) {
+			$errors['company_email'] = 'Invalid email format';
+		}
+		if ($data['phone'] === '')
+		{
+			$errors['phone'] = 'Phone is required';
+		} elseif (!self::validPhone($data['phone']) || self::tooLong($data['phone'], 50)) {
+			$errors['phone'] = 'Invalid phone number';
+		}
+		if (!empty($errors))
+		{
+			$this->respond(422, 'Please check the highlighted fields.', array(), $errors);
+		}
+
+		pjCompanyModel::factory()->set('id', $company_id)->modify($data);
+		$this->respond(200, 'Saved.', $this->accountProfileData($signup));
+	}
+
+	/** New password of the logged-in host: signup_token*, current_password*, password*, confirm_password*. */
+	public function pjActionAccountPassword()
+	{
+		$this->setAjax(true);
+		$this->requirePost();
+		$this->requireSignupTable();
+		$signup = $this->signupFromToken();
+		$user = $signup['user'];
+
+		$password = $this->password('password');
+		$confirm = $this->password('confirm_password');
+		$errors = array();
+		if ($password === '')
+		{
+			$errors['password'] = 'New password is required';
+		} else {
+			$rule = $this->checkPasswordRules($password);
+			if ($rule !== true)
+			{
+				$errors['password'] = $rule;
+			}
+		}
+		if ($confirm === '')
+		{
+			$errors['confirm_password'] = 'Confirm the new password';
+		} elseif ($password !== $confirm) {
+			$errors['confirm_password'] = 'Passwords do not match';
+		}
+		if (!empty($errors))
+		{
+			$this->respond(422, 'Please check the highlighted fields.', array(), $errors);
+		}
+		$this->requireCurrentPassword($user);
+		if ($this->isCurrentPassword((int) $user['id'], $password))
+		{
+			$this->respond(422, 'Please check the highlighted fields.', array(), array('password' => 'Choose a password different from the current one'));
+		}
+
+		pjAuthUserModel::factory()->set('id', (int) $user['id'])->modify(array('password' => $password));
+		$this->respond(200, 'Password changed.', $this->accountProfileData($signup));
+	}
+
+	/**
+	 * Checks current_password for a change of e-mail or password (same throttle as the log-in: failed attempts
+	 * per IP and per account). Answers 422 with errors.current_password when it is wrong.
+	 */
+	private function requireCurrentPassword($user)
+	{
+		$ip = $this->throttleIp();
+		$key = 'user' . (int) $user['id'];
+		$message = 'Too many wrong passwords. Please wait 15 minutes and try again.';
+		$this->throttleCheck('login_ip', $ip, $message);
+		$this->throttleCheck('login_email', $key, $message);
+		$current = $this->password('current_password');
+		if ($current === '' || !$this->isCurrentPassword((int) $user['id'], $current))
+		{
+			if ($current !== '')
+			{
+				self::throttleHit('login_ip', $ip);
+				self::throttleHit('login_email', $key);
+			}
+			$this->respond(422, 'Please check the highlighted fields.', array(),
+				array('current_password' => $current === '' ? 'Enter your current password' : 'The current password is not correct'));
+		}
+		self::throttleClear('login_email', $key);
+	}
+
+	/** Data of the profile page (pjActionAccountProfile and the account updates). */
+	private function accountProfileData($signup)
+	{
+		$plan = null;
+		if ((int) $signup['company_id'] > 0 && class_exists('pjEntitlement'))
+		{
+			$s = pjEntitlement::state((int) $signup['company_id']);
+			if ($s['source'] === 'plan' && !empty($s['plan']))
+			{
+				$sub = isset($s['subscription']) ? $s['subscription'] : array();
+				$plan = array(
+					'code'                 => (string) $s['plan']['code'],
+					'name'                 => (string) $s['plan']['name'],
+					'status'               => (string) $s['status'],
+					'is_free'              => pjEntitlement::isFree($s['plan']),
+					'trial_ends_at'        => $s['status'] === 'trial' && !empty($sub['trial_ends_at']) ? (string) $sub['trial_ends_at'] : null,
+					'period_end'           => !empty($sub['current_period_end']) ? (string) $sub['current_period_end'] : null,
+					'cancel_at_period_end' => !empty($sub['cancel_at_period_end']),
+				);
+			}
+		}
+		$user = pjAuthUserModel::factory()->find((int) $signup['user_id'])->getData();
+		return array(
+			'state'         => $this->signupState($signup),
+			'member_since'  => !empty($user['created']) ? (string) $user['created'] : (string) $signup['created'],
+			'plan'          => $plan,
+			'dashboard_url' => PJ_INSTALL_URL . 'index.php?controller=pjBase&action=pjActionLogin',
+			'my_plan_url'   => PJ_INSTALL_URL . 'index.php?controller=pjAdminSubscriptions&action=pjActionMyPlan',
+		);
+	}
+
+	/**
+	 * The host starts a plan's free trial (no payment): signup_token*, plan*. Once per company, for a company that
+	 * never paid and is not on a paid plan (pjEntitlement::trialAvailable). Data: plan, status, trial_ends_at.
+	 */
+	public function pjActionPlanStartTrial()
+	{
+		$this->setAjax(true);
+		$this->requirePost();
+		list($signup, $company, $plan) = $this->billingContext();
+		if (!pjEntitlement::trialAvailable((int) $company['id'], $plan))
+		{
+			$this->respond(409, 'The free trial is not available for this account (it can be used once, before a first payment).');
+		}
+		if (!pjEntitlement::startWebsiteTrial((int) $company['id'], $plan, (int) $signup['user_id']))
+		{
+			$this->respond(500, 'The free trial could not be started. Please try again.');
+		}
+		$sub = pjEntitlement::subscription((int) $company['id']);
+		$this->respond(200, 'OK', array(
+			'plan'          => array('code' => (string) $plan['code'], 'name' => (string) $plan['name']),
+			'status'        => 'trial',
+			'trial_ends_at' => $sub ? (string) $sub['trial_ends_at'] : null,
+		));
+	}
+
+	/**
+	 * Company, user and plan of a purchase: signup_token* (a company log-in with its company created),
+	 * plan* (plan code or id, an active public plan). Answers 401 / 409 / 404 otherwise.
+	 */
+	private function billingContext()
+	{
+		$this->requireSignupTable();
+		$signup = $this->signupFromToken();
+		if (!class_exists('pjEntitlement') || !pjEntitlement::isReady())
+		{
+			$this->respond(503, 'Plans are not available at the moment. Please try again later.');
+		}
+		$cid = (int) $signup['company_id'];
+		if ($cid <= 0)
+		{
+			$this->respond(409, 'Please add your company details first (step 3), then choose a plan.', array('next_step' => (int) $signup['step']));
+		}
+		$company = pjCompanyModel::factory()->find($cid)->getData();
+		if (empty($company) || (class_exists('pjCompanyContext') && pjCompanyContext::isAdminWorkspace($cid)))
+		{
+			$this->respond(403, 'This account cannot buy a plan here. Please contact us.');
+		}
+		$ref = $this->param('plan');
+		$plan = ctype_digit($ref) ? pjEntitlement::plan((int) $ref) : (preg_match('/^[a-z0-9_-]{1,40}$/', $ref) ? pjEntitlement::planByCode($ref) : false);
+		if (!$plan || $plan['status'] !== 'T' || (int) $plan['is_public'] !== 1)
+		{
+			$this->respond(404, 'This plan is not available.', array(), array('plan' => 'This plan is not available.'));
+		}
+		return array($signup, $company, $plan);
+	}
+
+	/**
+	 * Is buying $plan a downgrade for this company? (Same rule as My plan: a cheaper plan than the paid plan it has now
+	 * is not charged now; it takes over at the end of the paid period.)
+	 */
+	private static function isDowngrade($state, $plan)
+	{
+		$cur = $state['plan'];
+		return $cur && $state['entitled'] && $state['status'] !== 'trial' && !pjEntitlement::isFree($cur)
+			&& (int) $cur['id'] !== (int) $plan['id'] && (int) $plan['sort'] < (int) $cur['sort'] && !pjEntitlement::isFree($plan);
+	}
+
+	/** A label text of the back office (subscription messages), or $fallback. */
+	private static function subText($key, $fallback = '')
+	{
+		$t = __($key, true);
+		return is_string($t) && $t !== '' && $t !== $key ? $t : ($fallback !== '' ? $fallback : 'Something went wrong. Please try again.');
+	}
+
+	/**
+	 * Checkout summary of a plan for the logged-in company: the currency it pays in (billing country, or its locked
+	 * billing currency), the amount with the discount / coupon, and the gateways of that currency.
+	 *   signup_token*, plan*, currency (USD|INR, only used while the company's currency is not fixed yet), coupon_code
+	 * Data: plan {id, code, name, interval_count, billing_interval, trial_days}, kind (new|upgrade|renewal), free,
+	 *   currency, locked, price_locked, billing_country, currencies[] {code, price, price_text, available, selectable},
+	 *   list/discount/amount (+ _text), usd_text, rate_text, coupon {code, valid, message}, methods[] {id, name, logo},
+	 *   current {code, name, status} | null
+	 */
+	public function pjActionPlanCheckout()
+	{
+		$this->setAjax(true);
+		$this->requirePost();
+		list($signup, $company, $plan) = $this->billingContext();
+		$cid = (int) $company['id'];
+		$state = pjEntitlement::state($cid);
+		$kind = pjSubscriptionBilling::payKind($plan, $state['plan']);
+		$out = array(
+			'plan' => array('id' => (int) $plan['id'], 'code' => (string) $plan['code'], 'name' => (string) $plan['name'],
+				'interval_count' => (int) $plan['interval_count'], 'billing_interval' => (string) $plan['billing_interval'], 'trial_days' => (int) $plan['trial_days']),
+			'kind' => $kind,
+			'free' => pjEntitlement::isFree($plan),
+			'purchasable' => pjEntitlement::isPurchasable($plan),
+			'current' => $state['source'] === 'plan' && !empty($state['plan'])
+				? array('code' => (string) $state['plan']['code'], 'name' => (string) $state['plan']['name'], 'status' => (string) $state['status'], 'entitled' => (bool) $state['entitled'])
+				: null,
+			'billing_country' => pjEntitlement::billingCountry($cid),
+			'downgrade' => self::isDowngrade($state, $plan),
+			'current_ends_at' => !empty($state['subscription']['current_period_end']) ? $state['subscription']['current_period_end'] : null,
+			'scheduled' => !empty($state['subscription']['pending_plan_id']) && (int) $state['subscription']['pending_plan_id'] === (int) $plan['id'],
+		);
+		if ($out['free'] || !$out['purchasable'] || $out['downgrade'])
+		{
+			$this->respond(200, 'OK', $out);
+		}
+		// billing country from the website's country selector (India: INR, other countries: USD) while not fixed
+		$country = strtoupper($this->param('country'));
+		$country = pjEntitlement::isCountry($country) ? $country : '';
+		$currency = pjEntitlement::checkoutCurrency($cid, $plan, $kind, $this->param('currency'), $country);
+		$charged = $currency ? pjEntitlement::chargedPlan($cid, $plan, $kind, $currency) : false;
+		if (!$charged)
+		{
+			$this->respond(409, self::subText('subErrCurrency'), $out);
+		}
+		$locked = pjEntitlement::currencyLocked($cid);
+		$code = $this->param('coupon_code');
+		$q = pjSubscriptionPromos::quote($charged, $kind, $cid, $code);
+		$rate = pjEntitlement::rate();
+		$currencies = array();
+		foreach (pjEntitlement::$currencies as $c)
+		{
+			$p = $c === $currency ? (float) $charged['price'] : pjEntitlement::priceIn($plan, $c);
+			$available = $p !== null && $p > 0;
+			$currencies[] = array('code' => $c, 'price' => $available ? $p : null, 'price_text' => $available ? pjMoney::format($p, $c) : '',
+				'available' => $available, 'selectable' => $available && (!$locked || $c === $currency));
+		}
+		$methods = array();
+		foreach (pjSubscriptionBilling::methodsFor($currency) as $m => $name)
+		{
+			$methods[] = array('id' => $m, 'name' => (string) $name, 'logo' => PJ_INSTALL_URL . PJ_IMG_PATH . 'backend/payments/' . $m . '.png');
+		}
+		$out = array_merge($out, array(
+			'currency' => $currency,
+			'locked' => $locked,
+			'price_locked' => !empty($charged['price_locked']),
+			'currencies' => $currencies,
+			// the country the price is for: chosen on the website (account currency not fixed yet), else the company's
+			'billing_country' => $country !== '' && !$locked ? $country : $out['billing_country'],
+			'list' => $q['list'], 'discount' => $q['discount'], 'amount' => $q['amount'],
+			'list_text' => pjMoney::format($q['list'], $currency),
+			'discount_text' => $q['discount'] > 0 ? '- ' . pjMoney::format($q['discount'], $currency) : '',
+			'amount_text' => pjMoney::format($q['amount'], $currency),
+			'usd_text' => $currency !== 'USD' ? pjMoney::format(pjEntitlement::toUsd($q['amount'], $currency, $rate), 'USD') : '',
+			'rate_text' => $currency !== 'USD' ? '1 USD = ' . pjMoney::format($rate, $currency) : '',
+			'coupon' => array('code' => $q['coupon_code'], 'valid' => $code === '' ? null : $q['error'] === '',
+				'message' => $code === '' ? '' : ($q['error'] !== '' ? self::subText($q['error'], 'This coupon code is not valid.') : self::subText('sub_coupon_ok', 'Coupon applied.'))),
+			'methods' => $methods,
+		));
+		$this->respond(200, 'OK', $out);
+	}
+
+	/**
+	 * Buy a plan: signup_token*, plan*, currency, method (gateway of that currency), coupon_code, return_path (website
+	 * path to open after the payment, e.g. /setup/theme). The browser goes to pay_url (gateway form); the gateway
+	 * confirms the payment to the server, then the browser comes back to /billing/return?next=…&txn=….
+	 * Data: result checkout|applied|requested|free_switched|free_scheduled, txn, pay_url, amount_text, currency, method
+	 */
+	public function pjActionPlanPurchase()
+	{
+		$this->setAjax(true);
+		$this->requirePost();
+		list($signup, $company, $plan) = $this->billingContext();
+		$path = $this->param('return_path');
+		$path = preg_match('~^/[A-Za-z0-9/_\-]{0,120}$~', $path) && strpos($path, '//') === false ? $path : '/';
+		// back to the website that started the payment (an allowed origin, checked by api.php), else the configured one
+		$origin = $this->param('api_site_url');
+		$site = preg_match('~^https?://[A-Za-z0-9.\-]+(:\d+)?$~', $origin) ? $origin
+			: (defined('PJ_WEBSITE_URL') && preg_match('~^https?://~i', PJ_WEBSITE_URL) ? rtrim(PJ_WEBSITE_URL, '/') : rtrim(PJ_INSTALL_URL, '/'));
+		$return_url = $site . '/billing/return?next=' . rawurlencode($path);
+		// a cheaper plan than the paid one: switches at the end of the paid period, nothing is charged now
+		$state = pjEntitlement::state((int) $company['id']);
+		if (self::isDowngrade($state, $plan))
+		{
+			pjEntitlement::scheduleChange((int) $company['id'], (int) $plan['id'], (int) $signup['user']['id']);
+			$this->respond(200, 'OK', array('result' => 'scheduled', 'kind' => 'downgrade', 'txn' => null, 'pay_url' => null,
+				'amount_text' => '', 'currency' => null, 'method' => null, 'ends_at' => $state['subscription']['current_period_end']));
+		}
+		$res = pjSubscriptionBilling::purchase($company, $plan, $this->param('currency'), $this->param('method'), $this->param('coupon_code'),
+			(int) $signup['user']['id'], $return_url, strtoupper($this->param('country')));
+		if ($res['result'] === 'error')
+		{
+			$msg = self::subText($res['error']);
+			$this->respond(422, $msg, array(), array($res['error'] === 'subErrCoupon' ? 'coupon_code' : ($res['error'] === 'subErrMethod' ? 'method' : 'plan') => $msg));
+		}
+		$txn = $res['txn'];
+		$this->respond(200, 'OK', array(
+			'result' => $res['result'],
+			'kind' => $res['kind'],
+			'txn' => $txn ? (string) $txn['uuid'] : null,
+			'pay_url' => $res['result'] === 'checkout' ? pjSubscriptionBilling::payUrl($txn) : null,
+			'amount_text' => $txn ? pjMoney::format($txn['amount'], $txn['currency']) : '',
+			'currency' => $txn ? (string) $txn['currency'] : $res['currency'],
+			'method' => $txn ? (string) $txn['provider'] : null,
+		));
+	}
+
+	/**
+	 * Status of a plan payment of the logged-in company (after the gateway): signup_token*, txn*.
+	 * Data: status pending|paid|failed|cancelled|refunded, plan, kind, amount_text, currency, method, failure_reason,
+	 *   period_end, subscription {plan, status, ends_at}
+	 */
+	public function pjActionPlanPaymentStatus()
+	{
+		$this->setAjax(true);
+		$this->requirePost();
+		$this->requireSignupTable();
+		$signup = $this->signupFromToken();
+		$uuid = $this->param('txn');
+		$txn = (int) $signup['company_id'] > 0 && class_exists('pjEntitlement') && pjEntitlement::isReady() && preg_match('/^[a-f0-9]{32}$/', $uuid)
+			? pjBillingTransactionModel::factory()->where('t1.uuid', $uuid)->where('t1.company_id', (int) $signup['company_id'])->limit(1)->findAll()->getDataIndex(0)
+			: array();
+		if (empty($txn))
+		{
+			$this->respond(404, 'Payment not found.');
+		}
+		$plan = pjEntitlement::plan($txn['plan_id']);
+		pjEntitlement::clearCache();
+		$state = pjEntitlement::state((int) $signup['company_id']);
+		$this->respond(200, 'OK', array(
+			'status' => (string) $txn['status'],
+			'plan' => $plan ? array('code' => (string) $plan['code'], 'name' => (string) $plan['name']) : null,
+			'kind' => (string) $txn['kind'],
+			'amount_text' => pjMoney::format($txn['amount'], $txn['currency']),
+			'currency' => (string) $txn['currency'],
+			'method' => pjSubscriptionBilling::methodName($txn['provider']),
+			'online' => pjSubscriptionBilling::isOnline($txn['provider']),
+			'failure_reason' => (string) $txn['failure_reason'],
+			'period_end' => $txn['period_end'],
+			'subscription' => !empty($state['plan']) ? array('plan' => (string) $state['plan']['name'], 'status' => (string) $state['status'],
+				'ends_at' => !empty($state['subscription']['current_period_end']) ? $state['subscription']['current_period_end'] : null) : null,
 		));
 	}
 
@@ -4957,7 +5449,7 @@ class pjJabbApi extends pjAppController
 			$return = ($site !== '' ? $site : rtrim(PJ_INSTALL_URL, '/')) . self::sitePropertyPath($site, $cid, $slug) . '/book/confirmed?ref=' . $booking['uuid'] . '&key=' . self::bookingKey($booking['uuid']);
 			$payment['pay_url'] = PJ_INSTALL_URL . 'index.php?controller=pjFront&action=pjActionPayBooking&cid=' . (int) $cal['id']
 				. '&ref=' . rawurlencode($booking['uuid']) . '&return=' . rawurlencode($return)
-				. '&hash=' . sha1($booking['uuid'] . strtotime($booking['created']) . $return . PJ_SALT);
+				. '&hash=' . sha1($booking['uuid'] . pjSubscriptionBilling::stamp($booking['created']) . $return . PJ_SALT);
 		} elseif ($method === 'bank') {
 			$payment['bank_account'] = self::bankAccount($cal['id'], $lid);
 		}

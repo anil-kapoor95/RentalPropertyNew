@@ -620,6 +620,13 @@ $routes = array(
     'pjActionGetCountries'  => 'pjJabbApi',
     'pjActionGetThemes'     => 'pjJabbApi',
     'pjActionGetPlans'      => 'pjJabbApi',
+    // Buying a plan (dual currency: INR via Razorpay, USD via Razorpay / Stripe)
+    'pjActionPlanCheckout'  => 'pjJabbApi',
+    'pjActionPlanPurchase'  => 'pjJabbApi',
+    'pjActionPlanPaymentStatus' => 'pjJabbApi',
+    'pjActionPlanStartTrial' => 'pjJabbApi',
+    'pjActionAccountProfile' => 'pjJabbApi',
+    'pjActionAccountPassword' => 'pjJabbApi',
     'pjActionGetCurrencies' => 'pjJabbApi',
     'pjActionCheckPropertyName' => 'pjJabbApi',
     'pjActionCheckCompanyName' => 'pjJabbApi',

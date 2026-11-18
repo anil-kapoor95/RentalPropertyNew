@@ -739,6 +739,10 @@ class pjFront extends pjAppController
 			if($is_ip_blocked == true)
 			{
 				$this->set('status', 'IP_BLOCKED');
+			} elseif (empty($_SESSION['pjFrontOwnBookings']) || !in_array($this->_get->toInt('reservation_id'), (array) $_SESSION['pjFrontOwnBookings'], true)) {
+				// A booking id is a plain counter: without this check anyone could read every guest's name, e-mail,
+				// phone and amount by trying ids. Only the bookings made in this browser session are shown.
+				exit;
 			} else {
 				$booking_arr = pjReservationModel::factory()
 					->join('pjMultiLang', "t2.foreign_id = t1.calendar_id AND t2.model = 'pjCalendar' AND t2.locale = '".$this->getLocaleId()."' AND t2.field = 'name'", 'left')
@@ -800,7 +804,7 @@ class pjFront extends pjAppController
 			? pjReservationModel::factory()->where('t1.uuid', $ref)->where('t1.calendar_id', $this->_get->toInt('cid'))->limit(1)->findAll()->getDataIndex(0)
 			: array();
 		if (empty($booking) || !preg_match('~^https?://~i', $return)
-			|| !hash_equals(sha1($booking['uuid'] . strtotime($booking['created']) . $return . PJ_SALT), (string) $this->_get->toString('hash')))
+			|| !hash_equals(sha1($booking['uuid'] . pjSubscriptionBilling::stamp($booking['created']) . $return . PJ_SALT), (string) $this->_get->toString('hash')))
 		{
 			$this->set('error', __('book_not_found', true));
 			return;
@@ -826,6 +830,48 @@ class pjFront extends pjAppController
 			'currency_code' => $this->option_arr['o_currency'],
 		)));
 		$this->set('booking', $booking);
+	}
+
+	/**
+	 * Payment page of a plan bought on the StayOwned website (pjJabbApi::pjActionPlanPurchase gives the signed link):
+	 * the gateway form of the payment (Razorpay / Stripe, in the currency of the payment). The gateway confirms the
+	 * payment server to server (payments_webhook.php -> pjActionConfirm); the browser then goes back to the website.
+	 *   txn (payment uuid), hash (signed by the API)
+	 */
+	public function pjActionPaySubscription()
+	{
+		$this->setAjax(true);
+		$uuid = (string) $this->_get->toString('txn');
+		$txn = class_exists('pjEntitlement') && pjEntitlement::isReady() && preg_match('/^[a-f0-9]{32}$/', $uuid)
+			? pjBillingTransactionModel::factory()->where('t1.uuid', $uuid)->limit(1)->findAll()->getDataIndex(0) : array();
+		if (empty($txn) || empty($txn['return_url']) || !hash_equals(pjSubscriptionBilling::payHash($txn), (string) $this->_get->toString('hash')))
+		{
+			$this->set('error', __('subErrPlan', true));
+			$this->set('return_url', defined('PJ_WEBSITE_URL') ? PJ_WEBSITE_URL : PJ_INSTALL_URL);
+			return;
+		}
+		$back = pjSubscriptionBilling::returnUrl($txn);
+		$this->set('return_url', $back);
+		// paid, cancelled, offline or no longer allowed for its currency: nothing to pay here
+		$active = pjSubscriptionBilling::methodsFor($txn['currency']);
+		if ($txn['status'] !== 'pending' || !pjSubscriptionBilling::isOnline($txn['provider']) || !isset($active[$txn['provider']]))
+		{
+			if ($txn['status'] === 'pending' && pjSubscriptionBilling::isOnline($txn['provider']))
+			{
+				pjEntitlement::failPayment($txn['id'], 'cancelled', 'Payment method no longer available');
+			}
+			pjUtil::redirect($back);
+		}
+		$company = pjCompanyModel::factory()->find((int) $txn['company_id'])->getData();
+		$params = !empty($company) ? pjSubscriptionBilling::formParams($txn, $company, $this->getLocaleId()) : false;
+		if (!$params)
+		{
+			pjEntitlement::failPayment($txn['id'], 'cancelled', 'Payment form not available');
+			pjUtil::redirect($back);
+		}
+		$this->set('params', $params);
+		$this->set('txn', $txn);
+		$this->set('plan', pjEntitlement::plan($txn['plan_id']));
 	}
 
 	public function pjActionGetSummaryForm()
@@ -1403,6 +1449,14 @@ class pjFront extends pjAppController
 				unset($_SESSION[$this->defaultCaptcha]);
 				
 				pjFront::pjActionConfirmSend($reservation_id, $this->option_arr, $this->getLocaleId(), 'confirmation');
+
+				// the payment form (pjActionGetPaymentForm) is shown only for bookings made in this browser session
+				if (!isset($_SESSION['pjFrontOwnBookings']) || !is_array($_SESSION['pjFrontOwnBookings']))
+				{
+					$_SESSION['pjFrontOwnBookings'] = array();
+				}
+				$_SESSION['pjFrontOwnBookings'][] = (int) $reservation_id;
+				$_SESSION['pjFrontOwnBookings'] = array_slice(array_values(array_unique($_SESSION['pjFrontOwnBookings'])), -20);
 			
 				pjAppController::jsonResponse(array(
 					'status' => 'OK', 'code' => 200, 'text' => 'Reservation was saved.',
@@ -1716,13 +1770,26 @@ class pjFront extends pjAppController
 				if (!empty($booking_arr))
 				{
 				    $booking_id = $booking_arr['id'];
+				    // The gateway calls back without a property in the URL: load the settings of the booking's company
+				    // (currency, paid / not paid status ...) as the payment page did, then the property's own ones.
+				    $company_arr = array();
+				    if (class_exists('pjCompanyContext'))
+				    {
+				        $cal_row = pjCalendarModel::factory()->select('t1.company_id')->find((int) $booking_arr['calendar_id'])->getData();
+				        if (!empty($cal_row['company_id']))
+				        {
+				            $company_arr = pjCompanyContext::basePairs((int) $cal_row['company_id']);
+				        }
+				    }
 				    $option_arr = pjOptionModel::factory()->getPairs($booking_arr['calendar_id']);
-				    $option_arr = array_merge($this->option_arr, $option_arr);
+				    $option_arr = array_merge($this->option_arr, $company_arr, $option_arr);
 				    $params = array(
 				        'request'		=> $_REQUEST,
 				        'payment_method' => $_REQUEST['payment_method'],
 				        'foreign_id'	 => $booking_arr['calendar_id'],
 				        'amount'		 => $booking_arr['deposit'],
+				        // the currency the guest paid in (the property's), not the one of this callback request
+				        'currency_code'  => isset($option_arr['o_currency']) ? (string) $option_arr['o_currency'] : '',
 				        'txn_id'		 => $booking_arr['txn_id'],
 				        'order_id'	   => $booking_arr['id'],
 				        'cancel_hash'	=> sha1($booking_arr['uuid'].strtotime($booking_arr['created']).PJ_SALT),

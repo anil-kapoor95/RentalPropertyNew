@@ -8,11 +8,13 @@ $sub = $s['subscription'];
 $cur = $s['plan'];
 $action = $_SERVER['PHP_SELF'] . '?controller=pjAdminSubscriptions&amp;action=pjActionMyPlan';
 $methods = $tpl['methods'];
+$method_cur = $tpl['method_currencies'];
+$billing = $tpl['billing_currency'];
 $btn = function ($do, $plan_id, $label, $class = 'btn-primary', $confirm = false) use ($action, $subCsrf, $methods) {
 	if ($do === 'pay')
 	{
 		// popup first: coupon code and (when switched on) the payment method
-		return '<button type="button" class="btn ' . $class . ' btn-sm sub-inline subPayBtn" data-plan="' . (int) $plan_id . '">' . __($label, true) . '</button>';
+		return '<button type="button" class="btn ' . $class . ' btn-sm sub-inline subPayBtn" data-plan="' . (int) $plan_id . '" data-kind-label="' . pjSanitize::html(__($label, true)) . '">' . __($label, true) . '</button>';
 	}
 	return '<form method="post" action="' . $action . '" class="sub-inline"' . ($confirm ? ' data-sub-confirm="' . pjSanitize::html(__('sub_confirm', true)) . '"' : '') . '>' . $subCsrf
 		. '<input type="hidden" name="do" value="' . $do . '"><input type="hidden" name="plan_id" value="' . (int) $plan_id . '">'
@@ -63,6 +65,18 @@ $btn = function ($do, $plan_id, $label, $class = 'btn-primary', $confirm = false
 		</ul>
 	</div></div>
 
+	<div class="sub-cur-bar">
+		<span class="sub-cur-bar-label"><i class="fa fa-globe"></i> <?php __('sub_prices_in'); ?></span>
+		<div class="sub-seg" role="radiogroup" aria-label="<?php __('sub_prices_in', false, true); ?>" id="subCurSwitch">
+			<?php foreach (pjEntitlement::$currencies as $c) { ?>
+			<button type="button" class="sub-seg-btn<?php echo $c === $billing ? ' active' : ''; ?>" role="radio" aria-checked="<?php echo $c === $billing ? 'true' : 'false'; ?>" data-cur="<?php echo $c; ?>">
+				<strong><?php echo $c; ?></strong> <small><?php __('sub_cur_' . strtolower($c) . '_short'); ?></small>
+			</button>
+			<?php } ?>
+		</div>
+		<?php if ($tpl['currency_locked']) { ?><span class="sub-cur-bar-note"><i class="fa fa-lock"></i> <?php echo str_replace('{CUR}', '<strong>' . pjSanitize::html($billing) . '</strong>', __('sub_billed_in', true)); ?></span><?php } ?>
+	</div>
+
 	<div class="row sub-plans">
 	<?php foreach ($tpl['plans'] as $p) { if ((int) $p['is_public'] !== 1) { continue; }
 		$is_cur = $cur && (int) $cur['id'] === (int) $p['id'];
@@ -70,11 +84,25 @@ $btn = function ($do, $plan_id, $label, $class = 'btn-primary', $confirm = false
 		$free = pjEntitlement::isFree($p);
 		?>
 		<div class="col-md-4">
-			<div class="ibox sub-plan<?php echo $is_cur ? ' current' : ''; ?>"><div class="ibox-content">
+			<div class="ibox sub-plan<?php echo $is_cur ? ' current' : ''; ?>" data-plan="<?php echo (int) $p['id']; ?>" data-interval="<?php echo pjSanitize::html(strip_tags(html_entity_decode($subInterval($p)))); ?>"
+				data-currencies="<?php echo pjSanitize::html(implode(',', pjEntitlement::currenciesOf($p))); ?>"
+				data-prices="<?php echo pjSanitize::html(json_encode(array('USD' => pjEntitlement::priceIn($p, 'USD') !== null ? pjMoney::format(pjEntitlement::priceIn($p, 'USD'), 'USD') : '', 'INR' => pjEntitlement::priceIn($p, 'INR') !== null ? pjMoney::format(pjEntitlement::priceIn($p, 'INR'), 'INR') : ''))); ?>"><div class="ibox-content">
 				<?php if ($is_cur) { ?><span class="sub-badge sub-active pull-right"><?php __('sub_current'); ?></span><?php } ?>
 				<h3 class="m-t-none"><?php echo pjSanitize::html($p['name']); ?></h3>
-				<?php $q = isset($tpl['quotes'][(int) $p['id']]) ? $tpl['quotes'][(int) $p['id']] : null; ?>
-				<div class="sub-price"><?php if ($q && $q['discount'] > 0) { ?><del class="sub-price-old"><?php echo $subMoney($q['list'], $p['currency']); ?></del> <?php echo $subMoney($q['amount'], $p['currency']); ?><?php } else { echo $subMoney($p['price'], $p['currency']); } ?><?php if ($p['price'] !== null) { ?> <small>/ <?php echo $subInterval($p); ?></small><?php } ?></div>
+				<?php
+				// one price per currency (USD / INR); the currency switch above the plans shows one of them
+				$qs = isset($tpl['quotes'][(int) $p['id']]) ? $tpl['quotes'][(int) $p['id']] : array();
+				foreach (pjEntitlement::$currencies as $c) {
+					$cp = pjEntitlement::priceIn($p, $c);
+					$q = isset($qs[$c]) ? $qs[$c] : null;
+					?>
+				<div class="sub-price" data-cur="<?php echo $c; ?>"<?php echo $c !== $billing ? ' hidden' : ''; ?>><?php
+					if ($p['price'] === null) { echo $subMoney(null, $c); }
+					elseif ($cp === null) { ?><span class="sub-price-na"><?php __('sub_price_na_cur'); ?></span><?php }
+					elseif ($q && $q['discount'] > 0) { ?><del class="sub-price-old"><?php echo $subMoney($q['list'], $c); ?></del> <?php echo $subMoney($q['amount'], $c); ?><?php }
+					else { echo $subMoney($q ? $q['amount'] : $cp, $c); /* a renewal shows the agreed (locked) price */ }
+					if ($p['price'] !== null && $cp !== null) { ?> <small>/ <?php echo $subInterval($p); ?></small><?php } ?></div>
+				<?php } ?>
 				<p class="text-muted small"><?php echo pjSanitize::html((string) $p['description']); ?></p>
 				<ul class="sub-limits">
 					<li><?php __('sub_max_properties'); ?>: <?php echo $subLimit($p['max_properties']); ?></li>
@@ -103,46 +131,78 @@ $btn = function ($do, $plan_id, $label, $class = 'btn-primary', $confirm = false
 	</div>
 	<?php if (empty($methods)) { ?><p class="text-muted small"><?php __('sub_manual_note'); ?></p><?php } ?>
 
-	<div class="modal inmodal fade" id="subPayModal" tabindex="-1" role="dialog" aria-hidden="true" style="display: none;">
+	<!-- Choose how to pay: currency -> payment method -> coupon -> summary -->
+	<div class="modal inmodal fade sub-pay-modal" id="subPayModal" tabindex="-1" role="dialog" aria-labelledby="subPayTitle" aria-hidden="true" style="display: none;">
 		<div class="modal-dialog"><div class="modal-content">
-			<form method="post" action="<?php echo $action; ?>" id="frmSubPay" data-check="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminSubscriptions&amp;action=pjActionCheckPromo">
+			<form method="post" action="<?php echo $action; ?>" id="frmSubPay" data-check="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdminSubscriptions&amp;action=pjActionCheckPromo"
+				data-billing="<?php echo pjSanitize::html($billing); ?>" data-btn-pay="<?php __('sub_pay_continue', false, true); ?>" data-btn-request="<?php __('sub_pay_send_request', false, true); ?>"
+				data-locked="<?php __('sub_pay_locked', false, true); ?>" data-price-locked="<?php __('sub_pay_price_locked', false, true); ?>">
 				<?php echo $subCsrf; ?><input type="hidden" name="do" value="pay"><input type="hidden" name="plan_id" value="0">
-				<div class="modal-header">
-					<button type="button" class="close" data-dismiss="modal"><span aria-hidden="true">&times;</span></button>
-					<h4 class="modal-title"><?php __('sub_pay_choose'); ?></h4>
+				<div class="sub-pay-head">
+					<button type="button" class="close" data-dismiss="modal" aria-label="<?php __('btnCancel', false, true); ?>"><span aria-hidden="true">&times;</span></button>
+					<span class="sub-pay-kind" data-pv="kind"></span>
+					<h4 class="sub-pay-title" id="subPayTitle"></h4>
+					<p class="sub-pay-sub"><i class="fa fa-refresh"></i> <span data-pv="interval"></span></p>
 				</div>
-				<div class="modal-body">
-					<div class="form-group sub-coupon">
-						<label><?php __('sub_coupon_code'); ?></label>
-						<div class="input-group">
-							<input type="text" class="form-control text-uppercase" name="coupon_code" maxlength="30" autocomplete="off" placeholder="<?php __('sub_coupon_hint', false, true); ?>">
-							<span class="input-group-btn"><button type="button" class="btn btn-white subCouponApply"><?php __('sub_coupon_apply'); ?></button></span>
+				<div class="sub-pay-body">
+					<!-- 1. Currency -->
+					<fieldset class="sub-pay-step">
+						<legend><span class="sub-step-no">1</span><?php __('sub_pay_step_currency'); ?></legend>
+						<div class="sub-cur-options">
+							<?php foreach (pjEntitlement::$currencies as $c) { ?>
+							<label class="sub-cur-option" data-cur="<?php echo $c; ?>">
+								<input type="radio" name="currency" value="<?php echo $c; ?>">
+								<span class="sub-cur-flag"><?php echo $c === 'INR' ? '&#8377;' : '$'; ?></span>
+								<span class="sub-cur-meta"><strong><?php echo $c; ?></strong><small><?php __('sub_cur_' . strtolower($c) . '_name'); ?></small></span>
+								<span class="sub-cur-price" data-pv="price"></span>
+							</label>
+							<?php } ?>
 						</div>
-						<small class="subCouponMsg"></small>
+						<p class="sub-pay-locked" hidden><i class="fa fa-lock"></i> <span></span></p>
+					</fieldset>
+
+					<!-- 2. Payment method (only the gateways of the chosen currency) -->
+					<fieldset class="sub-pay-step">
+						<legend><span class="sub-step-no">2</span><?php __('sub_pay_step_method'); ?></legend>
+						<div class="sub-methods">
+						<?php foreach ($methods as $m => $name) { if (!isset($method_cur[$m])) { continue; } ?>
+							<label class="sub-method" data-currencies="<?php echo pjSanitize::html(implode(',', $method_cur[$m])); ?>">
+								<input type="radio" name="method" value="<?php echo pjSanitize::html($m); ?>">
+								<span class="sub-method-check"><i class="fa fa-check"></i></span>
+								<img src="<?php echo PJ_IMG_PATH; ?>backend/payments/<?php echo pjSanitize::html($m); ?>.png" alt="">
+								<span class="sub-method-name"><?php echo pjSanitize::html($name); ?></span>
+							</label>
+						<?php } ?>
+						</div>
+						<p class="sub-pay-nomethod" hidden><i class="fa fa-info-circle"></i> <?php __('sub_pay_no_method'); ?></p>
+					</fieldset>
+
+					<!-- Coupon (optional) -->
+					<div class="sub-coupon">
+						<button type="button" class="sub-coupon-toggle" aria-expanded="false" aria-controls="subCouponBox"><i class="fa fa-tag"></i> <?php __('sub_have_coupon'); ?></button>
+						<div class="sub-coupon-box" id="subCouponBox" hidden>
+							<label class="sr-only" for="subCouponInput"><?php __('sub_coupon_code'); ?></label>
+							<div class="input-group">
+								<input type="text" class="form-control text-uppercase" id="subCouponInput" name="coupon_code" maxlength="30" autocomplete="off" placeholder="<?php __('sub_coupon_hint', false, true); ?>">
+								<span class="input-group-btn"><button type="button" class="btn btn-white subCouponApply"><?php __('sub_coupon_apply'); ?></button></span>
+							</div>
+							<small class="subCouponMsg" role="status" aria-live="polite"></small>
+						</div>
 					</div>
-					<table class="table sub-kv sub-quote m-b-md">
-						<tr><th><?php __('sub_list_price'); ?></th><td class="subQuoteList"></td></tr>
-						<tr class="subQuoteDiscountRow"><th><?php __('sub_discount'); ?></th><td class="subQuoteDiscount"></td></tr>
-						<tr><th><?php __('sub_you_pay'); ?></th><td><strong class="subQuoteAmount"></strong></td></tr>
-					</table>
-					<?php if (!empty($methods)) { ?>
-					<label><?php __('sub_pay_choose'); ?></label>
-					<div class="sub-methods">
-					<?php $first = true; foreach ($methods as $m => $name) { ?>
-						<label class="sub-method">
-							<input type="radio" name="method" value="<?php echo pjSanitize::html($m); ?>"<?php echo $first ? ' checked' : ''; ?>>
-							<img src="<?php echo PJ_IMG_PATH; ?>backend/payments/<?php echo pjSanitize::html($m); ?>.png" alt="<?php echo pjSanitize::html($name); ?>">
-							<span><?php echo pjSanitize::html($name); ?></span>
-						</label>
-					<?php $first = false; } ?>
+
+					<!-- Summary -->
+					<div class="sub-summary" aria-live="polite">
+						<div class="sub-summary-row"><span><?php __('sub_list_price'); ?></span><span class="subQuoteList"></span></div>
+						<div class="sub-summary-row sub-summary-discount subQuoteDiscountRow"><span><?php __('sub_discount'); ?></span><span class="subQuoteDiscount"></span></div>
+						<div class="sub-summary-total"><span><?php __('sub_you_pay'); ?></span><strong class="subQuoteAmount"></strong></div>
+						<p class="sub-summary-usd" hidden></p>
+						<p class="sub-summary-lock" hidden><i class="fa fa-lock"></i> <span></span></p>
 					</div>
-					<?php } else { ?>
-					<p class="text-muted small m-b-none"><?php __('sub_manual_note'); ?></p>
-					<?php } ?>
+					<p class="sub-pay-secure"><i class="fa fa-shield"></i> <?php __('sub_pay_secure'); ?></p>
 				</div>
-				<div class="modal-footer">
+				<div class="sub-pay-foot">
 					<button type="button" class="btn btn-white" data-dismiss="modal"><?php __('btnCancel'); ?></button>
-					<button type="submit" class="btn btn-primary"><?php __('sub_pay_btn'); ?></button>
+					<button type="submit" class="btn btn-primary sub-pay-submit"><i class="fa fa-lock m-r-xs"></i><span><?php __('sub_pay_continue'); ?></span></button>
 				</div>
 			</form>
 		</div></div>

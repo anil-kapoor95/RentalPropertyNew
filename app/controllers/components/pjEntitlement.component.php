@@ -70,8 +70,23 @@ class pjEntitlement
 	 * Settings
 	 * ------------------------------------------------------------------ */
 
+	/**
+	 * Dual pricing: every plan has a USD price (international, the base / reporting currency of the dashboards)
+	 * and an INR price (India). A company pays in one of them; every payment keeps a snapshot of both prices, the
+	 * exchange rate and the USD value at the time of the checkout, so history is never recalculated.
+	 */
+	const BASE_CURRENCY = 'USD';
+
+	public static $currencies = array('USD', 'INR');
+
 	public static $defaults = array(
 		'currency' => 'USD', 'grace_days' => '7',
+		// INR per 1 USD (Subscriptions > Plans > Currency & exchange rate): suggests INR prices, values INR payments in USD
+		'inr_rate' => '88.00',
+		// billing country -> pricing currency (ISO codes, "IN:INR,NP:INR"); every other country pays in fallback_currency
+		'country_currencies' => 'IN:INR', 'fallback_currency' => 'USD',
+		// gateways per currency for subscription payments (JSON), edited in Options > Payments
+		'gateway_map' => '{"INR":["razorpay"],"USD":["razorpay","stripe"]}',
 		// A company without a plan has no full access (basic features only, nothing new).
 		// expired_mode: 'suspend' = the website takes no bookings and the back office is read-only (My plan stays
 		// open to pay); 'read_only' = back office read-only, website open; 'basic' = only the basic features.
@@ -184,9 +199,309 @@ class pjEntitlement
 		{
 			$row[$l] = ($row[$l] === null || $row[$l] === '') ? null : (int) $row[$l];
 		}
-		$row['price'] = ($row['price'] === null || $row['price'] === '') ? null : (float) $row['price'];
-		$row['currency'] = !empty($row['currency']) ? strtoupper($row['currency']) : self::setting('currency');
+		$num = function ($v) { return ($v === null || $v === '') ? null : (float) $v; };
+		if (array_key_exists('price_usd', $row))
+		{
+			$usd = $num($row['price_usd']);
+			$inr = isset($row['price_inr']) ? $num($row['price_inr']) : null;
+		} else {
+			// the dual-currency update has not run yet: the single price of the plan
+			$legacy = $num($row['price']);
+			$legacy_cur = !empty($row['currency']) ? strtoupper($row['currency']) : self::BASE_CURRENCY;
+			$usd = $legacy_cur === 'USD' ? $legacy : null;
+			$inr = $legacy_cur === 'INR' ? $legacy : null;
+			if ($usd === null && $inr !== null)
+			{
+				$usd = round($inr / self::rate(), 2);
+			}
+		}
+		$row['inr_auto'] = isset($row['inr_auto']) ? (int) $row['inr_auto'] : 0;
+		$row['prices'] = array('USD' => $usd, 'INR' => $inr);
+		// "price" / "currency" of a plan are its USD (base) price: limits, free / purchasable checks and dashboards
+		$row['price'] = $usd;
+		$row['currency'] = self::BASE_CURRENCY;
 		return $row;
+	}
+
+	/* ------------------------------------------------------------------
+	 * Dual currency (USD / INR)
+	 * ------------------------------------------------------------------ */
+
+	/** INR per 1 USD from the settings (never 0). */
+	public static function rate()
+	{
+		$r = (float) str_replace(',', '.', (string) self::setting('inr_rate'));
+		return $r > 0 ? $r : 88.0;
+	}
+
+	/** Suggested INR price of a USD price at the current rate (whole rupees). */
+	public static function suggestInr($usd)
+	{
+		return $usd === null || $usd === '' ? null : (float) round((float) $usd * self::rate());
+	}
+
+	/** USD value of an amount at the given rate (INR per USD); null for other currencies. */
+	public static function toUsd($amount, $currency, $rate = null)
+	{
+		$currency = strtoupper((string) $currency);
+		if ($currency === 'USD')
+		{
+			return round((float) $amount, 2);
+		}
+		if ($currency === 'INR')
+		{
+			$rate = $rate === null ? self::rate() : (float) $rate;
+			return $rate > 0 ? round((float) $amount / $rate, 2) : null;
+		}
+		return null;
+	}
+
+	public static function isCurrency($currency)
+	{
+		return in_array(strtoupper((string) $currency), self::$currencies, true);
+	}
+
+	/** Price of a plan in a currency (null: not offered in it). A free plan is free in every currency. */
+	public static function priceIn($plan, $currency)
+	{
+		$currency = strtoupper((string) $currency);
+		if (empty($plan) || !isset($plan['prices']) || !self::isCurrency($currency))
+		{
+			return null;
+		}
+		if ($plan['prices']['USD'] !== null && $plan['prices']['USD'] <= 0)
+		{
+			return 0.0;
+		}
+		return $plan['prices'][$currency];
+	}
+
+	/** Currencies a plan can be bought in (price > 0), base currency first. */
+	public static function currenciesOf($plan)
+	{
+		$out = array();
+		foreach (self::$currencies as $c)
+		{
+			$p = self::priceIn($plan, $c);
+			if ($p !== null && $p > 0)
+			{
+				$out[] = $c;
+			}
+		}
+		return $out;
+	}
+
+	/** The plan as charged in $currency (price / currency replaced), or false when it has no price in it. */
+	public static function planInCurrency($plan, $currency)
+	{
+		$price = self::priceIn($plan, $currency);
+		if (empty($plan) || $price === null)
+		{
+			return false;
+		}
+		$plan['price'] = $price;
+		$plan['currency'] = strtoupper((string) $currency);
+		return $plan;
+	}
+
+	/** Country -> currency mapping of the settings: array('IN' => 'INR', ...). */
+	public static function countryCurrencies()
+	{
+		$out = array();
+		foreach (preg_split('/[\s,;]+/', strtoupper((string) self::setting('country_currencies'))) as $pair)
+		{
+			if (preg_match('/^([A-Z]{2})[:=]([A-Z]{3})$/', $pair, $m) && self::isCurrency($m[2]))
+			{
+				$out[$m[1]] = $m[2];
+			}
+		}
+		return $out;
+	}
+
+	/** Currency for countries without their own (USD unless the settings say otherwise). */
+	public static function fallbackCurrency()
+	{
+		$c = strtoupper((string) self::setting('fallback_currency'));
+		return self::isCurrency($c) ? $c : self::BASE_CURRENCY;
+	}
+
+	/** Pricing currency of a country (ISO alpha-2): the settings' country mapping (India: INR), else the fallback (USD). */
+	public static function currencyForCountry($country)
+	{
+		$country = strtoupper(trim((string) $country));
+		$map = self::countryCurrencies();
+		return preg_match('/^[A-Z]{2}$/', $country) && isset($map[$country]) ? $map[$country] : self::fallbackCurrency();
+	}
+
+	/** A real country code (in the countries of Display > Countries)? */
+	public static function isCountry($country)
+	{
+		$country = strtoupper(trim((string) $country));
+		if (!preg_match('/^[A-Z]{2}$/', $country))
+		{
+			return false;
+		}
+		return !class_exists('pjBaseCountryModel')
+			|| (int) pjBaseCountryModel::factory()->where('t1.alpha_2', $country)->findCount()->getData() > 0;
+	}
+
+	/** Billing country of a company (ISO alpha-2 from its profile), '' when not set. */
+	public static function billingCountry($company_id)
+	{
+		$c = pjCompanyModel::factory()->find((int) $company_id)->getData();
+		if (!empty($c['country_id']) && class_exists('pjBaseCountryModel'))
+		{
+			$country = pjBaseCountryModel::factory()->find((int) $c['country_id'])->getData();
+			if (!empty($country['alpha_2']))
+			{
+				return strtoupper($country['alpha_2']);
+			}
+		}
+		return '';
+	}
+
+	/** Pricing currency of the company's billing country (country mapping of the settings, else the fallback). */
+	public static function countryCurrency($company_id)
+	{
+		$map = self::countryCurrencies();
+		$country = self::billingCountry($company_id);
+		return $country !== '' && isset($map[$country]) ? $map[$country] : self::fallbackCurrency();
+	}
+
+	/**
+	 * The company's currency is fixed once it has a subscription billing currency or a paid payment: renewals,
+	 * upgrades and downgrades stay in it (never converted silently). Only the administrator changes it
+	 * (Subscriptions > company > Billing currency, logged).
+	 */
+	public static function currencyLocked($company_id)
+	{
+		$sub = self::subscription($company_id);
+		if ($sub && !empty($sub['billing_currency']))
+		{
+			return true;
+		}
+		return (int) $company_id > 0 && self::isReady() && (int) pjBillingTransactionModel::factory()->where('t1.company_id', (int) $company_id)
+			->where('t1.status', 'paid')->where('t1.amount >', 0)->findCount()->getData() > 0;
+	}
+
+	/**
+	 * Billing currency of a company: the currency of its subscription (set by its last payment or the administrator),
+	 * else of its last paid payment, else of its country.
+	 */
+	public static function billingCurrency($company_id)
+	{
+		$sub = self::subscription($company_id);
+		if ($sub && !empty($sub['billing_currency']) && self::isCurrency($sub['billing_currency']))
+		{
+			return strtoupper($sub['billing_currency']);
+		}
+		if ((int) $company_id > 0 && self::isReady())
+		{
+			$paid = pjBillingTransactionModel::factory()->select('t1.currency')->where('t1.company_id', (int) $company_id)->where('t1.status', 'paid')
+				->where('t1.amount >', 0)->orderBy('t1.id DESC')->limit(1)->findAll()->getDataIndex(0);
+			if (!empty($paid) && self::isCurrency($paid['currency']))
+			{
+				return strtoupper($paid['currency']);
+			}
+		}
+		return (int) $company_id > 0 ? self::countryCurrency($company_id) : self::BASE_CURRENCY;
+	}
+
+	/**
+	 * Currency a purchase is charged in. Once the company's currency is fixed (currencyLocked) every purchase stays
+	 * in it; before that (first purchase) the company may pick, the default being the currency of its billing
+	 * country. A plan without a price in that currency falls back to the fallback currency (shown explicitly).
+	 * $country: billing country chosen on the website (ISO alpha-2): before the currency is fixed it decides the
+	 * currency (India INR, other countries USD), ahead of $requested.
+	 * Returns false when the plan has no price in any currency.
+	 */
+	public static function checkoutCurrency($company_id, $plan, $kind, $requested = '', $country = '')
+	{
+		$avail = self::currenciesOf($plan);
+		if (empty($avail))
+		{
+			return false;
+		}
+		$billing = self::billingCurrency($company_id);
+		if (self::currencyLocked($company_id) && in_array($billing, $avail, true))
+		{
+			return $billing;
+		}
+		$requested = self::isCountry($country) ? self::currencyForCountry($country) : strtoupper((string) $requested);
+		if (!self::currencyLocked($company_id) && in_array($requested, $avail, true))
+		{
+			return $requested;
+		}
+		if (in_array($billing, $avail, true))
+		{
+			return $billing;
+		}
+		return in_array(self::fallbackCurrency(), $avail, true) ? self::fallbackCurrency() : $avail[0];
+	}
+
+	/**
+	 * The plan as charged to this company: its price in $currency, except a renewal of the same plan in the same
+	 * currency, which keeps the recurring amount agreed at the last payment (price changes apply to new purchases).
+	 */
+	public static function chargedPlan($company_id, $plan, $kind, $currency)
+	{
+		$charged = self::planInCurrency($plan, $currency);
+		if (!$charged)
+		{
+			return false;
+		}
+		$sub = self::subscription($company_id);
+		if ($kind === 'renewal' && $sub && (int) $sub['plan_id'] === (int) $plan['id'] && strtoupper((string) $sub['billing_currency']) === $charged['currency']
+			&& isset($sub['price_amount']) && $sub['price_amount'] !== null && (float) $sub['price_amount'] > 0)
+		{
+			$charged['price'] = (float) $sub['price_amount'];
+			$charged['price_locked'] = true;
+		}
+		return $charged;
+	}
+
+	/** Id of the exchange rate snapshot payments are valued with now (the last one saved), 0 when none. */
+	public static function rateSnapshotId()
+	{
+		if (!class_exists('pjExchangeRateSnapshotModel'))
+		{
+			return 0;
+		}
+		$row = pjExchangeRateSnapshotModel::factory()->where('t1.base_currency', 'USD')->where('t1.quote_currency', 'INR')
+			->orderBy('t1.id DESC')->limit(1)->findAll()->getDataIndex(0);
+		return !empty($row) ? (int) $row['id'] : 0;
+	}
+
+	/** Administrator saves the exchange rate: setting + a new snapshot (audit: rate, source, time, user). */
+	public static function saveRate($rate, $source, $user_id)
+	{
+		self::saveSetting('inr_rate', number_format((float) $rate, 4, '.', ''));
+		pjExchangeRateSnapshotModel::factory()->setAttributes(array('base_currency' => 'USD', 'quote_currency' => 'INR',
+			'rate' => number_format((float) $rate, 6, '.', ''), 'source' => substr((string) $source, 0, 40),
+			'user_id' => $user_id ? (int) $user_id : ':NULL', 'captured_at' => date('Y-m-d H:i:s')))->insert();
+	}
+
+	/** Administrator sets the billing currency of a company (its next payments; history is not touched). */
+	public static function setBillingCurrency($company_id, $currency, $user_id)
+	{
+		$currency = strtoupper((string) $currency);
+		$sub = self::subscription($company_id);
+		if (!$sub || !self::isCurrency($currency))
+		{
+			return false;
+		}
+		$old = !empty($sub['billing_currency']) ? $sub['billing_currency'] : '-';
+		$data = array('billing_currency' => $currency);
+		if ($old !== $currency)
+		{
+			// the agreed recurring amount was in the old currency: the next payment uses the plan price in the new one
+			$data['price_amount'] = ':NULL';
+			$data['price_usd'] = ':NULL';
+			$data['exchange_rate'] = ':NULL';
+		}
+		self::saveSubscription($company_id, $data);
+		self::log($company_id, 'currency', sprintf('Billing currency %s -> %s', $old, $currency), $user_id);
+		return true;
 	}
 
 	/** A plan can be bought online only when it is active, public and has a price > 0. */
@@ -294,6 +609,14 @@ class pjEntitlement
 				$sub = self::applyDueChange($sub);
 				$plan = self::plan($sub['plan_id']);
 				list($status, $entitled, $grace_end) = self::effectiveStatus($sub);
+				// trial over and not paid (before the hourly job has moved it): already the free plan's rights
+				if ($status === 'expired' && ($free = self::trialFallbackPlan($sub)))
+				{
+					$plan = $free;
+					$status = 'active';
+					$entitled = true;
+					$grace_end = null;
+				}
 				$state['source'] = 'plan';
 				$state['plan'] = $plan;
 				$state['subscription'] = $sub;
@@ -757,8 +1080,9 @@ class pjEntitlement
 		$old = self::plan($sub['plan_id']);
 		$end = strtotime($sub['current_period_end']);
 		$start = strtotime($sub['current_period_start']);
-		if (!$old || self::isFree($old) || $old['price'] === null || $end <= $now || $end <= $start
-			|| strtoupper((string) $old['currency']) !== strtoupper((string) $new_plan['currency']) || (float) $new_plan['price'] <= 0)
+		// worked out in USD (the base price of both plans; the payment by its USD value at the time it was made)
+		$new_usd = self::priceIn($new_plan, self::BASE_CURRENCY);
+		if (!$old || self::isFree($old) || $old['price'] === null || $end <= $now || $end <= $start || $new_usd === null || $new_usd <= 0)
 		{
 			return 0;
 		}
@@ -766,14 +1090,75 @@ class pjEntitlement
 		$paid = pjBillingTransactionModel::factory()->where('t1.company_id', (int) $sub['company_id'])->where('t1.plan_id', (int) $old['id'])
 			->where('t1.status', 'paid')->where('t1.period_end >', date('Y-m-d H:i:s', $now))->where('t1.amount >', 0)
 			->orderBy('t1.period_end DESC')->limit(1)->findAll()->getDataIndex(0);
-		if (empty($paid) || strtoupper((string) $paid['currency']) !== strtoupper((string) $new_plan['currency']))
+		if (empty($paid))
+		{
+			return 0;
+		}
+		$paid_usd = isset($paid['amount_usd']) && $paid['amount_usd'] !== null && $paid['amount_usd'] !== ''
+			? (float) $paid['amount_usd'] : (strtoupper((string) $paid['currency']) === 'USD' ? (float) $paid['amount'] : 0);
+		if ($paid_usd <= 0)
 		{
 			return 0;
 		}
 		$old_len = max(86400, strtotime(self::addPeriod($sub['current_period_start'], $old)) - $start);
-		$value_left = min((float) $paid['amount'], (float) $old['price']) * min(1, ($end - $now) / $old_len);
+		$value_left = min($paid_usd, (float) $old['price']) * min(1, ($end - $now) / $old_len);
 		$new_len = strtotime(self::addPeriod(date('Y-m-d H:i:s', $now), $new_plan)) - $now;
-		return (int) floor($value_left / (float) $new_plan['price'] * $new_len);
+		return (int) floor($value_left / $new_usd * $new_len);
+	}
+
+	/**
+	 * Can the company start this plan's free trial itself (website plans window / Pricing page)? A paid plan with
+	 * trial days, once per company, for a company that never paid for a plan and is not on a paid plan or a trial now.
+	 */
+	public static function trialAvailable($company_id, $plan)
+	{
+		$company_id = (int) $company_id;
+		if ($company_id <= 0 || !self::isReady() || !$plan || $plan['status'] !== 'T' || (int) $plan['is_public'] !== 1
+			|| (int) $plan['trial_days'] <= 0 || self::isFree($plan) || $plan['price'] === null)
+		{
+			return false;
+		}
+		$sub = self::subscription($company_id);
+		if ($sub && (int) $sub['used_trial'] === 1)
+		{
+			return false;
+		}
+		if ((int) pjBillingTransactionModel::factory()->where('t1.company_id', $company_id)->where('t1.status', 'paid')
+			->where('t1.amount >', 0)->findCount()->getData() > 0)
+		{
+			return false;
+		}
+		$s = self::state($company_id);
+		// on a paid plan (or a trial) now: nothing to try
+		if ($s['source'] === 'plan' && $s['entitled'] && !empty($s['plan']) && (!self::isFree($s['plan']) || $s['status'] === 'trial'))
+		{
+			return false;
+		}
+		return true;
+	}
+
+	/** The company starts a plan's free trial on the website (rules: trialAvailable). No payment. */
+	public static function startWebsiteTrial($company_id, $plan, $user_id)
+	{
+		if (!self::trialAvailable($company_id, $plan))
+		{
+			return false;
+		}
+		return self::assignPlan((int) $company_id, (int) $plan['id'], 'trial', '', $user_id, 'Free trial started on the website');
+	}
+
+	/**
+	 * A trial that ended without payment goes back to the free plan for new companies (when that plan is free):
+	 * the company keeps its free website instead of being suspended. Returns the free plan, or false.
+	 */
+	public static function trialFallbackPlan($sub)
+	{
+		if (empty($sub) || $sub['status'] !== 'trial')
+		{
+			return false;
+		}
+		$plan = self::defaultPlan();
+		return $plan && self::isFree($plan) && (int) $plan['id'] !== (int) $sub['plan_id'] ? $plan : false;
 	}
 
 	/** Company starts the free trial itself (only when allowed in the settings, once per company). */
@@ -839,6 +1224,12 @@ class pjEntitlement
 		{
 			$start = $sub['current_period_end'];
 		}
+		// Paying for the plan of a running trial: the trial days are kept, the paid period starts when the trial ends.
+		if ($sub && $sub['status'] === 'trial' && (int) $sub['plan_id'] === (int) $plan['id'] && !empty($sub['trial_ends_at'])
+			&& strtotime($sub['trial_ends_at']) > time())
+		{
+			$start = $sub['trial_ends_at'];
+		}
 		$end = self::addPeriod($start, $plan);
 		// Plan change with paid time left on the old plan: that time is not lost, it is credited as extra time.
 		$credit = $start === $now ? self::changeCreditSeconds($sub, $plan) : 0;
@@ -853,6 +1244,23 @@ class pjEntitlement
 		));
 		$data = array('plan_id' => (int) $plan['id'], 'status' => 'active', 'current_period_start' => $start,
 			'current_period_end' => $end, 'trial_ends_at' => ':NULL', 'cancel_at_period_end' => 0, 'cancelled_at' => ':NULL');
+		// the company is billed in the currency it paid in (renewals keep it); prices / rate of this payment kept
+		if (self::isCurrency($txn['currency']))
+		{
+			$cur = strtoupper($txn['currency']);
+			$list = $cur === 'INR' ? (isset($txn['price_inr']) ? $txn['price_inr'] : null) : (isset($txn['price_usd']) ? $txn['price_usd'] : null);
+			$data['billing_currency'] = $cur;
+			// recurring amount agreed with this payment (before a one-off discount / coupon): renewals keep it.
+			// A payment recorded by the administrator uses the plan price in that currency.
+			$agreed = $txn['list_amount'] !== null && $txn['list_amount'] !== '' ? $txn['list_amount'] : $txn['amount'];
+			$data['price_amount'] = $txn['provider'] === 'manual' && $list !== null && $list !== '' ? $list : $agreed;
+			if (!empty($txn['billing_country']))
+			{
+				$data['billing_country'] = $txn['billing_country'];
+			}
+			$data['price_usd'] = isset($txn['price_usd']) && $txn['price_usd'] !== null && $txn['price_usd'] !== '' ? $txn['price_usd'] : ':NULL';
+			$data['exchange_rate'] = isset($txn['exchange_rate']) && $txn['exchange_rate'] !== null && $txn['exchange_rate'] !== '' ? $txn['exchange_rate'] : ':NULL';
+		}
 		if (!$sub || empty($sub['started_at']))
 		{
 			$data['started_at'] = $now;
@@ -886,9 +1294,15 @@ class pjEntitlement
 	/**
 	 * New pending transaction. The amount comes from the plan, never from the request; $quote
 	 * (pjSubscriptionPromos::quote, worked out on the server) takes the discount / coupon off.
+	 * $plan is the plan as charged (planInCurrency): its price / currency are the charged ones. A snapshot of
+	 * both plan prices, the exchange rate and the USD value of the amount is stored with the payment.
 	 */
-	public static function createTransaction($company_id, $plan, $kind, $provider, $user_id, $quote = null)
+	public static function createTransaction($company_id, $plan, $kind, $provider, $user_id, $quote = null, $extra = array())
 	{
+		if (!self::isCurrency($plan['currency']))
+		{
+			return false;
+		}
 		$uuid = bin2hex(function_exists('random_bytes') ? random_bytes(16) : md5(uniqid(mt_rand(), true), true));
 		$data = array(
 			'uuid' => $uuid, 'company_id' => (int) $company_id, 'plan_id' => (int) $plan['id'], 'kind' => $kind,
@@ -903,6 +1317,24 @@ class pjEntitlement
 			$data['discount_amount'] = number_format((float) $quote['discount'], 2, '.', '');
 			$data['promo_ids'] = implode(',', $quote['promo_ids']);
 			$data['coupon_code'] = $quote['coupon_code'] !== '' ? $quote['coupon_code'] : ':NULL';
+		}
+		$rate = self::rate();
+		$fmt = function ($v) { return $v === null || $v === '' ? ':NULL' : number_format((float) $v, 2, '.', ''); };
+		$data['price_usd'] = $fmt(isset($plan['prices']) ? self::priceIn($plan, 'USD') : null);
+		$data['price_inr'] = $fmt(isset($plan['prices']) ? self::priceIn($plan, 'INR') : null);
+		$data['exchange_rate'] = number_format($rate, 6, '.', '');
+		$data['amount_usd'] = $fmt(self::toUsd($data['amount'], $plan['currency'], $rate));
+		$snap = self::rateSnapshotId();
+		$data['rate_snapshot_id'] = $snap > 0 ? $snap : ':NULL';
+		// billing country chosen at the checkout (website country selector), else the company's country
+		$country = !empty($extra['billing_country']) && self::isCountry($extra['billing_country'])
+			? strtoupper($extra['billing_country']) : self::billingCountry($company_id);
+		$data['billing_country'] = $country !== '' ? $country : ':NULL';
+		// a payment started on the StayOwned website returns there after the gateway
+		if (!empty($extra['return_url']))
+		{
+			$data['return_url'] = (string) $extra['return_url'];
+			$data['channel'] = 'web';
 		}
 		$id = pjBillingTransactionModel::factory()->setAttributes($data)->insert()->getInsertId();
 		return ($id !== false && (int) $id > 0) ? pjBillingTransactionModel::factory()->find($id)->getData() : false;
@@ -931,6 +1363,17 @@ class pjEntitlement
 		foreach (pjCompanySubscriptionModel::factory()->whereIn('t1.status', array('trial', 'active', 'past_due'))->findAll()->getData() as $sub)
 		{
 			list($status) = self::effectiveStatus($sub);
+			// trial over and not paid: back to the free plan (keeps the free website), not suspended
+			if ($status === 'expired' && ($free = self::trialFallbackPlan($sub)))
+			{
+				$now = date('Y-m-d H:i:s');
+				self::saveSubscription($sub['company_id'], array('plan_id' => (int) $free['id'], 'status' => 'active',
+					'current_period_start' => $now, 'current_period_end' => ':NULL', 'trial_ends_at' => ':NULL',
+					'cancel_at_period_end' => 0, 'cancelled_at' => ':NULL', 'pending_plan_id' => ':NULL'));
+				self::log($sub['company_id'], 'status', sprintf('Trial ended without payment: back to %s (automatic)', $free['name']));
+				$changed++;
+				continue;
+			}
 			if ($status !== $sub['status'])
 			{
 				$data = array('status' => $status, 'modified' => date('Y-m-d H:i:s'));

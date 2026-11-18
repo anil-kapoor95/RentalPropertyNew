@@ -26,6 +26,11 @@ class pjCompanySubscriptionModel extends pjAppModel
 		array('name' => 'cancelled_at', 'type' => 'datetime', 'default' => ':NULL'),
 		array('name' => 'pending_plan_id', 'type' => 'int', 'default' => ':NULL'),
 		array('name' => 'used_trial', 'type' => 'tinyint', 'default' => '0'),
+		array('name' => 'billing_currency', 'type' => 'varchar', 'default' => ':NULL'),
+		array('name' => 'billing_country', 'type' => 'varchar', 'default' => ':NULL'),
+		array('name' => 'price_amount', 'type' => 'decimal', 'default' => ':NULL'),
+		array('name' => 'price_usd', 'type' => 'decimal', 'default' => ':NULL'),
+		array('name' => 'exchange_rate', 'type' => 'decimal', 'default' => ':NULL'),
 		array('name' => 'notes', 'type' => 'text', 'default' => ':NULL'),
 		array('name' => 'created', 'type' => 'datetime', 'default' => ':NOW()'),
 		array('name' => 'modified', 'type' => 'datetime', 'default' => ':NULL')

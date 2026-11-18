@@ -152,6 +152,10 @@ class pjAdminSubscriptions extends pjAdmin
 				case 'cancel_end':
 					$ok = pjEntitlement::cancelAtPeriodEnd($cid, $this->_post->toInt('flag') === 1, $uid);
 					break;
+				case 'currency':
+					// billing currency of the company's next payments (payments already made keep theirs)
+					$ok = pjEntitlement::setBillingCurrency($cid, $this->_post->toString('currency'), $uid);
+					break;
 				case 'remove':
 					// back to "no plan" (the history and payments are kept)
 					$ok = pjEntitlement::removeSubscription($cid, $uid, $note);
@@ -178,8 +182,13 @@ class pjAdminSubscriptions extends pjAdmin
 				case 'payment':
 					// Payment received outside the system (bank transfer...): explicit administrator action.
 					$plan = pjEntitlement::plan($this->_post->toInt('plan_id'));
-					$amount = (float) str_replace(',', '.', (string) $this->_post->toString('amount'));
+					$amount = round((float) str_replace(',', '.', (string) $this->_post->toString('amount')), 2);
 					$ref = trim((string) $this->_post->toString('reference'));
+					$currency = strtoupper(trim((string) $this->_post->toString('currency')));
+					if (!pjEntitlement::isCurrency($currency))
+					{
+						$currency = pjEntitlement::billingCurrency($cid);
+					}
 					if ($plan && $amount > 0 && $ref !== '')
 					{
 						if ((int) pjBillingTransactionModel::factory()->where('t1.provider', 'manual')->where('t1.provider_ref', $ref)->findCount()->getData() > 0)
@@ -188,9 +197,11 @@ class pjAdminSubscriptions extends pjAdmin
 						}
 						$st = pjEntitlement::state($cid);
 						$kind = $this->payKind($plan, $st['source'] === 'plan' ? $st['plan'] : false);
-						$plan['price'] = $amount; // the amount actually received
+						// the amount actually received, in the currency it was received in (plan prices / rate kept as snapshot)
+						$plan['price'] = $amount;
+						$plan['currency'] = $currency;
 						$txn = pjEntitlement::createTransaction($cid, $plan, $kind, 'manual', $uid);
-						$ok = $txn && pjEntitlement::applyPayment($txn['id'], $ref, $amount, $plan['currency'], $uid) === 'applied';
+						$ok = $txn && pjEntitlement::applyPayment($txn['id'], $ref, $amount, $currency, $uid) === 'applied';
 					}
 					break;
 			}
@@ -198,6 +209,7 @@ class pjAdminSubscriptions extends pjAdmin
 		}
 		$this->set('company', $company);
 		$this->set('hash', $hash);
+		$this->set('billing_currency', pjEntitlement::billingCurrency($cid));
 		$this->set('state', pjEntitlement::state($cid));
 		$this->set('usage', pjEntitlement::usage($cid));
 		$this->set('plans', pjEntitlement::plans());
@@ -213,9 +225,73 @@ class pjAdminSubscriptions extends pjAdmin
 	{
 		if (!$this->requireAdmin()) { return; }
 		$counts = pjCompanySubscriptionModel::factory()->select('t1.plan_id, COUNT(*) AS `cnt`')->groupBy('t1.plan_id')->findAll()->getDataPair('plan_id', 'cnt');
+		$this->set('inr_rate', pjEntitlement::rate());
+		$this->set('inr_countries', array_keys(array_filter(pjEntitlement::countryCurrencies(), function ($c) { return $c === 'INR'; })));
+		$this->set('country_list', $this->countryList());
 		$this->set('plans', pjEntitlement::plans());
 		$this->set('counts', $counts);
 		$this->set('default_plan_id', (int) pjEntitlement::setting('default_plan_id'));
+	}
+
+	/**
+	 * Options > Currency & exchange rate (Super Admin): INR per 1 USD (suggests INR prices, values INR payments in
+	 * USD) and the billing countries that pay in INR. Plans set to "follow the rate" get their INR price again when
+	 * the rate is saved; manual INR prices and payments already made never change.
+	 */
+	public function pjActionCurrency()
+	{
+		if (!$this->requireAdmin()) { return; }
+		if (self::isPost())
+		{
+			// Currency & exchange rate: INR per 1 USD. Plans set to "follow the rate" get their INR price again;
+			// manually set INR prices and every payment already made stay as they are.
+			if (!$this->csrfOk())
+			{
+				$this->back('pjActionCurrency', 'subErrCsrf');
+			}
+			$rate = round((float) str_replace(',', '.', (string) $this->_post->toString('inr_rate')), 4);
+			if ($rate < 1 || $rate > 100000)
+			{
+				$this->back('pjActionCurrency', 'subErrRate');
+			}
+			$old = pjEntitlement::rate();
+			// country -> currency mapping: the billing countries picked (ISO codes); every other country pays in USD
+			$known = array();
+			foreach ($this->countryList() as $c) { $known[$c['code']] = true; }
+			$posted = $this->_post->check('inr_countries') && is_array($_POST['inr_countries'])
+				? (array) $this->_post->toArray('inr_countries')
+				: preg_split('/[\s,;]+/', (string) $this->_post->toString('inr_countries'));
+			$map = array();
+			foreach ($posted as $cc)
+			{
+				$cc = strtoupper(trim((string) $cc));
+				if (preg_match('/^[A-Z]{2}$/', $cc) && (empty($known) || isset($known[$cc]))) { $map[$cc] = $cc . ':INR'; }
+			}
+			pjEntitlement::saveSetting('country_currencies', implode(',', $map));
+			if ($rate !== round($old, 4) || pjEntitlement::rateSnapshotId() === 0)
+			{
+				pjEntitlement::saveRate($rate, 'manual', $this->getUserId());
+			}
+			$updated = 0;
+			foreach (pjEntitlement::plans() as $p)
+			{
+				if ((int) $p['inr_auto'] === 1 && $p['prices']['USD'] !== null)
+				{
+					$inr = $p['prices']['USD'] <= 0 ? 0 : pjEntitlement::suggestInr($p['prices']['USD']);
+					pjPlanModel::factory()->set('id', $p['id'])->modify(array('price_inr' => number_format($inr, 2, '.', ''), 'modified' => date('Y-m-d H:i:s')));
+					$updated++;
+				}
+			}
+			pjEntitlement::clearCache();
+			pjEntitlement::log(0, 'exchange_rate', sprintf('1 USD = %s INR (was %s); %d plan(s) following the rate updated', $rate, $old, $updated), $this->getUserId());
+			$this->back('pjActionCurrency', 'subRateSaved');
+		}
+		$this->set('inr_rate', pjEntitlement::rate());
+		$this->set('inr_countries', array_keys(array_filter(pjEntitlement::countryCurrencies(), function ($c) { return $c === 'INR'; })));
+		$this->set('country_list', $this->countryList());
+		$snap = pjEntitlement::rateSnapshotId();
+		$this->set('rate_snapshot', $snap > 0 ? pjExchangeRateSnapshotModel::factory()->find($snap)->getData() : null);
+		$this->set('plans', pjEntitlement::plans());
 	}
 
 	public function pjActionPlan()
@@ -257,18 +333,31 @@ class pjAdminSubscriptions extends pjAdmin
 				$this->back('pjActionPlan', 'subErrPlanCode', $plan ? '&id=' . $plan['id'] : '');
 			}
 			$num = function ($v) { $v = trim((string) $v); return $v === '' ? ':NULL' : max(0, (int) $v); };
-			$price = trim(str_replace(',', '.', (string) $this->_post->toString('price')));
 			$features = array_values(array_intersect(array_keys(pjEntitlement::$features), (array) $this->_post->toArray('features')));
-			$currency = strtoupper(trim((string) $this->_post->toString('currency')));
-			if (!in_array($currency, $this->currencyList(), true))
+			// Dual pricing: USD (international, required for a paid plan) and INR (India). INR either follows the
+			// exchange rate (suggested price) or is set by hand.
+			$money = function ($v) { $v = trim(str_replace(',', '.', (string) $v)); return $v === '' ? null : max(0, round((float) $v, 2)); };
+			$fmt = function ($v) { return $v === null ? ':NULL' : number_format($v, 2, '.', ''); };
+			$usd = $money($this->_post->toString('price_usd'));
+			$inr_auto = $this->_post->check('inr_auto') ? 1 : 0;
+			$inr = $inr_auto ? pjEntitlement::suggestInr($usd) : $money($this->_post->toString('price_inr'));
+			if ($usd !== null && $usd <= 0)
 			{
-				$currency = '';
+				$inr = 0.0; // a free plan is free in every currency
+			}
+			if ($usd === null && $inr !== null && $inr > 0)
+			{
+				$this->back('pjActionPlan', 'subErrPlanUsd', $plan ? '&id=' . $plan['id'] : '');
 			}
 			$data = array(
 				'code' => $code, 'name' => $name,
 				'description' => trim((string) $this->_post->toString('description')) !== '' ? trim((string) $this->_post->toString('description')) : ':NULL',
-				'price' => $price === '' ? ':NULL' : number_format(max(0, (float) $price), 2, '.', ''),
-				'currency' => preg_match('/^[A-Z]{3}$/', $currency) ? $currency : ':NULL',
+				'price_usd' => $fmt($usd),
+				'price_inr' => $fmt($inr),
+				'inr_auto' => $inr_auto,
+				// legacy single price = the USD (base) price
+				'price' => $fmt($usd),
+				'currency' => pjEntitlement::BASE_CURRENCY,
 				'billing_interval' => $this->_post->toString('billing_interval') === 'year' ? 'year' : 'month',
 				'interval_count' => max(1, min(12, $this->_post->toInt('interval_count'))),
 				'trial_days' => max(0, min(365, $this->_post->toInt('trial_days'))),
@@ -302,8 +391,25 @@ class pjAdminSubscriptions extends pjAdmin
 			$this->back('pjActionPlans', 'subSaved');
 		}
 		$this->set('plan', $plan);
-		$this->set('currencies', $this->currencyList());
+		$this->set('inr_rate', pjEntitlement::rate());
 		$this->set('default_plan_id', (int) pjEntitlement::setting('default_plan_id'));
+	}
+
+	/** Countries (System options > Countries) with their ISO code and name: array(code, name), by name. */
+	private function countryList()
+	{
+		$out = array();
+		foreach (pjBaseCountryModel::factory()->select('t1.alpha_2, t2.content AS `name`')
+			->join('pjMultiLang', "t2.model='pjBaseCountry' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='" . (int) $this->getLocaleId() . "'", 'left outer')
+			->where('t1.status', 'T')->orderBy('`name` ASC')->findAll()->getData() as $row)
+		{
+			$code = strtoupper(trim((string) $row['alpha_2']));
+			if (preg_match('/^[A-Z]{2}$/', $code) && !isset($out[$code]))
+			{
+				$out[$code] = array('code' => $code, 'name' => trim((string) $row['name']) !== '' ? (string) $row['name'] : $code);
+			}
+		}
+		return array_values($out);
 	}
 
 	/** Currencies of System options > Currency (the administrator's list), in its order. */
@@ -392,10 +498,11 @@ class pjAdminSubscriptions extends pjAdmin
 			}
 			$plan_ids = array_values(array_intersect($plan_ids, array_map('intval', (array) $this->_post->toArray('plan_ids'))));
 			$kinds = array_values(array_intersect(pjSubscriptionPromos::$kinds, (array) $this->_post->toArray('kinds')));
+			// a fixed amount is in USD or INR (it only applies to payments in that currency)
 			$currency = strtoupper(trim((string) $this->_post->toString('currency')));
-			if (!preg_match('/^[A-Z]{3}$/', $currency))
+			if (!pjEntitlement::isCurrency($currency))
 			{
-				$currency = strtoupper((string) pjEntitlement::setting('currency'));
+				$currency = pjEntitlement::BASE_CURRENCY;
 			}
 			$from = $date($this->_post->toString('date_from'));
 			$to = $date($this->_post->toString('date_to'));
@@ -448,10 +555,45 @@ class pjAdminSubscriptions extends pjAdmin
 	public function pjActionGateways()
 	{
 		if (!$this->requireAdmin()) { return; }
+		if (self::isPost() && $this->_post->toString('do') === 'gateway_map')
+		{
+			// which online gateways may take each currency (configuration, not code)
+			if (!$this->csrfOk())
+			{
+				pjUtil::redirect($_SERVER['PHP_SELF'] . '?controller=pjAdminSubscriptions&action=pjActionGateways&msg=subErrCsrf');
+			}
+			// Only the gateways listed for a currency (switched on + able to take it) are changed here; a gateway that
+			// is switched off keeps its choice, so it comes back as it was when it is switched on again.
+			$posted = (array) $this->_post->toArray('map');
+			$old = pjSubscriptionBilling::currencyMethods();
+			$map = array();
+			foreach (pjEntitlement::$currencies as $cur)
+			{
+				$shown = array_keys(pjSubscriptionBilling::gatewayOptions($cur));
+				$picked = isset($posted[$cur]) && is_array($posted[$cur]) ? array_values(array_intersect($shown, $posted[$cur])) : array();
+				$kept = array_values(array_filter(isset($old[$cur]) ? $old[$cur] : array(), function ($m) use ($shown, $cur) {
+					return !in_array($m, $shown, true) && pjSubscriptionBilling::supports($m, $cur);
+				}));
+				$map[$cur] = array_values(array_unique(array_merge($picked, $kept)));
+			}
+			pjEntitlement::saveSetting('gateway_map', json_encode($map));
+			pjEntitlement::log(0, 'gateway_map', 'Subscription gateways per currency: ' . json_encode($map), $this->getUserId());
+			pjUtil::redirect($_SERVER['PHP_SELF'] . '?controller=pjAdminSubscriptions&action=pjActionGateways&msg=subSaved');
+		}
 		$this->set('all_methods', pjSubscriptionBilling::allMethods());
 		$this->set('active_methods', pjSubscriptionBilling::activeMethods());
 		// every plan is charged and verified in its own currency (no dependency on a property's settings)
 		$this->set('gateway_currency', implode(', ', pjSubscriptionBilling::planCurrencies()));
+		$this->set('currency_methods', pjSubscriptionBilling::currencyMethods());
+		$options = array();
+		$unsupported = array();
+		foreach (pjEntitlement::$currencies as $cur)
+		{
+			$options[$cur] = pjSubscriptionBilling::gatewayOptions($cur);
+			$unsupported[$cur] = pjSubscriptionBilling::unsupportedActive($cur);
+		}
+		$this->set('gateway_options', $options);
+		$this->set('gateway_unsupported', $unsupported);
 		$this->set('currency_mismatch', array());
 	}
 
@@ -546,44 +688,29 @@ class pjAdminSubscriptions extends pjAdmin
 					$this->back('pjActionMyPlan', $plan && pjEntitlement::startTrial($cid, $plan['id'], $uid) ? 'subTrialStarted' : 'subErrTrial');
 					break;
 				case 'pay':
-					// new plan / upgrade / renewal: always through a verified payment
-					if (!$plan)
+					// new plan / upgrade / renewal: always through a verified payment. The same purchase process as the
+					// StayOwned website (pjSubscriptionBilling::purchase).
+					$res = pjSubscriptionBilling::purchase($company, $plan, $this->_post->toString('currency'), (string) $this->_post->toString('method'),
+						$this->_post->toString('coupon_code'), $uid);
+					switch ($res['result'])
 					{
-						$this->back('pjActionMyPlan', 'subErrPlan');
+						case 'checkout':
+							pjUtil::redirect($_SERVER['PHP_SELF'] . '?controller=pjAdminSubscriptions&action=pjActionPay&txn=' . $res['txn']['uuid']);
+							break;
+						case 'applied':
+							$this->back('pjActionMyPlan', 'subPaymentOk');
+							break;
+						case 'requested':
+							$this->back('pjActionMyPlan', 'subRequestSent');
+							break;
+						case 'free_switched':
+							$this->back('pjActionMyPlan', 'subFreeSwitched');
+							break;
+						case 'free_scheduled':
+							$this->back('pjActionMyPlan', 'subDowngradeScheduled');
+							break;
 					}
-					if (pjEntitlement::isFree($plan))
-					{
-						// a free plan needs no payment: now, or at the end of the paid period
-						$res = pjEntitlement::switchToFree($cid, $plan, $uid);
-						$this->back('pjActionMyPlan', $res === 'switched' ? 'subFreeSwitched' : ($res === 'scheduled' ? 'subDowngradeScheduled' : 'subErrPlan'));
-					}
-					$kind = $this->payKind($plan, $cur);
-					// the administrator's discount / coupon (Subscriptions > Coupons & Discounts), worked out here
-					$quote = pjEntitlement::isPurchasable($plan) ? pjSubscriptionPromos::quote($plan, $kind, $cid, $this->_post->toString('coupon_code')) : null;
-					if ($quote && $quote['error'] !== '')
-					{
-						$this->back('pjActionMyPlan', $quote['error']);
-					}
-					if ($quote && !empty($quote['promo_ids']) && $quote['amount'] <= 0)
-					{
-						// nothing left to pay: the plan starts now
-						$txn = pjEntitlement::createTransaction($cid, $plan, $kind, 'promo', $uid, $quote);
-						$res = $txn ? pjEntitlement::applyPayment($txn['id'], $txn['uuid'], 0, $txn['currency'], $uid) : '';
-						$this->back('pjActionMyPlan', $res === 'applied' ? 'subPaymentOk' : 'subErrCheckout');
-					}
-					if (pjEntitlement::isPurchasable($plan) && count(pjSubscriptionBilling::activeMethods()) === 0)
-					{
-						// no payment method switched on yet: leave a payment request for the administrator
-						$txn = pjEntitlement::createTransaction($cid, $plan, $kind, 'manual', $uid, $quote);
-						pjEntitlement::log($cid, 'payment_requested', 'Payment requested for plan ' . $plan['name'] . ($txn ? ' (' . $txn['amount'] . ' ' . $txn['currency'] . ')' : ''), $uid);
-						$this->back('pjActionMyPlan', 'subRequestSent');
-					}
-					$res = pjSubscriptionBilling::checkout($company, $plan, $kind, (string) $this->_post->toString('method'), $uid, $quote);
-					if (isset($res['txn']))
-					{
-						pjUtil::redirect($_SERVER['PHP_SELF'] . '?controller=pjAdminSubscriptions&action=pjActionPay&txn=' . $res['txn']['uuid']);
-					}
-					$this->back('pjActionMyPlan', $res['error']);
+					$this->back('pjActionMyPlan', $res['error'] !== '' ? $res['error'] : 'subErrPlan');
 					break;
 				case 'downgrade':
 					// takes effect at the end of the paid period (no refund, no charge now)
@@ -623,20 +750,28 @@ class pjAdminSubscriptions extends pjAdmin
 		{
 			if (pjEntitlement::isPurchasable($p))
 			{
-				$quotes[(int) $p['id']] = pjSubscriptionPromos::quote($p, $this->payKind($p, $state['plan']), $cid);
+				$k = $this->payKind($p, $state['plan']);
+				foreach (pjEntitlement::currenciesOf($p) as $c)
+				{
+					$quotes[(int) $p['id']][$c] = pjSubscriptionPromos::quote(pjEntitlement::chargedPlan($cid, $p, $k, $c), $k, $cid);
+				}
 			}
 		}
 		$this->set('plans', $plans);
 		$this->set('quotes', $quotes);
 		$this->set('transactions', $this->transactions($cid, 50));
 		$this->set('methods', pjSubscriptionBilling::activeMethods());
+		$this->set('method_currencies', pjSubscriptionBilling::methodCurrencies());
+		$this->set('billing_currency', pjEntitlement::billingCurrency($cid));
+		$this->set('currency_locked', pjEntitlement::currencyLocked($cid));
+		$this->set('inr_rate', pjEntitlement::rate());
 		$this->set('self_trial', pjEntitlement::setting('self_trial') === '1');
 	}
 
 	/** What buying the plan is for the company: renewal of its plan, upgrade or a new plan. */
 	private function payKind($plan, $cur)
 	{
-		return ($cur && (int) $cur['id'] === (int) $plan['id']) ? 'renewal' : (($cur && (int) $plan['sort'] > (int) $cur['sort']) ? 'upgrade' : 'new');
+		return pjSubscriptionBilling::payKind($plan, $cur);
 	}
 
 	/** My plan (Ajax): the price of a plan with the discount and the coupon code typed in the payment popup. */
@@ -651,14 +786,31 @@ class pjAdminSubscriptions extends pjAdmin
 			self::jsonResponse(array('status' => 'ERR', 'text' => __('subErrPlan', true)));
 		}
 		$state = pjEntitlement::state($cid);
-		$q = pjSubscriptionPromos::quote($plan, $this->payKind($plan, $state['plan']), $cid, $this->_get->toString('code'));
-		$money = function ($v) use ($plan) { return pjMoney::format($v, $plan['currency']); };
+		$kind = $this->payKind($plan, $state['plan']);
+		$currency = pjEntitlement::checkoutCurrency($cid, $plan, $kind, $this->_get->toString('currency'));
+		$charged = $currency ? pjEntitlement::chargedPlan($cid, $plan, $kind, $currency) : false;
+		if (!$charged)
+		{
+			self::jsonResponse(array('status' => 'ERR', 'text' => __('subErrCurrency', true)));
+		}
+		$q = pjSubscriptionPromos::quote($charged, $kind, $cid, $this->_get->toString('code'));
+		$money = function ($v) use ($currency) { return pjMoney::format($v, $currency); };
+		$rate = pjEntitlement::rate();
 		self::jsonResponse(array(
 			'status' => $q['error'] === '' ? 'OK' : 'ERR',
 			'text' => $q['error'] !== '' ? __($q['error'], true) : ($q['coupon_code'] !== '' ? __('sub_coupon_ok', true) : ''),
+			'currency' => $currency,
+			// the company's currency is fixed after its first payment (only the administrator changes it)
+			'locked' => pjEntitlement::currencyLocked($cid),
+			'price_locked' => !empty($charged['price_locked']),
+			'kind' => $kind,
 			'list' => $money($q['list']),
 			'discount' => $q['discount'] > 0 ? '- ' . $money($q['discount']) : '',
 			'amount' => $money($q['amount']),
+			'amount_raw' => $q['amount'],
+			'usd' => $currency !== 'USD' ? pjMoney::format(pjEntitlement::toUsd($q['amount'], $currency, $rate), 'USD') : '',
+			'rate' => $currency !== 'USD' ? '1 USD = ' . pjMoney::format($rate, $currency) : '',
+			'methods' => array_keys(pjSubscriptionBilling::methodsFor($currency)),
 		));
 	}
 
@@ -681,7 +833,8 @@ class pjAdminSubscriptions extends pjAdmin
 		$params = false;
 		if (pjSubscriptionBilling::isOnline($txn['provider']))
 		{
-			$active = pjSubscriptionBilling::activeMethods();
+			// the gateway must (still) be switched on and allowed for the currency of this payment
+			$active = pjSubscriptionBilling::methodsFor($txn['currency']);
 			$params = isset($active[$txn['provider']]) ? pjSubscriptionBilling::formParams($txn, $company, $this->getLocaleId()) : false;
 			if (!$params)
 			{

@@ -1693,6 +1693,12 @@ class pjAdminCalendars extends pjAdmin
 		}
 	
 		if ($this->_post->check('id') && $this->_post->toInt('id') > 0) {
+			// only a period of a property of the active company (the id comes from the browser)
+			$period = pjPeriodModel::factory()->find($this->_post->toInt('id'))->getData();
+			if (empty($period) || !$this->isCompanyCalendar((int) $period['foreign_id']))
+			{
+				self::jsonResponse(array('status' => 'ERR', 'code' => 102, 'text' => 'Access denied.'));
+			}
 			if (pjPeriodModel::factory()->set('id', $this->_post->toInt('id'))->erase()->getAffectedRows() == 1)
 			{
 				pjPeriodPriceModel::factory()->where('period_id', $this->_post->toInt('id'))->eraseAll();
@@ -2555,6 +2561,11 @@ class pjAdminCalendars extends pjAdmin
         
         if ($this->isXHR())
         {
+            // the property must belong to the active company (the id comes from the browser)
+            if (!$this->isCompanyCalendar($this->_post->toInt('calendar_id')))
+            {
+                self::jsonResponse(array('status' => 'ERR', 'code' => 104, 'text' => 'Access denied.'));
+            }
             if($this->_post->isEmpty('ical_urls'))
             {
                 self::jsonResponse(array('status' => 'ERR', 'code' => 100, 'text' => __('rpbc_feed_url_empty', true)));
@@ -2656,7 +2667,9 @@ class pjAdminCalendars extends pjAdmin
                 'image/jpeg', 'image/jpg', 'image/pjpeg',
                 'image/png', 'image/x-png', 'image/gif'
             ));
-			if (!$handle->load($file))
+			// WEBP / AVIF photos (often saved from websites as ".jpg") become JPG, the name follows the real type; then the
+			// whole file must decode as a picture (a header-only check lets "GIF89a<?php ..." through)
+			if (pjImageGuard::prepareUpload($file) === false || !pjImageGuard::isImage($file['tmp_name']) || !$handle->load($file))
 			{
 				continue;
 			}
@@ -2685,7 +2698,7 @@ class pjAdminCalendars extends pjAdmin
 					$small_path = $small_rel;
 				}
 			}
-			catch (Exception $e)
+			catch (\Throwable $e)
 			{
 				$small_path = $large_rel;
 			}

@@ -32,6 +32,8 @@ $planOptions = function ($selected = 0, $empty = false) use ($tpl) {
 					<?php if (!empty($sub['pending_plan_id'])) { $pp = pjEntitlement::plan($sub['pending_plan_id']); ?><tr><th><?php __('sub_scheduled_change'); ?></th><td><?php echo $pp ? pjSanitize::html($pp['name']) : ''; ?></td></tr><?php } ?>
 					<?php if ((int) $sub['cancel_at_period_end'] === 1) { ?><tr><th></th><td><?php __('sub_cancels_at_end'); ?></td></tr><?php } ?>
 					<?php } ?>
+					<tr><th><?php __('sub_billing_currency'); ?></th><td><span class="sub-cur-chip<?php echo $tpl['billing_currency'] === 'INR' ? ' sub-cur-inr' : ''; ?>"><?php echo pjSanitize::html($tpl['billing_currency']); ?></span>
+						<?php if ($sub && !empty($sub['price_amount'])) { ?><small class="text-muted m-l-xs"><?php __('sub_locked_price'); ?>: <?php echo $subMoney($sub['price_amount'], $tpl['billing_currency']); ?><?php if (!empty($sub['exchange_rate']) && $tpl['billing_currency'] !== 'USD') { ?> &middot; 1 USD = <?php echo $subMoney($sub['exchange_rate'], 'INR'); ?><?php } ?></small><?php } ?></td></tr>
 					<tr><th><?php __('sub_col_properties'); ?></th><td><?php echo (int) $tpl['usage']['properties']; ?> / <?php echo $subLimit($s['limits']['max_properties']); ?></td></tr>
 					<tr><th><?php __('sub_col_users'); ?></th><td><?php echo (int) $tpl['usage']['users']; ?> / <?php echo $subLimit($s['limits']['max_users']); ?></td></tr>
 				</table>
@@ -70,6 +72,14 @@ $planOptions = function ($selected = 0, $empty = false) use ($tpl) {
 					<?php echo $hidden; ?><input type="hidden" name="do" value="extend">
 					<input type="date" name="period_end" class="form-control" required value="<?php echo !empty($sub['current_period_end']) ? date('Y-m-d', strtotime($sub['current_period_end'])) : ''; ?>">
 					<input type="text" name="note" class="form-control" placeholder="<?php __('sub_note', false, true); ?>" maxlength="200">
+					<button class="btn btn-default" type="submit"><?php __('sub_btn_save'); ?></button>
+				</form>
+				<div class="hr-line-dashed"></div>
+				<h4><?php __('sub_currency_title'); ?></h4>
+				<p class="text-muted small"><?php __('sub_currency_hint'); ?></p>
+				<form method="post" action="<?php echo $action; ?>" class="form-inline sub-form" data-sub-confirm="<?php __('sub_confirm', false, true); ?>">
+					<?php echo $hidden; ?><input type="hidden" name="do" value="currency">
+					<select name="currency" class="form-control"><?php foreach (pjEntitlement::$currencies as $c) { ?><option value="<?php echo $c; ?>"<?php echo $c === $tpl['billing_currency'] ? ' selected' : ''; ?>><?php echo $c; ?></option><?php } ?></select>
 					<button class="btn btn-default" type="submit"><?php __('sub_btn_save'); ?></button>
 				</form>
 				<div class="hr-line-dashed"></div>
@@ -119,6 +129,7 @@ $planOptions = function ($selected = 0, $empty = false) use ($tpl) {
 				<form method="post" action="<?php echo $action; ?>" class="form-inline sub-form" data-sub-confirm="<?php __('sub_confirm', false, true); ?>">
 					<?php echo $hidden; ?><input type="hidden" name="do" value="payment">
 					<select name="plan_id" class="form-control"><?php echo $planOptions($sub ? $sub['plan_id'] : 0); ?></select>
+					<select name="currency" class="form-control" aria-label="<?php __('sub_currency', false, true); ?>"><?php foreach (pjEntitlement::$currencies as $c) { ?><option value="<?php echo $c; ?>"<?php echo $c === $tpl['billing_currency'] ? ' selected' : ''; ?>><?php echo $c; ?></option><?php } ?></select>
 					<input type="number" name="amount" class="form-control" min="0.01" step="0.01" required placeholder="<?php __('sub_amount', false, true); ?>">
 					<input type="text" name="reference" class="form-control" required maxlength="120" placeholder="<?php __('sub_reference', false, true); ?>">
 					<button class="btn btn-primary" type="submit"><?php __('sub_btn_record'); ?></button>

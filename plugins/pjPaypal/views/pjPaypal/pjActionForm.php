@@ -61,16 +61,20 @@
 			            	paypal_order_id: data.orderID
 			            })
 			        })
-			        .then((response) => response.json())
-			        .then((details) => {
-			        	window.location.href = "<?php echo $tpl['arr']['return_url']; ?>";
-			        });
+			        .then(function (response) { return response.text(); })
+			        // the return page shows the result (paid / not completed): go there whatever the answer was
+			        .then(function () { window.location.href = "<?php echo $tpl['arr']['return_url']; ?>"; },
+			              function () { window.location.href = "<?php echo $tpl['arr']['return_url']; ?>"; });
 			    },
 			    /*onCancel(data) {
 			    	window.location.href = "<?php echo $tpl['arr']['failure_url']; ?>";
 		      	},*/
 		      	onError(err) {
-			    	$('#modalPaypal').find('.modal-body').html(err);
+			    	// show the reason as text (never as HTML) with a way back
+			    	var msg = (err && err.message) ? String(err.message) : 'PayPal could not take the payment. Please try again.';
+			    	var $body = $('#modalPaypal').find('.modal-body').empty();
+			    	$('<p class="text-danger" style="margin:0 0 10px"></p>').text(msg).appendTo($body);
+			    	$('<a class="btn btn-default"></a>').attr('href', "<?php echo $tpl['arr']['failure_url']; ?>").text('Back').appendTo($body);
 		      	}
 			}).render('#paypal-button-container');
 		}, 2000);

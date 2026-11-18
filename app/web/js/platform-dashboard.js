@@ -71,7 +71,9 @@
 		var conv = k.conversion;
 		var cards = [
 			{ label: T.kpi_revenue, value: k.revenue.multi ? k.revenue.text : money(k.revenue.value), icon: 'fa-money', accent: true, spark: spark(s.revenue, '#F97618'),
-				foot: delta(k.revenue.value, k.revenue.prev), sub: T.vs_prev, title: k.revenue.text + ' · ' + P.range.compare + ': ' + k.revenue.prev_text },
+				// sub line: what was collected per currency (INR / USD); the big number is the consolidated USD at stored rates
+				foot: delta(k.revenue.value, k.revenue.prev), sub: k.revenue.collected_text || T.vs_prev,
+				title: k.revenue.text + (k.revenue.collected_text ? ' (' + k.revenue.collected_text + ')' : '') + ' · ' + P.range.compare + ': ' + k.revenue.prev_text },
 			{ label: T.kpi_companies, value: num(k.companies.value), icon: 'fa-building', spark: spark(s.companies, '#2a78d6'),
 				foot: '<span class="sa-delta up">▲ ' + esc(fmt(T.new_n, [k.companies['new']])) + '</span>', sub: fmt(T.left_n, [k.companies.left]) },
 			{ label: T.kpi_subs, value: num(k.subs.value), icon: 'fa-credit-card', spark: spark(s.active, '#1baf7a'),
@@ -363,7 +365,7 @@
 	/* ---------- export: the figures of the period as CSV ---------- */
 	document.getElementById('saExport').addEventListener('click', function () {
 		var k = P.data.kpi, s = P.data.series, rows = [[T.csv_period, P.range.label], [], [T.csv_metric, T.csv_value]];
-		rows.push([T.kpi_revenue, k.revenue.text], [T.kpi_companies, k.companies.value], [T.kpi_subs, k.subs.value], [T.kpi_mrr, k.mrr.text],
+		rows.push([T.kpi_revenue, k.revenue.text + (k.revenue.collected_text ? ' (' + k.revenue.collected_text + ')' : '')], [T.kpi_companies, k.companies.value], [T.kpi_subs, k.subs.value], [T.kpi_mrr, k.mrr.text],
 			[T.kpi_conv, k.conversion.rate === null ? '' : k.conversion.rate + '%'], []);
 		var head = [T.csv_period, T.kpi_revenue + ' (' + P.data.money.code + ')'].concat(s.by_plan.map(function (x) { return x.name; }), [T.new_companies, T.left, T.kpi_subs, T.kpi_mrr + ' (' + P.data.money.code + ')']);
 		rows.push(head);

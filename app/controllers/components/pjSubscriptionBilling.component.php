@@ -27,6 +27,119 @@ class pjSubscriptionBilling
 	 */
 	public static $currencyOverride = '';
 
+	/**
+	 * Default gateways per currency for subscription payments: INR only through Razorpay, USD through Razorpay
+	 * or Stripe. The administrator changes them in Options > Payments (setting gateway_map). Enforced on the
+	 * server (checkout and payment page), not only in the popup.
+	 */
+	public static $currencyMethods = array(
+		'INR' => array('razorpay'),
+		'USD' => array('razorpay', 'stripe'),
+	);
+
+	/**
+	 * Currencies each gateway can take for a subscription payment. A gateway is never offered (or accepted) for a
+	 * currency it does not take, whatever the settings say: PayPal / Authorize.Net and the others do not take INR.
+	 */
+	public static $currencySupport = array(
+		'razorpay'       => array('INR', 'USD'),
+		'stripe'         => array('USD'), // INR payments: Razorpay only
+		'paypal'         => array('USD'),
+		'paypal_express' => array('USD'),
+		'authorize'      => array('USD'),
+		'2checkout'      => array('USD'),
+		'mollie'         => array('USD'),
+		'skrill'         => array('USD'),
+		'braintree'      => array('USD'),
+		'world_pay'      => array('USD'),
+	);
+
+	/** Can the gateway take a payment in $currency? */
+	public static function supports($method, $currency)
+	{
+		$currency = strtoupper((string) $currency);
+		return isset(self::$currencySupport[$method]) && in_array($currency, self::$currencySupport[$method], true);
+	}
+
+	/**
+	 * Gateways the administrator can pick for a currency: switched on in Options > Payments, online, and able to take
+	 * that currency (method => name).
+	 */
+	public static function gatewayOptions($currency)
+	{
+		$out = array();
+		foreach (self::activeMethods() as $m => $name)
+		{
+			if (self::isOnline($m) && self::supports($m, $currency))
+			{
+				$out[$m] = $name;
+			}
+		}
+		return $out;
+	}
+
+	/** Switched-on online gateways that cannot take $currency (method => name), to explain why they are not listed. */
+	public static function unsupportedActive($currency)
+	{
+		$out = array();
+		foreach (self::activeMethods() as $m => $name)
+		{
+			if (self::isOnline($m) && !self::supports($m, $currency))
+			{
+				$out[$m] = $name;
+			}
+		}
+		return $out;
+	}
+
+	/** Gateways per currency from the settings (the defaults above when not set): currency => methods. */
+	public static function currencyMethods()
+	{
+		$map = json_decode((string) pjEntitlement::setting('gateway_map'), true);
+		$out = array();
+		foreach (pjEntitlement::$currencies as $cur)
+		{
+			$out[$cur] = is_array($map) && isset($map[$cur]) && is_array($map[$cur])
+				? array_values(array_filter($map[$cur], 'is_string'))
+				: (isset(self::$currencyMethods[$cur]) ? self::$currencyMethods[$cur] : array());
+		}
+		return $out;
+	}
+
+	/** Gateways allowed for a currency (whether switched on or not). */
+	public static function allowedFor($currency)
+	{
+		$currency = strtoupper((string) $currency);
+		$map = self::currencyMethods();
+		// only gateways that can take the currency, whatever is saved
+		return isset($map[$currency]) ? array_values(array_filter($map[$currency], function ($m) use ($currency) {
+			return pjSubscriptionBilling::supports($m, $currency);
+		})) : array();
+	}
+
+	/** Switched-on gateways that can take a payment in $currency: method => name. */
+	public static function methodsFor($currency)
+	{
+		return array_intersect_key(self::activeMethods(), array_flip(self::allowedFor($currency)));
+	}
+
+	/** Every switched-on gateway with the currencies it takes: method => array(currencies). */
+	public static function methodCurrencies()
+	{
+		$out = array();
+		foreach (self::activeMethods() as $m => $name)
+		{
+			foreach (pjEntitlement::$currencies as $cur)
+			{
+				if (in_array($m, self::allowedFor($cur), true))
+				{
+					$out[$m][] = $cur;
+				}
+			}
+		}
+		return $out;
+	}
+
 	public static function hasPayments()
 	{
 		return class_exists('pjPayments') && pjObject::getPlugin('pjPayments') !== NULL;
@@ -109,36 +222,164 @@ class pjSubscriptionBilling
 		$out = array();
 		foreach (pjEntitlement::plans() as $p)
 		{
-			if ($p['price'] !== null && $p['price'] > 0)
+			foreach (pjEntitlement::currenciesOf($p) as $c)
 			{
-				$out[strtoupper((string) $p['currency'])] = true;
+				$out[$c] = true;
 			}
 		}
 		return array_keys($out);
 	}
 
+	/**
+	 * Where the browser goes back to after the gateway: the StayOwned website page saved with a payment started there
+	 * (return_url), otherwise My plan in the back office.
+	 */
 	public static function returnUrl($txn)
 	{
+		if (!empty($txn['return_url']) && preg_match('~^https?://~i', $txn['return_url']))
+		{
+			return $txn['return_url'] . (strpos($txn['return_url'], '?') === false ? '?' : '&') . 'txn=' . $txn['uuid'];
+		}
 		return PJ_INSTALL_URL . 'index.php?controller=pjAdminSubscriptions&action=pjActionCheckoutReturn&txn=' . $txn['uuid'];
+	}
+
+	/** Signature of the public payment page of a subscription payment started on the website. */
+	/**
+	 * The same number for a stored date/time string in every request, whatever time zone the request runs in.
+	 * Payments and bookings made through the API are written in the company's time zone, while the payment page,
+	 * the gateway callbacks and the back office run in another one: strtotime() alone gives a different number there
+	 * and every link signed with it fails ("This plan cannot be chosen.").
+	 */
+	public static function stamp($datetime)
+	{
+		$t = strtotime((string) $datetime . ' UTC');
+		return $t === false ? 0 : $t;
+	}
+
+	public static function payHash($txn)
+	{
+		return hash_hmac('sha256', $txn['uuid'] . '|' . self::stamp($txn['created']), PJ_SALT);
+	}
+
+	/** Public payment page (gateway form) of a payment started on the website. */
+	public static function payUrl($txn)
+	{
+		return PJ_INSTALL_URL . 'index.php?controller=pjFront&action=pjActionPaySubscription&txn=' . $txn['uuid'] . '&hash=' . self::payHash($txn);
+	}
+
+	/**
+	 * Buy a plan: the one purchase process for My plan (back office) and the StayOwned website.
+	 * Same rules everywhere: currency (billing country / locked billing currency), the agreed renewal price,
+	 * discount + coupon, the gateways of that currency, free plans, 100 % coupons and payment requests.
+	 *   $plan: plan row (pjEntitlement::plan), $method: gateway, $coupon: code typed, $return_url: website page
+	 *   to come back to (null: My plan).
+	 * Returns array(result, txn, error):
+	 *   result 'checkout' (pay txn at the gateway), 'applied' (nothing to pay, plan started), 'requested'
+	 *   (no gateway for the currency: payment request left), 'free_switched', 'free_scheduled', or 'error' (+ error label key).
+	 */
+	public static function purchase($company, $plan, $requested_currency, $method, $coupon, $user_id, $return_url = null, $country = '')
+	{
+		$out = array('result' => 'error', 'txn' => null, 'error' => 'subErrPlan', 'kind' => null, 'currency' => null);
+		$cid = (int) $company['id'];
+		if (!$plan || $plan['status'] !== 'T' || (int) $plan['is_public'] !== 1)
+		{
+			return $out; // hidden / inactive plans are assigned by the administrator only
+		}
+		$state = pjEntitlement::state($cid);
+		$cur = $state['plan'];
+		$kind = self::payKind($plan, $cur);
+		$out['kind'] = $kind;
+		if (pjEntitlement::isFree($plan))
+		{
+			// a free plan needs no payment: now, or at the end of the paid period
+			$res = pjEntitlement::switchToFree($cid, $plan, $user_id);
+			$out['result'] = $res === 'switched' ? 'free_switched' : ($res === 'scheduled' ? 'free_scheduled' : 'error');
+			$out['error'] = $res ? '' : 'subErrPlan';
+			return $out;
+		}
+		if (!pjEntitlement::isPurchasable($plan))
+		{
+			$out['error'] = 'subErrCheckout';
+			return $out;
+		}
+		$currency = pjEntitlement::checkoutCurrency($cid, $plan, $kind, $requested_currency, $country);
+		$charged = $currency ? pjEntitlement::chargedPlan($cid, $plan, $kind, $currency) : false;
+		if (!$charged)
+		{
+			$out['error'] = 'subErrCurrency';
+			return $out;
+		}
+		$out['currency'] = $currency;
+		$quote = pjSubscriptionPromos::quote($charged, $kind, $cid, (string) $coupon);
+		if ($quote['error'] !== '')
+		{
+			$out['error'] = $quote['error'];
+			return $out;
+		}
+		$extra = $return_url ? array('return_url' => substr($return_url, 0, 255), 'channel' => 'web') : array();
+		// the billing country chosen on the website is kept with the payment while the account's currency isn't
+		// fixed (it decided the currency); afterwards the company's own country is kept
+		if ($country !== '' && pjEntitlement::isCountry($country) && !pjEntitlement::currencyLocked($cid)
+			&& pjEntitlement::currencyForCountry($country) === $currency)
+		{
+			$extra['billing_country'] = strtoupper($country);
+		}
+		if (!empty($quote['promo_ids']) && $quote['amount'] <= 0)
+		{
+			// nothing left to pay: the plan starts now
+			$txn = pjEntitlement::createTransaction($cid, $charged, $kind, 'promo', $user_id, $quote, $extra);
+			$res = $txn ? pjEntitlement::applyPayment($txn['id'], $txn['uuid'], 0, $txn['currency'], $user_id) : '';
+			$out['txn'] = $txn ? pjBillingTransactionModel::factory()->find($txn['id'])->getData() : null;
+			$out['result'] = $res === 'applied' ? 'applied' : 'error';
+			$out['error'] = $res === 'applied' ? '' : 'subErrCheckout';
+			return $out;
+		}
+		if (count(self::methodsFor($currency)) === 0)
+		{
+			// no gateway for this currency switched on yet: leave a payment request for the administrator
+			$txn = pjEntitlement::createTransaction($cid, $charged, $kind, 'manual', $user_id, $quote, $extra);
+			pjEntitlement::log($cid, 'payment_requested', 'Payment requested for plan ' . $plan['name'] . ($txn ? ' (' . $txn['amount'] . ' ' . $txn['currency'] . ')' : ''), $user_id);
+			$out['txn'] = $txn;
+			$out['result'] = $txn ? 'requested' : 'error';
+			$out['error'] = $txn ? '' : 'subErrCheckout';
+			return $out;
+		}
+		$res = self::checkout($company, $charged, $kind, (string) $method, $user_id, $quote, $extra);
+		if (isset($res['txn']))
+		{
+			$out['txn'] = $res['txn'];
+			$out['result'] = 'checkout';
+			$out['error'] = '';
+			return $out;
+		}
+		$out['error'] = $res['error'];
+		return $out;
+	}
+
+	/** What buying the plan is for the company: renewal of its plan, upgrade or a new plan. */
+	public static function payKind($plan, $cur)
+	{
+		return ($cur && (int) $cur['id'] === (int) $plan['id']) ? 'renewal' : (($cur && (int) $plan['sort'] > (int) $cur['sort']) ? 'upgrade' : 'new');
 	}
 
 	public static function cancelHash($txn)
 	{
-		return sha1($txn['uuid'] . strtotime($txn['created']) . PJ_SALT);
+		return sha1($txn['uuid'] . self::stamp($txn['created']) . PJ_SALT);
 	}
 
 	/**
-	 * Start (or reuse) a payment of $plan with $method. Returns array('txn' => ..) or array('error' => label key).
+	 * Start (or reuse) a payment of $plan with $method. $plan is the plan as charged (pjEntitlement::planInCurrency):
+	 * its currency decides which gateways may take it. Returns array('txn' => ..) or array('error' => label key).
 	 * Duplicate prevention: an open payment of the same company / plan / kind / method is reused
 	 * (online: from the last 30 minutes; bank / cash: while it is still open).
 	 */
-	public static function checkout($company, $plan, $kind, $method, $user_id, $quote = null)
+	public static function checkout($company, $plan, $kind, $method, $user_id, $quote = null, $extra = array())
 	{
 		if (!pjEntitlement::isPurchasable($plan))
 		{
 			return array('error' => 'subErrCheckout');
 		}
-		$active = self::activeMethods();
+		$active = self::methodsFor($plan['currency']);
 		if (!isset($active[$method]))
 		{
 			return array('error' => 'subErrMethod');
@@ -150,7 +391,8 @@ class pjSubscriptionBilling
 		}
 		$m = pjBillingTransactionModel::factory()
 			->where('t1.company_id', (int) $company['id'])->where('t1.plan_id', (int) $plan['id'])
-			->where('t1.kind', $kind)->where('t1.status', 'pending')->where('t1.provider', $method);
+			->where('t1.kind', $kind)->where('t1.status', 'pending')->where('t1.provider', $method)
+			->where('t1.currency', strtoupper((string) $plan['currency']));
 		if ($online)
 		{
 			$m->where('t1.created >', date('Y-m-d H:i:s', time() - 1800));
@@ -158,11 +400,13 @@ class pjSubscriptionBilling
 		$open = $m->orderBy('t1.id DESC')->limit(1)->findAll()->getDataIndex(0);
 		$amount = $quote ? (float) $quote['amount'] : (float) $plan['price'];
 		$coupon = $quote ? (string) $quote['coupon_code'] : '';
-		if (!empty($open) && round((float) $open['amount'], 2) === round($amount, 2) && (string) $open['coupon_code'] === $coupon)
+		$return = isset($extra['return_url']) ? (string) $extra['return_url'] : '';
+		if (!empty($open) && round((float) $open['amount'], 2) === round($amount, 2) && (string) $open['coupon_code'] === $coupon
+			&& (string) (isset($open['return_url']) ? $open['return_url'] : '') === $return)
 		{
 			return array('txn' => $open);
 		}
-		$txn = pjEntitlement::createTransaction($company['id'], $plan, $kind, $method, $user_id, $quote);
+		$txn = pjEntitlement::createTransaction($company['id'], $plan, $kind, $method, $user_id, $quote, $extra);
 		if (!$txn)
 		{
 			return array('error' => 'subErrCheckout');
@@ -179,9 +423,11 @@ class pjSubscriptionBilling
 		{
 			return false;
 		}
-		return $pjPlugin::getFormParams(array('payment_method' => $txn['provider']), array(
+		$back = self::returnUrl($txn);
+		$params = $pjPlugin::getFormParams(array('payment_method' => $txn['provider']), array(
 			'locale_id' => $locale_id,
-			'return_url' => self::returnUrl($txn),
+			'return_url' => $back,
+			'cancel_url' => $back,
 			'id' => $txn['id'],
 			'foreign_id' => self::FOREIGN_ID,
 			'uuid' => $txn['uuid'],
@@ -192,6 +438,44 @@ class pjSubscriptionBilling
 			'cancel_hash' => self::cancelHash($txn),
 			'currency_code' => $txn['currency'],
 		));
+		if (is_array($params))
+		{
+			// The success / failure pages typed in a gateway's settings are for bookings (and may not even be a full
+			// URL, e.g. "www.phpjabbers.com"): a plan payment always comes back to its own page, which shows the result
+			// and offers to pay again.
+			$params['success_url'] = $back;
+			$params['failure_url'] = $back;
+		}
+		return $params;
+	}
+
+	/**
+	 * Order data a gateway plugin must use for a plan payment (PayPal creates its order from this, not from the
+	 * browser): array(amount, currency, description) for an open payment of $method, false for a plan payment
+	 * that can't be paid any more (paid, cancelled, other gateway), null when $uuid is not a plan payment
+	 * (a booking: the plugin keeps its own behaviour).
+	 */
+	public static function gatewayOrder($uuid, $method)
+	{
+		if (!is_string($uuid) || !preg_match('/^[a-f0-9]{32}$/', $uuid) || !class_exists('pjEntitlement') || !pjEntitlement::isReady())
+		{
+			return null;
+		}
+		$txn = pjBillingTransactionModel::factory()->where('t1.uuid', $uuid)->limit(1)->findAll()->getDataIndex(0);
+		if (empty($txn))
+		{
+			return null;
+		}
+		if ($txn['status'] !== 'pending' || $txn['provider'] !== $method || !isset(self::methodsFor($txn['currency'])[$method]))
+		{
+			return false;
+		}
+		$plan = pjEntitlement::plan($txn['plan_id']);
+		return array(
+			'amount' => number_format((float) $txn['amount'], 2, '.', ''),
+			'currency' => strtoupper((string) $txn['currency']),
+			'description' => trim(($plan ? $plan['name'] . ' plan' : 'Plan') . ' (' . $txn['uuid'] . ')'),
+		);
 	}
 
 	/** Bank account text the administrator entered for subscriptions (Options > Payments > Bank). */
@@ -232,6 +516,8 @@ class pjSubscriptionBilling
 			'payment_method' => $method,
 			'foreign_id' => self::FOREIGN_ID,
 			'amount' => $txn['amount'],
+			// the currency the gateway must have been paid in (the global o_currency is the company's / property's)
+			'currency_code' => strtoupper((string) $txn['currency']),
 			'txn_id' => (string) $txn['provider_ref'],
 			'order_id' => $txn['id'],
 			'uuid' => $txn['uuid'],

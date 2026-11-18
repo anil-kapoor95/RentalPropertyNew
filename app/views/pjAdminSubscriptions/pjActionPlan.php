@@ -4,10 +4,13 @@ $heading_title = $tpl['plan'] ? 'sub_plan_edit' : 'sub_plan_add';
 $heading_desc = 'sub_plan_desc';
 include dirname(__FILE__) . '/elements/heading.php';
 $p = $tpl['plan'] ? $tpl['plan'] : array('id' => 0, 'code' => '', 'name' => '', 'description' => '', 'price' => null, 'currency' => '', 'billing_interval' => 'month',
+	'prices' => array('USD' => null, 'INR' => null), 'inr_auto' => 1,
 	'interval_count' => 1, 'trial_days' => 0, 'max_properties' => null, 'max_users' => null, 'max_payment_gateways' => null, 'ai_monthly_messages' => null,
 	'feature_list' => pjEntitlement::$baseFeatures, 'is_public' => 1, 'show_branding' => 1, 'status' => 'T', 'sort' => 0);
 $v = function ($k) use ($p) { return $p[$k] === null ? '' : pjSanitize::html((string) $p[$k]); };
-$cur = $tpl['plan'] && $tpl['plan']['currency'] ? $tpl['plan']['currency'] : strtoupper((string) pjEntitlement::setting('currency'));
+$rate = (float) $tpl['inr_rate'];
+$price_val = function ($c) use ($p) { return $p['prices'][$c] === null ? '' : number_format((float) $p['prices'][$c], 2, '.', ''); };
+$inr_auto = (int) $p['inr_auto'] === 1;
 $is_default = $tpl['plan'] && (int) $tpl['plan']['id'] === (int) $tpl['default_plan_id'];
 $limits = array(
 	'max_properties'       => 'fa-home',
@@ -28,7 +31,8 @@ $toggle = function ($name, $value, $on, $title, $hint) {
 	<form method="post" action="<?php echo $self; ?>pjActionPlan" id="subPlanForm" class="sub-plan-form"
 		data-free="<?php __('sub_plan_free', false, true); ?>" data-not-set="<?php __('sub_price_not_set', false, true); ?>"
 		data-unlimited="<?php __('sub_unlimited', false, true); ?>" data-month="<?php __('sub_month', false, true); ?>" data-year="<?php __('sub_year', false, true); ?>"
-		data-trial="<?php __('sub_plan_trial', false, true); ?>" data-count="<?php __('sub_features_count', false, true); ?>">
+		data-trial="<?php __('sub_plan_trial', false, true); ?>" data-count="<?php __('sub_features_count', false, true); ?>"
+		data-rate="<?php echo pjSanitize::html(number_format($rate, 4, '.', '')); ?>" data-usd-sign="<?php echo pjSanitize::html(pjMoney::symbol('USD')); ?>" data-inr-sign="<?php echo pjSanitize::html(pjMoney::symbol('INR')); ?>">
 		<?php echo $subCsrf; ?><input type="hidden" name="id" value="<?php echo (int) $p['id']; ?>">
 
 		<div class="sub-plan-layout">
@@ -60,18 +64,44 @@ $toggle = function ($name, $value, $on, $title, $hint) {
 				<section class="ibox sub-sec">
 					<div class="ibox-content">
 						<h4 class="sub-sec-title"><span>2</span><?php __('sub_plan_sec_pricing'); ?></h4>
+						<!-- Dual pricing: USD (international) + INR (India) -->
+						<div class="sub-dual">
+							<div class="sub-dual-card">
+								<div class="sub-dual-head">
+									<span class="sub-cur-chip">USD</span>
+									<div><strong><?php __('sub_price_usd'); ?></strong><small><?php __('sub_price_usd_hint'); ?></small></div>
+								</div>
+								<div class="sub-money-input">
+									<span class="sub-money-sign"><?php echo pjSanitize::html(pjMoney::symbol('USD')); ?></span>
+									<input class="form-control" id="subPriceUsd" name="price_usd" type="number" min="0" step="0.01" value="<?php echo $price_val('USD'); ?>" placeholder="<?php __('sub_price_not_set', false, true); ?>" aria-label="<?php __('sub_price_usd', false, true); ?>">
+								</div>
+							</div>
+							<div class="sub-dual-card">
+								<div class="sub-dual-head">
+									<span class="sub-cur-chip sub-cur-inr">INR</span>
+									<div><strong><?php __('sub_price_inr'); ?></strong><small><?php __('sub_price_inr_hint'); ?></small></div>
+								</div>
+								<div class="sub-money-input">
+									<span class="sub-money-sign"><?php echo pjSanitize::html(pjMoney::symbol('INR')); ?></span>
+									<input class="form-control" id="subPriceInr" name="price_inr" type="number" min="0" step="0.01" value="<?php echo $price_val('INR'); ?>"<?php echo $inr_auto ? ' readonly' : ''; ?> placeholder="<?php __('sub_price_not_set', false, true); ?>" aria-label="<?php __('sub_price_inr', false, true); ?>">
+								</div>
+								<label class="sub-opt sub-opt-sm m-t-sm">
+									<span class="sub-switch"><input type="checkbox" name="inr_auto" value="1" id="subInrAuto"<?php echo $inr_auto ? ' checked' : ''; ?>><i></i></span>
+									<span><strong><?php __('sub_inr_auto'); ?></strong><small><?php __('sub_inr_auto_hint'); ?></small></span>
+								</label>
+								<p class="sub-suggest" id="subInrSuggest">
+									<i class="fa fa-magic"></i>
+									<span><?php __('sub_inr_suggested'); ?> <strong data-pv="suggest">&mdash;</strong></span>
+									<button type="button" class="btn btn-white btn-xs" id="subUseSuggested"><?php __('sub_inr_use_suggested'); ?></button>
+								</p>
+							</div>
+						</div>
+						<p class="sub-rate-line"><i class="fa fa-exchange"></i>
+							<?php echo str_replace('{RATE}', '<strong>' . pjSanitize::html(pjMoney::format($rate, 'INR')) . '</strong>', __('sub_rate_line', true)); ?>
+							<a href="<?php echo $self; ?>pjActionCurrency"><?php __('sub_rate_change'); ?></a>
+						</p>
 						<div class="row">
-							<div class="col-sm-4 col-xs-8 form-group">
-								<label for="subPrice"><?php __('sub_col_price'); ?></label>
-								<input class="form-control" id="subPrice" name="price" type="number" min="0" step="0.01" value="<?php echo $v('price'); ?>" placeholder="<?php __('sub_price_not_set', false, true); ?>">
-							</div>
-							<div class="col-sm-2 col-xs-4 form-group">
-								<label for="subCurrency"><?php __('sub_currency'); ?></label>
-								<select class="form-control" id="subCurrency" name="currency">
-									<?php foreach ($tpl['currencies'] as $code) { ?><option value="<?php echo pjSanitize::html($code); ?>"<?php echo $code === $cur ? ' selected' : ''; ?>><?php echo pjSanitize::html($code); ?></option><?php } ?>
-								</select>
-							</div>
-							<div class="col-sm-4 col-xs-8 form-group">
+							<div class="col-sm-6 col-xs-8 form-group">
 								<label for="subEvery"><?php __('sub_billing_interval'); ?></label>
 								<div class="sub-every">
 									<input class="form-control" id="subEvery" name="interval_count" type="number" min="1" max="12" value="<?php echo (int) $p['interval_count']; ?>">
@@ -81,7 +111,7 @@ $toggle = function ($name, $value, $on, $title, $hint) {
 									</select>
 								</div>
 							</div>
-							<div class="col-sm-2 col-xs-4 form-group">
+							<div class="col-sm-3 col-xs-4 form-group">
 								<label for="subTrial"><?php __('sub_trial_days'); ?></label>
 								<input class="form-control" id="subTrial" name="trial_days" type="number" min="0" max="365" value="<?php echo (int) $p['trial_days']; ?>">
 							</div>

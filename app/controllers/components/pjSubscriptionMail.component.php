@@ -109,6 +109,12 @@ class pjSubscriptionMail
 	{
 		$end_ts = $end ? strtotime($end) : 0;
 		$days = $end_ts ? (int) ceil(($end_ts - time()) / 86400) : 0;
+		// the price in the company's billing currency (the currency its renewal is charged in)
+		if ($plan && !empty($company['id']) && class_exists('pjEntitlement'))
+		{
+			$billed = pjEntitlement::planInCurrency($plan, pjEntitlement::billingCurrency((int) $company['id']));
+			$plan = $billed ? $billed : $plan;
+		}
 		return array(
 			'{Name}'       => !empty($company['contact_person']) ? (string) $company['contact_person'] : (string) $company['name'],
 			'{Company}'    => (string) $company['name'],

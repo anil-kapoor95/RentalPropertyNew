@@ -26,15 +26,31 @@ $price = function ($p) use ($subInterval, $t) {
 	{
 		return '<span class="sub-pc-price">' . $t('sub_plan_free') . '</span>';
 	}
-	// big number, small currency symbol on the side the settings put it (pjMoney)
+	// big number, small currency symbol on the side the settings put it (pjMoney): the USD price, the INR price below
 	list($sign, $number, $place) = pjMoney::parts($p['price'], $p['currency']);
 	$sign_html = '<small>' . pjSanitize::html($sign) . '</small>';
+	$inr = pjEntitlement::priceIn($p, 'INR');
 	return '<span class="sub-pc-price">' . ($place === 'front' ? $sign_html . ' ' . pjSanitize::html($number) : pjSanitize::html($number) . ' ' . $sign_html) . '</span>'
-		. '<span class="sub-pc-per">/ ' . $subInterval($p) . '</span>';
+		. '<span class="sub-pc-per">/ ' . $subInterval($p) . '</span>'
+		. '<span class="sub-pc-alt">' . ($inr !== null && $inr > 0 ? pjSanitize::html(pjMoney::format($inr, 'INR')) . ' <small>INR</small>' : '<small>' . $t('sub_inr_not_set') . '</small>')
+		. ((int) $p['inr_auto'] === 1 ? ' <span class="sub-auto-tag" title="' . $t('sub_inr_auto') . '"><i class="fa fa-refresh"></i> ' . $t('sub_inr_auto_short') . '</span>' : '') . '</span>';
 };
 ?>
 <div class="wrapper wrapper-content animated fadeInRight">
 	<?php include dirname(__FILE__) . '/elements/messages.php'; ?>
+
+	<!-- Currency & exchange rate: set in Options > Currency & exchange rate -->
+	<?php
+	$inr_names = array();
+	foreach ($tpl['country_list'] as $c) { if (in_array($c['code'], $tpl['inr_countries'], true)) { $inr_names[] = $c['name']; } }
+	?>
+	<div class="sub-fx-strip">
+		<i class="fa fa-exchange"></i>
+		<span><?php echo str_replace(array('{RATE}', '{COUNTRIES}'),
+			array('<strong>' . pjSanitize::html(pjMoney::format($tpl['inr_rate'], 'INR')) . '</strong>', '<strong>' . pjSanitize::html(!empty($inr_names) ? implode(', ', $inr_names) : '—') . '</strong>'),
+			__('sub_fx_strip', true)); ?></span>
+		<a href="<?php echo $self; ?>pjActionCurrency"><?php __('sub_fx_strip_link'); ?> <i class="fa fa-angle-right"></i></a>
+	</div>
 
 	<div class="sub-plans-bar">
 		<p class="sub-plans-count"><?php echo $t('sub_plans_count', array('{N}' => count($tpl['plans']))); ?></p>
@@ -125,7 +141,8 @@ $price = function ($p) use ($subInterval, $t) {
 				</tr></thead>
 				<tbody>
 					<tr class="sub-compare-group"><td colspan="<?php echo count($tpl['plans']) + 1; ?>"><?php __('sub_col_price'); ?></td></tr>
-					<tr><td><?php __('sub_col_price'); ?></td><?php foreach ($tpl['plans'] as $p) { ?><td class="text-center"><?php echo $p['price'] === null ? '&mdash;' : ((float) $p['price'] <= 0 ? $t('sub_plan_free') : $subMoney($p['price'], $p['currency']) . ' <small class="text-muted">/ ' . $subInterval($p) . '</small>'); ?></td><?php } ?></tr>
+					<tr><td><?php __('sub_price_usd'); ?></td><?php foreach ($tpl['plans'] as $p) { ?><td class="text-center"><?php echo $p['price'] === null ? '&mdash;' : ((float) $p['price'] <= 0 ? $t('sub_plan_free') : $subMoney($p['price'], 'USD') . ' <small class="text-muted">/ ' . $subInterval($p) . '</small>'); ?></td><?php } ?></tr>
+					<tr><td><?php __('sub_price_inr'); ?></td><?php foreach ($tpl['plans'] as $p) { $inr = pjEntitlement::priceIn($p, 'INR'); ?><td class="text-center"><?php echo $inr === null ? '&mdash;' : ($inr <= 0 ? $t('sub_plan_free') : $subMoney($inr, 'INR') . ' <small class="text-muted">/ ' . $subInterval($p) . '</small>'); ?></td><?php } ?></tr>
 					<tr><td><?php __('sub_trial_days'); ?></td><?php foreach ($tpl['plans'] as $p) { ?><td class="text-center"><?php echo (int) $p['trial_days'] > 0 ? (int) $p['trial_days'] : '&mdash;'; ?></td><?php } ?></tr>
 					<tr class="sub-compare-group"><td colspan="<?php echo count($tpl['plans']) + 1; ?>"><?php __('sub_limits'); ?></td></tr>
 					<?php foreach ($limits as $k => $icon) { ?>

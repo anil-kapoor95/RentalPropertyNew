@@ -241,7 +241,8 @@ class pjPaypal extends pjPaypalAppController
 		$headers = array(
 			"Content-Type: application/json",
 		   	"Authorization: Bearer ".$access_token,
-			"PayPal-Request-Id: ".time()
+			// one key per order: a repeated capture of the same order is answered once (never another order's result)
+			"PayPal-Request-Id: capture-" . preg_replace('/[^A-Za-z0-9-]/', '', (string) $request['paypal_order_id'])
 		);
 		
 		$http->setHeaders($headers);
@@ -253,9 +254,9 @@ class pjPaypal extends pjPaypalAppController
 				if (isset($result['purchase_units'][0]['payments']['captures'][0]['id']) && !empty($result['purchase_units'][0]['payments']['captures'][0]['id'])) {
 					$txn_id = $result['purchase_units'][0]['payments']['captures'][0]['id'];
 					if (isset($result['purchase_units'][0]['payments']['captures'][0]['status']) && $result['purchase_units'][0]['payments']['captures'][0]['status'] == 'COMPLETED') {				
-						if (isset($result['purchase_units'][0]['payments']['captures'][0]['amount']['value']) && $result['purchase_units'][0]['payments']['captures'][0]['amount']['value'] == $params['amount']) {
+						if (isset($result['purchase_units'][0]['payments']['captures'][0]['amount']['value']) && round((float) $result['purchase_units'][0]['payments']['captures'][0]['amount']['value'], 2) == round((float) $params['amount'], 2)) {
 							$this->log(self::$logPrefix . "TXN ID: {$txn_id}<br>AMOUNT is OK");
-							if (isset($result['purchase_units'][0]['payments']['captures'][0]['amount']['currency_code']) && $result['purchase_units'][0]['payments']['captures'][0]['amount']['currency_code'] == $this->option_arr['o_currency'])
+							if (isset($result['purchase_units'][0]['payments']['captures'][0]['amount']['currency_code']) && $result['purchase_units'][0]['payments']['captures'][0]['amount']['currency_code'] == (!empty($params['currency_code']) ? $params['currency_code'] : $this->option_arr['o_currency']))
 							{
 								$response['status'] = 'OK';
 								$response['txn_id'] = $txn_id;
@@ -548,52 +549,98 @@ class pjPaypal extends pjPaypalAppController
 		$http->setData($data);
 		$resp = $http->request($url);
 		$result = json_decode($resp->getResponse(), true);
-		$access_token = $result['access_token'];
-		
-		return $access_token;
+		// no token (wrong client ID / secret, live keys in test mode ...): '' instead of a PHP notice
+		return is_array($result) && !empty($result['access_token']) ? (string) $result['access_token'] : '';
 	}
 	
 	public function pjActionCreateOrder() {
 		$this->setAjax(true);
-		
-		$params = pjPaymentOptionModel::factory()->getOptions($_REQUEST['foreign_id'], self::$paymentMethod);
-					
+		// the browser calls this from the PayPal button: always answer 200 with JSON (an error has "message")
+		if (!headers_sent())
+		{
+			http_response_code(200);
+		}
+		$foreign_id = isset($_REQUEST['foreign_id']) ? (int) $_REQUEST['foreign_id'] : 0;
+		$params = pjPaymentOptionModel::factory()->getOptions($foreign_id, self::$paymentMethod);
+		if (empty($params) || (int) @$params['is_active'] !== 1)
+		{
+			pjAppController::jsonResponse(array('message' => 'PayPal is not available for this payment.'));
+		}
+
+		$post = json_decode((string) file_get_contents('php://input'), true);
+		$cart = is_array($post) && isset($post['cart']) && is_array($post['cart']) ? $post['cart'] : array();
+		$ref = isset($cart['reference_id']) ? (string) $cart['reference_id'] : '';
+
+		// A plan payment: amount, currency and text come from the payment stored on the server, never from the
+		// browser (the page could be changed to pay less).
+		if (class_exists('pjSubscriptionBilling') && method_exists('pjSubscriptionBilling', 'gatewayOrder'))
+		{
+			$order = pjSubscriptionBilling::gatewayOrder($ref, self::$paymentMethod);
+			if ($order === false)
+			{
+				pjAppController::jsonResponse(array('message' => 'This payment is no longer open. Please start the payment again.'));
+			}
+			if (is_array($order))
+			{
+				$cart = array_merge($cart, $order);
+			}
+		}
+		if (!preg_match('/^\d+(\.\d{1,2})?$/', (string) @$cart['amount']) || (float) $cart['amount'] <= 0 || !preg_match('/^[A-Z]{3}$/', (string) @$cart['currency']))
+		{
+			pjAppController::jsonResponse(array('message' => 'The payment amount is not valid.'));
+		}
+
 		$access_token = $this->getAccessToken($params);
-		$input = file_get_contents('php://input');
-		$post = json_decode($input, true);
-		
-		$http = new pjHttp();	
+		if ($access_token === '')
+		{
+			$this->log(self::$logPrefix . "No access token (check the PayPal client ID and secret).");
+			pjAppController::jsonResponse(array('message' => 'PayPal could not be reached. Please try again later or choose another payment method.'));
+		}
+
+		$http = new pjHttp();
 		$headers = array(
 			"Content-Type: application/json",
-		   	"Authorization: Bearer ".$access_token,
-			"PayPal-Request-Id: ".time()
+			"Authorization: Bearer ".$access_token,
+			// A new key for every order. It used to be time(): two orders started in the same second got the
+			// SAME PayPal order back (the second customer paid the first one's amount).
+			"Prefer: return=representation",
+			"PayPal-Request-Id: create-" . bin2hex(function_exists('random_bytes') ? random_bytes(16) : md5(uniqid(mt_rand(), true), true))
 		);
-		
+
 		$data = array(
 			'intent' => 'CAPTURE',
 			'purchase_units' => array(
 				array(
-					'reference_id' => $post['cart']['reference_id'],
+					'reference_id' => substr($ref, 0, 256),
 					'amount' => array(
-						'currency_code' => $post['cart']['currency'],
-						'value' => $post['cart']['amount']
+						'currency_code' => (string) $cart['currency'],
+						'value' => number_format((float) $cart['amount'], 2, '.', '')
 					),
-					'description' => $post['cart']['description']
+					'description' => mb_substr((string) @$cart['description'], 0, 127)
 				)
 			)
 		);
-		
+
 		if ((int)$params['is_test_mode'] == 1) {
 			$url = 'https://api-m.sandbox.paypal.com/v2/checkout/orders';
 		} else {
 			$url = 'https://api-m.paypal.com/v2/checkout/orders';
 		}
-		
+
 		$http->setHeaders($headers);
 		$http->setMethod('POST');
 		$http->setData(json_encode($data), false);
 		$resp = $http->request($url);
 		$result = json_decode($resp->getResponse(), true);
+		if (!is_array($result) || empty($result['id']))
+		{
+			$d = is_array($result) && isset($result['details'][0]) ? $result['details'][0] : array();
+			$this->log(self::$logPrefix . "Order not created: " . json_encode($result));
+			pjAppController::jsonResponse(array(
+				'message' => !empty($d['description']) ? (string) $d['description'] : (is_array($result) && !empty($result['message']) ? (string) $result['message'] : 'PayPal could not create the payment.'),
+				'details' => is_array($result) && isset($result['details']) ? $result['details'] : array(),
+			));
+		}
 		pjAppController::jsonResponse($result);
 	}
 }

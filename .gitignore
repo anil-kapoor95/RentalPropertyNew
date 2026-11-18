@@ -21,3 +21,7 @@ Claude outputs/coupons-discounts-company.zip
 /app/web/backup
 /Claude outputs
 *.zip
+*.jpg
+*.png
+*.jpeg
+*.webp

@@ -28,7 +28,7 @@ $url = $_SERVER['PHP_SELF'] . '?controller=pjAdminSubscriptions&amp;action=';
 						<option value="percent"<?php echo $p['type'] === 'percent' ? ' selected' : ''; ?>><?php __('sub_promo_type_percent'); ?></option>
 						<option value="amount"<?php echo $p['type'] === 'amount' ? ' selected' : ''; ?>><?php __('sub_promo_type_amount'); ?></option>
 					</select></div>
-				<div class="col-md-1 form-group subPromoCurrency"><label><?php __('sub_currency'); ?></label><input class="form-control text-uppercase" name="currency" maxlength="3" value="<?php echo $v('currency'); ?>" placeholder="<?php echo pjSanitize::html((string) pjEntitlement::setting('currency')); ?>"></div>
+				<div class="col-md-2 form-group subPromoCurrency"><label for="subPromoCur"><?php __('sub_currency'); ?></label><select class="form-control" id="subPromoCur" name="currency"><?php foreach (pjEntitlement::$currencies as $c) { ?><option value="<?php echo $c; ?>"<?php echo strtoupper((string) $p['currency']) === $c ? ' selected' : ''; ?>><?php echo $c; ?></option><?php } ?></select></div>
 			</div>
 			<p class="text-muted small subPromoCurrency"><?php __('sub_promo_currency_hint'); ?></p>
 			<div class="hr-line-dashed"></div>

@@ -206,11 +206,13 @@ class pjAdminCompanies extends pjAdmin
 			return false;
 		}
 
+		// real picture type decides; WEBP / AVIF become PNG when the server can convert them (kept otherwise)
+		pjImageGuard::prepareUpload($_FILES['logo'], true, true, 1000);
 		$handle = new pjUpload();
-		$handle->setAllowedExt(array('jpg', 'jpeg', 'png', 'gif', 'webp'));
+		$handle->setAllowedExt(array('jpg', 'jpeg', 'png', 'gif', 'webp', 'avif'));
 		$handle->setAllowedTypes(array(
 			'image/jpeg', 'image/jpg', 'image/pjpeg',
-			'image/png', 'image/x-png', 'image/gif', 'image/webp'
+			'image/png', 'image/x-png', 'image/gif', 'image/webp', 'image/avif'
 		));
 		if (!$handle->load($_FILES['logo']))
 		{
@@ -226,7 +228,7 @@ class pjAdminCompanies extends pjAdmin
 			return false;
 		}
 		@chmod($path, 0644);
-		if (@getimagesize($path) === false)
+		if (!pjImageGuard::isImage($path, true))
 		{
 			@unlink($path);
 			$this->logoError = 'msgCompanyInvalidLogo';

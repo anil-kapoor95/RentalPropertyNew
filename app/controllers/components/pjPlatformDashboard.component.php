@@ -167,7 +167,11 @@ class pjPlatformDashboard
 		return $out;
 	}
 
-	/** Paid revenue in the range: currency => total (refunded / failed / open payments are not counted). */
+	/**
+	 * Paid revenue in the range, in USD: array('USD' => total) (refunded / failed / open payments are not counted).
+	 * Every payment is counted at the USD value stored with it at checkout (amount_usd: INR payments at the exchange
+	 * rate of that day), so a later rate change never changes past revenue.
+	 */
 	public static function revenue($from, $to)
 	{
 		$out = array();
@@ -175,12 +179,12 @@ class pjPlatformDashboard
 		{
 			return $out;
 		}
-		foreach (pjBillingTransactionModel::factory()->select('t1.currency, SUM(t1.amount) AS `total`')->where('t1.status', 'paid')
-			->where(self::between('t1.paid_at', $from, $to))->groupBy('t1.currency')->findAll()->getData() as $row)
+		$row = pjBillingTransactionModel::factory()->select('SUM(t1.amount_usd) AS `total`, COUNT(*) AS `cnt`')->where('t1.status', 'paid')
+			->where('t1.amount_usd IS NOT NULL')->where(self::between('t1.paid_at', $from, $to))->findAll()->getDataIndex(0);
+		if (!empty($row) && (int) $row['cnt'] > 0)
 		{
-			$out[strtoupper((string) $row['currency'])] = round((float) $row['total'], 2);
+			$out[pjEntitlement::BASE_CURRENCY] = round((float) $row['total'], 2);
 		}
-		ksort($out);
 		return $out;
 	}
 
@@ -320,7 +324,9 @@ class pjPlatformDashboard
 				'company' => isset($names[(int) $t['company_id']]) ? (string) $names[(int) $t['company_id']] : '',
 				'plan' => isset($plans[(int) $t['plan_id']]) ? (string) $plans[(int) $t['plan_id']] : '',
 				'kind' => (string) $t['kind'],
+				// the amount charged, in its currency; the USD value stored with it beside (dashboards count in USD)
 				'amount' => pjMoney::format($t['amount'], $t['currency']),
+				'amount_usd' => isset($t['amount_usd']) && $t['amount_usd'] !== null && strtoupper((string) $t['currency']) !== 'USD' ? pjMoney::format($t['amount_usd'], 'USD') : '',
 				'status' => (string) $t['status'],
 				'method' => class_exists('pjSubscriptionBilling') ? (string) pjSubscriptionBilling::methodName($t['provider']) : (string) $t['provider'],
 				'coupon' => isset($t['coupon_code']) ? (string) $t['coupon_code'] : '',
@@ -348,6 +354,8 @@ class pjPlatformDashboard
 			->orderBy('t1.paid_at DESC')->limit(1)->findAll()->getDataIndex(0);
 		$pending = !empty($sub['pending_plan_id']) ? pjEntitlement::plan($sub['pending_plan_id']) : false;
 		$is_free = $plan && pjEntitlement::isFree($plan);
+		$billing_currency = pjEntitlement::billingCurrency($company_id);
+		$billed = $plan ? (pjEntitlement::planInCurrency($plan, $billing_currency) ?: $plan) : false;
 		// payment status: what the company has to know about paying
 		if (!$sub)
 		{
@@ -384,7 +392,9 @@ class pjPlatformDashboard
 			'ends_at' => $sub && !empty($sub['current_period_end']) ? $sub['current_period_end'] : null,
 			'cancel_at_end' => $sub && (int) $sub['cancel_at_period_end'] === 1,
 			'pending_plan' => $pending ? $pending['name'] : '',
-			'price' => $plan && $plan['price'] !== null && (float) $plan['price'] > 0 ? pjMoney::format($plan['price'], $plan['currency']) : '',
+			// the company sees its plan price in its own billing currency
+			'price' => $billed && $billed['price'] !== null && (float) $billed['price'] > 0 ? pjMoney::format($billed['price'], $billed['currency']) : '',
+			'billing_currency' => $billing_currency,
 			'interval' => $plan ? array((int) max(1, (int) $plan['interval_count']), $plan['billing_interval'] === 'year' ? 'year' : 'month') : null,
 			'last_payment' => !empty($paid) ? array('date' => $paid['paid_at'], 'amount' => pjMoney::format($paid['amount'], $paid['currency'])) : null,
 			'usage' => pjEntitlement::usage($company_id),
@@ -432,6 +442,26 @@ class pjPlatformDashboard
 		return -1;
 	}
 
+	/**
+	 * Monthly recurring revenue of one subscription in USD: the recurring amount the company agreed (in its billing
+	 * currency) at the exchange rate stored with its last payment; the plan's USD price when nothing is stored.
+	 */
+	private static function monthlyUsd($plan, $sub = null)
+	{
+		$base = self::monthly($plan);
+		if ($base <= 0 || empty($sub) || empty($sub['price_amount']) || (float) $sub['price_amount'] <= 0 || empty($sub['billing_currency']))
+		{
+			return $base;
+		}
+		$usd = class_exists('pjEntitlement') ? pjEntitlement::toUsd($sub['price_amount'], $sub['billing_currency'], !empty($sub['exchange_rate']) ? (float) $sub['exchange_rate'] : null) : null;
+		if ($usd === null || $usd <= 0)
+		{
+			return $base;
+		}
+		$months = max(1, (int) $plan['interval_count']) * ($plan['billing_interval'] === 'year' ? 12 : 1);
+		return round($usd / $months, 2);
+	}
+
 	/** Price of a plan per month (yearly plans / 12, plans of several months / months); 0 for free plans. */
 	private static function monthly($plan)
 	{
@@ -469,9 +499,22 @@ class pjPlatformDashboard
 		foreach ($companies as $c) { $created[(int) $c['id']] = !empty($c['created']) ? strtotime($c['created']) : 0; }
 		$existsAt = function ($cid, $ts) use ($created) { return isset($created[$cid]) && $created[$cid] <= $ts; };
 
-		// ---- revenue: paid payments in the period (and the period before), per currency, plan and kind
-		$paidRows = $ready ? pjBillingTransactionModel::factory()->select('t1.company_id, t1.plan_id, t1.kind, t1.amount, t1.currency, t1.paid_at, t1.coupon_code')
-			->where('t1.status', 'paid')->where(self::between('t1.paid_at', $pf, $to))->findAll()->getData() : array();
+		// ---- revenue: paid payments in the period (and the period before), per plan and kind, in USD (the value
+		// stored with each payment at checkout; INR payments at that day's rate, never recalculated)
+		$paidRows = $ready ? pjBillingTransactionModel::factory()->select('t1.company_id, t1.plan_id, t1.kind, t1.amount_usd AS `amount`, t1.amount AS `amount_orig`, t1.currency AS `currency_orig`, t1.paid_at, t1.coupon_code')
+			->where('t1.status', 'paid')->where('t1.amount_usd IS NOT NULL')->where(self::between('t1.paid_at', $pf, $to))->findAll()->getData() : array();
+		// currency-wise totals (what was actually collected, in the charged currencies) beside the consolidated USD
+		$collected = array();
+		foreach ($paidRows as $k3 => $t3)
+		{
+			$paidRows[$k3]['currency'] = pjEntitlement::BASE_CURRENCY;
+			if (substr($t3['paid_at'], 0, 10) >= $from && (float) $t3['amount_orig'] > 0)
+			{
+				$c3 = strtoupper((string) $t3['currency_orig']);
+				$collected[$c3] = (isset($collected[$c3]) ? $collected[$c3] : 0) + (float) $t3['amount_orig'];
+			}
+		}
+		ksort($collected);
 		$revenue = array();
 		$revenuePrev = array();
 		foreach ($paidRows as $t)
@@ -481,15 +524,8 @@ class pjPlatformDashboard
 			if ($day >= $from) { $revenue[$cur] = (isset($revenue[$cur]) ? $revenue[$cur] : 0) + (float) $t['amount']; }
 			elseif ($day <= $pt) { $revenuePrev[$cur] = (isset($revenuePrev[$cur]) ? $revenuePrev[$cur] : 0) + (float) $t['amount']; }
 		}
-		// main currency: the one with the most revenue, else the platform currency, else the currency of the plans
-		$main = '';
-		if (!empty($revenue)) { arsort($revenue); $main = key($revenue); }
-		if ($main === '')
-		{
-			$o = pjRegistry::getInstance()->is('options') ? pjRegistry::getInstance()->get('options') : array();
-			foreach ($plans as $p) { if ($p['price'] !== null && (float) $p['price'] > 0) { $main = strtoupper((string) $p['currency']); break; } }
-			if ($main === '' && !empty($o['o_currency'])) { $main = strtoupper($o['o_currency']); }
-		}
+		// the dashboard is kept in USD (plan prices are their USD base price, payments their stored USD value)
+		$main = $ready ? pjEntitlement::BASE_CURRENCY : 'USD';
 		ksort($revenue);
 
 		// revenue per step: by plan (the four largest plans, then "Other") and by kind, in the main currency
@@ -564,7 +600,7 @@ class pjPlatformDashboard
 				$o['plans'][$pid]['count']++;
 				if ($status === 'trial') { $o['trial']++; $o['plans'][$pid]['trial']++; continue; }
 				$plan = isset($plans[$pid]) ? $plans[$pid] : null;
-				$m = self::monthly($plan);
+				$m = self::monthlyUsd($plan, (int) $sub['plan_id'] === (int) $pid ? $sub : null);
 				if ($m > 0)
 				{
 					$o['paying']++;
@@ -691,7 +727,10 @@ class pjPlatformDashboard
 			'kpi' => array(
 				'revenue' => array('value' => round(isset($revenue[$main]) ? $revenue[$main] : 0, 2), 'prev' => round(isset($revenuePrev[$main]) ? $revenuePrev[$main] : 0, 2),
 					'text' => pjMoney::formatMany($revenue, null, pjMoney::format(0, $main)), 'prev_text' => pjMoney::formatMany($revenuePrev, null, pjMoney::format(0, $main)),
-					'multi' => count($revenue) > 1, 'payments' => count(array_filter($paidRows, function ($t) use ($from) { return substr($t['paid_at'], 0, 10) >= $from; }))),
+					'multi' => count($revenue) > 1, 'payments' => count(array_filter($paidRows, function ($t) use ($from) { return substr($t['paid_at'], 0, 10) >= $from; })),
+					// collected per charged currency, e.g. "₹ 4,498.00 + $ 39.00" (the KPI value is the consolidated USD)
+					'by_currency' => array_map(function ($v) { return round($v, 2); }, $collected),
+					'collected_text' => count($collected) > 0 ? pjMoney::formatMany($collected) : ''),
 				'companies' => array('value' => $companiesEnd, 'new' => array_sum($newSeries), 'left' => -array_sum($leftSeries)),
 				'subs' => array('value' => $end['active'], 'prev' => $prevEnd['active'], 'trial' => $end['trial']),
 				'mrr' => array('value' => round(isset($end['mrr'][$main]) ? $end['mrr'][$main] : 0, 2), 'prev' => round(isset($prevEnd['mrr'][$main]) ? $prevEnd['mrr'][$main] : 0, 2),
