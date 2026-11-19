@@ -300,7 +300,10 @@ class pjAdmin extends pjAppController
 		if (count($mon) !== 12) { $mon = array('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'); }
 		$short = function ($ymd) use ($mon) { $t = strtotime($ymd); return (int) date('j', $t) . ' ' . $mon[(int) date('n', $t) - 1]; };
 
-		$snap = pjPlatformDashboard::snapshot($from, $to);
+		// reporting currency (USD default / INR): consolidated figures converted at the global rate; amounts actually
+		// charged (latest billing, activity, "charged" line) stay in their own currency
+		$report = pjPlatformDashboard::reportCurrency($this->_get->toString('cur'));
+		$snap = pjPlatformDashboard::inCurrency(pjPlatformDashboard::snapshot($from, $to), $report);
 		$labels = array();
 		$tips = array();
 		foreach ($snap['steps'] as $st)
@@ -328,8 +331,11 @@ class pjAdmin extends pjAppController
 			$up[] = array('day' => (int) date('j', $t), 'mon' => $mon[(int) date('n', $t) - 1], 'date' => date($df, $t), 'company' => $r['company'], 'plan' => $r['plan'],
 				'trial' => $r['status'] === 'trial', 'amount' => $r['amount']);
 		}
-		$upcoming = array('list' => $up, 'renewals' => $bill['renewals'], 'renewals_text' => pjMoney::formatMany($bill['renewals_amount']),
-			'trials' => $bill['trials_ending'], 'trials_text' => pjMoney::formatMany($bill['trials_amount']), 'past_due' => $bill['past_due']);
+		// totals in the reporting currency (expected charges, converted); each row keeps the amount it will be charged in
+		$upcoming = array('list' => $up, 'renewals' => $bill['renewals'],
+			'renewals_text' => pjMoney::format(pjPlatformDashboard::toReport($bill['renewals_amount'], $report), $report),
+			'trials' => $bill['trials_ending'],
+			'trials_text' => pjMoney::format(pjPlatformDashboard::toReport($bill['trials_amount'], $report), $report), 'past_due' => $bill['past_due']);
 
 		// latest billing of the period
 		$billing = array();

@@ -505,3 +505,9 @@ a.pd-bill-tile:hover,a.pd-bill-tile:focus{border-color:#f3c9a6;box-shadow:0 4px 
 	.sa-f-row{grid-template-columns:92px minmax(0,1fr) 64px}
 }
 @media (max-width:420px){.sa-kpis>.sa-card:not(:first-child) .sa-kpi-val{font-size:17px}.sa-kpis>.sa-card:not(:first-child) .sa-kpi-val.is-long{font-size:15px}}
+/* reporting currency switch (USD / INR) and the note under the header */
+.sa-cur button{min-width:64px}
+.sa-cur-note{margin:-6px 0 16px;font-size:12.5px;color:var(--pjMuted,#6b7280);line-height:1.5}
+.sa-cur-note i{margin-right:4px;color:var(--pjMuted,#6b7280)}
+.sa-cur-note.is-converted{color:#92400e}
+.sa-cur-note.is-converted i{color:#f97618}

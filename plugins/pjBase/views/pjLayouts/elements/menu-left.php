@@ -28,26 +28,11 @@ $isSystemOptions = $isGeneralOptions || $isBackup || $isLocale || $isSms || $isV
     <div class="sidebar-collapse">
         <ul class="nav metismenu" id="side-menu">
             <li class="nav-header">
-            	<?php
-            	if($tpl['option_arr']['o_hide_phpjabbers_logo'] == 'No')
-            	{
-                	?>
-                    <a href="https://www.phpjabbers.com" class="navbar-brand" target="_blank">PHPJabbers</a>
-                    <?php
-            	}
-                ?>
-
-                <div class="dropdown profile-element"> 
-                    <strong class="m-t-xs"><?php __('script_name') ?> <span class="pj-ver">v<?php echo PJ_SCRIPT_VERSION; ?></span></strong>
-                    <?php
-                    if($tpl['option_arr']['o_hide_phpjabbers_logo'] == 'No')
-                    {
-                        ?> 
-                        <span class="text-muted text-xs block" style="font-size:12px">by PHPJabbers.com</span>
-                        <?php
-                    }
-                    ?> 
-                </div>
+                <!-- BookbyHost logo (Figma "Book by host"); the icon alone when the menu is collapsed -->
+                <a href="<?php echo $_SERVER['PHP_SELF']; ?>?controller=pjAdmin&amp;action=pjActionIndex" class="pj-brand-logo" title="<?php __('script_name', false, true); ?>">
+                    <img class="pj-brand-full" src="<?php echo PJ_INSTALL_URL; ?>app/web/img/bookbyhost-logo.svg" width="158" height="32" alt="<?php __('script_name', false, true); ?>">
+                    <img class="pj-brand-icon" src="<?php echo PJ_INSTALL_URL; ?>app/web/img/bookbyhost-icon.svg" width="32" height="32" alt="">
+                </a>
             </li>
 			<?php
 		    $main_script_menu = sprintf('%spjLayouts/elements/menu-left.php', PJ_VIEWS_PATH);

@@ -50,6 +50,53 @@ $self = $_SERVER['PHP_SELF'] . '?controller=pjAdminSubscriptions&amp;action=';
 					<?php } ?>
 				</div>
 				<p class="sub-fx-note"><i class="fa fa-info-circle"></i> <?php echo str_replace('{N}', '<strong>' . (int) $follow . '</strong>', __('sub_fx_rate_note', true)); ?></p>
+
+				<?php
+				// Automatic daily update: switch, last result, "Update now" (separate form below), recent rates
+				$auto = $tpl['rate_auto'];
+				$res = $auto['result'];
+				$fmt_dt = function ($v) use ($tpl) { return $v ? date($tpl['option_arr']['o_date_format'] . ' H:i', strtotime($v)) : ''; };
+				?>
+				<div class="sub-fx-auto<?php echo $auto['auto'] ? ' is-on' : ''; ?>">
+					<label class="sub-fx-auto-switch">
+						<input type="checkbox" name="rate_auto" value="1"<?php echo $auto['auto'] ? ' checked' : ''; ?> aria-describedby="subRateAutoHelp">
+						<span><?php __('sub_fx_auto_label'); ?></span>
+					</label>
+					<p class="sub-fx-help" id="subRateAutoHelp"><?php __('sub_fx_auto_help'); ?></p>
+					<div class="sub-fx-auto-status" role="status">
+						<?php if (!$auto['auto']) { ?>
+							<span class="sub-fx-auto-off"><i class="fa fa-pause-circle"></i> <?php __('sub_fx_auto_off'); ?></span>
+						<?php } elseif ($res && !empty($res['ok'])) { ?>
+							<span class="sub-fx-auto-ok"><i class="fa fa-check-circle"></i> <?php echo str_replace(
+								array('{DATE}', '{SOURCE}', '{RATEDATE}'),
+								array(pjSanitize::html($fmt_dt($auto['at'])), pjSanitize::html($res['source']), pjSanitize::html(!empty($res['rate_date']) ? date($tpl['option_arr']['o_date_format'], strtotime($res['rate_date'])) : '-')),
+								__('sub_fx_auto_ok', true)); ?></span>
+						<?php } elseif ($res) { ?>
+							<span class="sub-fx-auto-err"><i class="fa fa-exclamation-triangle"></i> <?php echo str_replace(
+								array('{DATE}', '{ERROR}'), array(pjSanitize::html($fmt_dt($auto['at'])), pjSanitize::html(isset($res['error']) ? $res['error'] : '')),
+								__('sub_fx_auto_failed', true)); ?></span>
+						<?php } else { ?>
+							<span class="sub-fx-auto-off"><i class="fa fa-clock-o"></i> <?php __('sub_fx_auto_never'); ?></span>
+						<?php } ?>
+						<button type="submit" form="subRateRefresh" class="btn btn-white btn-sm"><i class="fa fa-refresh m-r-xs"></i><?php __('sub_fx_update_now'); ?></button>
+					</div>
+					<?php if (!empty($auto['history'])) { ?>
+					<details class="sub-fx-history">
+						<summary><?php __('sub_fx_history'); ?></summary>
+						<table class="table table-condensed">
+							<tbody>
+							<?php foreach ($auto['history'] as $h) { ?>
+								<tr>
+									<td><?php echo pjSanitize::html($fmt_dt($h['captured_at'])); ?></td>
+									<td><strong>1 USD = <?php echo pjSanitize::html(pjMoney::format((float) $h['rate'], 'INR')); ?></strong></td>
+									<td class="text-muted"><?php echo strpos((string) $h['source'], 'auto') === 0 ? pjSanitize::html(trim(substr($h['source'], 5))) : __('sub_fx_history_manual', true); ?></td>
+								</tr>
+							<?php } ?>
+							</tbody>
+						</table>
+					</details>
+					<?php } ?>
+				</div>
 			</section>
 
 			<!-- 2. Countries that pay in INR -->
@@ -81,6 +128,11 @@ $self = $_SERVER['PHP_SELF'] . '?controller=pjAdminSubscriptions&amp;action=';
 			<span><?php __('sub_fx_foot'); ?></span>
 			<button class="btn btn-primary" type="submit"><i class="fa fa-check m-r-xs"></i><?php __('sub_fx_save'); ?></button>
 		</footer>
+	</form>
+	<!-- "Update now" (button inside the form above, form="subRateRefresh"): fetches today's rate -->
+	<form method="post" action="<?php echo $self; ?>pjActionCurrency" id="subRateRefresh" hidden>
+		<?php echo $subCsrf; ?>
+		<input type="hidden" name="rate_refresh" value="1">
 	</form>
 
 </div>

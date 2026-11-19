@@ -263,3 +263,10 @@ body.mini-navbar .pjcs-workspace,body.mini-navbar .pjcs-switch{display:none}
 	body.mini-navbar .pj-request-quote span{display:none}
 	body.mini-navbar .pj-request-quote i{font-size:1.25rem;margin:0}
 }
+
+/* ---- BookbyHost logo (sidebar): full logo, the icon alone when the menu is collapsed ---- */
+#side-menu li.nav-header .pj-brand-logo{display:block;line-height:0;padding:0!important;background:transparent!important;border:0!important}
+#side-menu li.nav-header .pj-brand-logo img{display:block;height:32px;width:auto;max-width:100%;margin:0!important}
+#side-menu li.nav-header .pj-brand-logo .pj-brand-icon{display:none}
+body.mini-navbar #side-menu li.nav-header .pj-brand-logo .pj-brand-full{display:none}
+body.mini-navbar #side-menu li.nav-header .pj-brand-logo .pj-brand-icon{display:block;margin:0 auto!important}

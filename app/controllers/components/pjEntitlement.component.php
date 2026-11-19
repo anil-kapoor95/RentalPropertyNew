@@ -83,6 +83,9 @@ class pjEntitlement
 		'currency' => 'USD', 'grace_days' => '7',
 		// INR per 1 USD (Subscriptions > Plans > Currency & exchange rate): suggests INR prices, values INR payments in USD
 		'inr_rate' => '88.00',
+		// automatic daily update of inr_rate from free central-bank rates (Frankfurter, backup ExchangeRate-API):
+		// on/off, time of the last attempt, result of it (JSON: ok, source, rate, rate_date, error)
+		'rate_auto' => '1', 'rate_auto_at' => '', 'rate_auto_result' => '',
 		// billing country -> pricing currency (ISO codes, "IN:INR,NP:INR"); every other country pays in fallback_currency
 		'country_currencies' => 'IN:INR', 'fallback_currency' => 'USD',
 		// gateways per currency for subscription payments (JSON), edited in Options > Payments
@@ -479,6 +482,179 @@ class pjEntitlement
 		pjExchangeRateSnapshotModel::factory()->setAttributes(array('base_currency' => 'USD', 'quote_currency' => 'INR',
 			'rate' => number_format((float) $rate, 6, '.', ''), 'source' => substr((string) $source, 0, 40),
 			'user_id' => $user_id ? (int) $user_id : ':NULL', 'captured_at' => date('Y-m-d H:i:s')))->insert();
+	}
+
+	/* ------------------------------------------------------------------
+	 * Automatic exchange rate (USD -> INR), once a day
+	 * ------------------------------------------------------------------ */
+
+	/** Free rate sources without an API key, tried in this order. */
+	private static $rateSources = array(
+		'Frankfurter'      => 'https://api.frankfurter.dev/v1/latest?from=USD&to=INR',
+		'ExchangeRate-API' => 'https://open.er-api.com/v6/latest/USD',
+	);
+
+	/** A daily change bigger than this (15 %) is not applied automatically: the administrator decides. */
+	const RATE_MAX_JUMP = 0.15;
+
+	/**
+	 * Current INR per 1 USD from the free sources (mid-market / central-bank reference rate).
+	 * Returns array(rate, source, date) or false; $errors gets why each source failed.
+	 */
+	public static function fetchLiveRate(&$errors = array())
+	{
+		$errors = array();
+		foreach (self::$rateSources as $name => $url)
+		{
+			$json = self::httpJson($url, $err);
+			$rate = null;
+			$date = '';
+			if (is_array($json) && isset($json['rates']['INR']))
+			{
+				$rate = (float) $json['rates']['INR'];
+				if (!empty($json['date']))
+				{
+					$date = (string) $json['date']; // Frankfurter: date of the rate
+				} elseif (!empty($json['time_last_update_unix'])) {
+					$date = gmdate('Y-m-d', (int) $json['time_last_update_unix']); // ExchangeRate-API
+				}
+				if (isset($json['result']) && $json['result'] !== 'success')
+				{
+					$rate = null;
+					$err = 'answer: ' . (string) $json['result'];
+				}
+			} elseif ($err === '') {
+				$err = 'no INR rate in the answer';
+			}
+			// a USD -> INR rate is far inside this range; anything else is a broken answer
+			if ($rate !== null && $rate > 20 && $rate < 500)
+			{
+				return array('rate' => (float) number_format($rate, 4, '.', ''), 'source' => $name, 'date' => preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) ? $date : '');
+			}
+			$errors[] = $name . ': ' . ($err !== '' ? $err : 'rate out of range');
+		}
+		return false;
+	}
+
+	/** GET a JSON URL (8 s timeout). Returns the decoded array or null; $error says why not. */
+	private static function httpJson($url, &$error = '')
+	{
+		$error = '';
+		$body = false;
+		$code = 0;
+		if (function_exists('curl_init'))
+		{
+			$ch = curl_init($url);
+			curl_setopt_array($ch, array(
+				CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 3,
+				CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_TIMEOUT => 8, CURLOPT_SSL_VERIFYPEER => true,
+				CURLOPT_USERAGENT => 'BookbyHost-exchange-rate/1.0', CURLOPT_HTTPHEADER => array('Accept: application/json'),
+			));
+			$body = curl_exec($ch);
+			$code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			if ($body === false)
+			{
+				$error = 'connection failed (' . curl_error($ch) . ')';
+			}
+			curl_close($ch);
+		} elseif (ini_get('allow_url_fopen')) {
+			$ctx = stream_context_create(array('http' => array('timeout' => 8, 'header' => "Accept: application/json\r\nUser-Agent: BookbyHost-exchange-rate/1.0\r\n")));
+			$body = @file_get_contents($url, false, $ctx);
+			$code = $body === false ? 0 : 200;
+			if ($body === false)
+			{
+				$error = 'connection failed';
+			}
+		} else {
+			$error = 'this server can\'t open web addresses (no cURL)';
+			return null;
+		}
+		if ($body === false)
+		{
+			return null;
+		}
+		if ($code !== 200)
+		{
+			$error = 'HTTP ' . $code;
+			return null;
+		}
+		$json = json_decode((string) $body, true);
+		if (!is_array($json))
+		{
+			$error = 'not JSON';
+			return null;
+		}
+		return $json;
+	}
+
+	/**
+	 * Automatic update of the exchange rate: fetches the current rate, saves it (setting + a dated snapshot, source
+	 * "auto: <source>") and logs it. Plan prices are never changed here (INR prices that "follow the rate" are
+	 * updated when the administrator saves the rate on the Currency page).
+	 * Runs from the daily cron job, and from the Currency page when the last update is more than a day old.
+	 * @param bool $force  run even when the rate was updated less than 20 hours ago
+	 * @return array status (updated|off|skipped|error|held), text
+	 */
+	public static function autoUpdateRate($force = false)
+	{
+		if (!self::isReady())
+		{
+			return array('status' => 'error', 'text' => 'Subscription tables are missing.');
+		}
+		if ((string) self::setting('rate_auto') !== '1')
+		{
+			return array('status' => 'off', 'text' => 'Automatic exchange rate is switched off.');
+		}
+		$last = (string) self::setting('rate_auto_at');
+		if (!$force && $last !== '' && strtotime($last) > time() - 20 * 3600)
+		{
+			return array('status' => 'skipped', 'text' => 'Exchange rate already updated at ' . $last . '.');
+		}
+		$now = date('Y-m-d H:i:s');
+		self::saveSetting('rate_auto_at', $now);
+		$errors = array();
+		$live = self::fetchLiveRate($errors);
+		if ($live === false)
+		{
+			$text = 'Exchange rate could not be fetched: ' . implode('; ', $errors);
+			self::saveSetting('rate_auto_result', json_encode(array('ok' => false, 'error' => substr(implode('; ', $errors), 0, 300))));
+			self::log(0, 'exchange_rate', $text . ' (rate kept: ' . self::rate() . ')');
+			return array('status' => 'error', 'text' => $text);
+		}
+		$old = self::rate();
+		$new = (float) $live['rate'];
+		if ($old > 0 && abs($new - $old) / $old > self::RATE_MAX_JUMP)
+		{
+			// a big jump is more likely a broken source than the market: kept for the administrator to confirm
+			$text = sprintf('Exchange rate not applied: %s gives 1 USD = %s INR, more than %d%% away from the current %s. Check it and save it by hand if it is right.',
+				$live['source'], $new, self::RATE_MAX_JUMP * 100, $old);
+			self::saveSetting('rate_auto_result', json_encode(array('ok' => false, 'held' => true, 'source' => $live['source'], 'rate' => (string) $new,
+				'rate_date' => $live['date'], 'error' => $text)));
+			self::log(0, 'exchange_rate', $text);
+			return array('status' => 'held', 'text' => $text);
+		}
+		self::saveRate($new, 'auto: ' . $live['source'], null);
+		self::saveSetting('rate_auto_result', json_encode(array('ok' => true, 'source' => $live['source'], 'rate' => (string) $new, 'rate_date' => $live['date'])));
+		self::clearCache();
+		$text = sprintf('1 USD = %s INR (was %s): automatic daily update from %s%s', $new, $old, $live['source'], $live['date'] !== '' ? ', rate of ' . $live['date'] : '');
+		self::log(0, 'exchange_rate', $text);
+		return array('status' => 'updated', 'text' => $text);
+	}
+
+	/** For the Currency page: auto on/off, last attempt and its result, the last saved rates. */
+	public static function rateAutoStatus($history = 7)
+	{
+		$res = json_decode((string) self::setting('rate_auto_result'), true);
+		$rows = class_exists('pjExchangeRateSnapshotModel')
+			? pjExchangeRateSnapshotModel::factory()->where('t1.base_currency', 'USD')->where('t1.quote_currency', 'INR')
+				->orderBy('t1.id DESC')->limit((int) $history)->findAll()->getData()
+			: array();
+		return array(
+			'auto'    => (string) self::setting('rate_auto') === '1',
+			'at'      => (string) self::setting('rate_auto_at'),
+			'result'  => is_array($res) ? $res : null,
+			'history' => $rows,
+		);
 	}
 
 	/** Administrator sets the billing currency of a company (its next payments; history is not touched). */

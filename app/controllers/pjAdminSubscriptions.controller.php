@@ -249,6 +249,15 @@ class pjAdminSubscriptions extends pjAdmin
 			{
 				$this->back('pjActionCurrency', 'subErrCsrf');
 			}
+			// "Update now": fetch today's rate straight away
+			if ($this->_post->check('rate_refresh'))
+			{
+				pjEntitlement::saveSetting('rate_auto', '1');
+				$res = pjEntitlement::autoUpdateRate(true);
+				$this->back('pjActionCurrency', $res['status'] === 'updated' ? 'subRateUpdated' : 'subRateFetchFailed');
+			}
+			// daily automatic update on / off
+			pjEntitlement::saveSetting('rate_auto', $this->_post->check('rate_auto') ? '1' : '0');
 			$rate = round((float) str_replace(',', '.', (string) $this->_post->toString('inr_rate')), 4);
 			if ($rate < 1 || $rate > 100000)
 			{
@@ -286,6 +295,9 @@ class pjAdminSubscriptions extends pjAdmin
 			pjEntitlement::log(0, 'exchange_rate', sprintf('1 USD = %s INR (was %s); %d plan(s) following the rate updated', $rate, $old, $updated), $this->getUserId());
 			$this->back('pjActionCurrency', 'subRateSaved');
 		}
+		// the daily update is due (no cron on this server, or it did not run): fetch it now
+		pjEntitlement::autoUpdateRate(false);
+		$this->set('rate_auto', pjEntitlement::rateAutoStatus());
 		$this->set('inr_rate', pjEntitlement::rate());
 		$this->set('inr_countries', array_keys(array_filter(pjEntitlement::countryCurrencies(), function ($c) { return $c === 'INR'; })));
 		$this->set('country_list', $this->countryList());

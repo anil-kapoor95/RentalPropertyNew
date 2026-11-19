@@ -28,7 +28,7 @@
                 <?php require $content_tpl; ?>
 
                 <div class="login-img-background">
-                    <img src="<?php echo pjObject::getConstant('pjBase', 'PLUGIN_IMG_PATH'); ?>phpjabbers-logo1.jpg" alt="PHPJabbers">
+                    <img src="<?php echo PJ_INSTALL_URL; ?>app/web/img/bookbyhost-icon.svg" alt="BookbyHost" class="pj-brand-login">
                 </div><!-- /.login-img-background -->
             </div><!-- /.middle-box --> 
             

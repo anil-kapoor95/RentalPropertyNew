@@ -758,6 +758,94 @@ class pjPlatformDashboard
 		);
 	}
 
+	/* ------------------------------------------------------------------ reporting currency */
+
+	/** Reporting currency of the dashboard: USD (default) or INR. */
+	public static function reportCurrency($value)
+	{
+		return strtoupper(trim((string) $value)) === 'INR' ? 'INR' : 'USD';
+	}
+
+	/**
+	 * Total of amounts in several currencies (array('USD' => 10, 'INR' => 900)) in the reporting currency, at the
+	 * global exchange rate of the settings. A reporting value only: never stored, never charged.
+	 */
+	public static function toReport($by_currency, $report)
+	{
+		$rate = class_exists('pjEntitlement') ? pjEntitlement::rate() : 1.0;
+		$total = 0.0;
+		foreach ((array) $by_currency as $code => $amount)
+		{
+			$code = strtoupper((string) $code);
+			$usd = $code === 'INR' ? (float) $amount / $rate : (float) $amount;
+			$total += $report === 'INR' ? $usd * $rate : $usd;
+		}
+		return round($total, 2);
+	}
+
+	/**
+	 * The dashboard snapshot (computed in USD: every payment at the USD value stored with it when it was paid) shown
+	 * in the reporting currency: with INR every consolidated figure (revenue, MRR, chart series, plan MRR) is
+	 * multiplied by the global rate (Subscriptions > Options > Currency & exchange rate). The amounts actually charged
+	 * (kpi.revenue.collected_text, latest billing, activity) are not touched: they stay in their own currency.
+	 * Adds 'report' {code, converted, rate, rate_text}.
+	 */
+	public static function inCurrency($snap, $report)
+	{
+		$base = isset($snap['money']['code']) ? $snap['money']['code'] : 'USD';
+		$rate = class_exists('pjEntitlement') ? pjEntitlement::rate() : 1.0;
+		$snap['report'] = array('code' => $report, 'converted' => false, 'rate' => $rate,
+			'rate_text' => '1 USD = ' . pjMoney::format($rate, 'INR'));
+		if ($report === $base || $base !== 'USD' || $report !== 'INR')
+		{
+			return $snap;
+		}
+		$f = $rate;
+		$m = function ($v) use ($f) { return round((float) $v * $f, 2); };
+		$ms = function ($list) use ($m) { return array_map($m, (array) $list); };
+
+		$snap['report']['converted'] = true;
+		$money = array('code' => 'INR');
+		list($money['decimals'], $money['thousands'], $money['place']) = pjMoney::style('INR');
+		$money['symbol'] = pjMoney::symbol('INR');
+		$snap['money'] = $money;
+
+		$k =& $snap['kpi'];
+		foreach (array('revenue', 'mrr') as $key)
+		{
+			$k[$key]['value'] = $m($k[$key]['value']);
+			$k[$key]['prev'] = $m($k[$key]['prev']);
+			$k[$key]['text'] = pjMoney::format($k[$key]['value'], 'INR');
+			if (isset($k[$key]['prev_text']))
+			{
+				$k[$key]['prev_text'] = pjMoney::format($k[$key]['prev'], 'INR');
+			}
+		}
+		$k['revenue']['multi'] = false;
+		unset($k);
+
+		$s =& $snap['series'];
+		$s['revenue'] = $ms($s['revenue']);
+		$s['mrr'] = $ms($s['mrr']);
+		foreach (array('by_plan', 'by_kind') as $key)
+		{
+			foreach ($s[$key] as $i => $row)
+			{
+				$s[$key][$i]['values'] = $ms($row['values']);
+			}
+		}
+		unset($s);
+
+		foreach ($snap['plan_mix']['plans'] as $i => $p)
+		{
+			$v = !empty($p['free']) ? 0.0 : self::toReport(array($p['currency'] => $p['mrr']), 'INR');
+			$snap['plan_mix']['plans'][$i]['mrr'] = $v;
+			$snap['plan_mix']['plans'][$i]['mrr_text'] = pjMoney::format($v, 'INR');
+		}
+		$snap['plan_mix']['mrr_text'] = $snap['kpi']['mrr']['text'];
+		return $snap;
+	}
+
 	/* ------------------------------------------------------------------ statistics cards */
 
 	/**

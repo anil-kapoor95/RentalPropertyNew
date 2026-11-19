@@ -313,3 +313,16 @@
 /* Billing list: extra days credited from the previous plan */
 .sub-credit-note{display:inline-block;margin-top:3px;color:#15803d;font-weight:600;font-size:12px;cursor:help}
 .sub-credit-note .fa{margin-right:2px}
+/* Currency page: automatic daily exchange rate */
+.sub-fx-auto{margin-top:16px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa}
+.sub-fx-auto.is-on{border-color:#cfe9da;background:#f4fbf7}
+.sub-fx-auto-switch{display:flex;align-items:center;gap:8px;margin:0;font-weight:600;color:#1f2937;cursor:pointer}
+.sub-fx-auto-switch input{width:16px;height:16px;margin:0;accent-color:#f97618}
+.sub-fx-auto-status{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;margin-top:10px;font-size:12px}
+.sub-fx-auto-ok{color:#166534}
+.sub-fx-auto-err{color:#b91c1c}
+.sub-fx-auto-off{color:#6b7280}
+.sub-fx-auto-status i{margin-right:4px}
+.sub-fx-history{margin-top:10px;font-size:12px}
+.sub-fx-history summary{cursor:pointer;color:#374151;font-weight:600}
+.sub-fx-history table{margin:8px 0 0;background:#fff}

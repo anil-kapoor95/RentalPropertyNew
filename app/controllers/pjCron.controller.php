@@ -68,6 +68,24 @@ class pjCron extends pjAppController
 		return $report;
 	}
 
+	/**
+	 * Exchange rate USD -> INR: fetches today's rate (free central-bank rates) and saves it. Daily, system run only.
+	 */
+	public function pjActionExchangeRate()
+	{
+		$cid = class_exists('pjCompanyContext') ? (int) pjCompanyContext::$cronCompanyId : 0;
+		if ($cid > 0)
+		{
+			return 'Runs once for the whole system.';
+		}
+		if (!class_exists('pjEntitlement'))
+		{
+			return 'Subscriptions are not installed.';
+		}
+		$res = pjEntitlement::autoUpdateRate(true);
+		return $res['text'];
+	}
+
 	public function pjActionSyncIcalUrls()
 	{
 		// Subscription plan: iCal / Airbnb sync for this company.

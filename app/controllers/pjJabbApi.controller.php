@@ -3506,6 +3506,15 @@ class pjJabbApi extends pjAppController
 		$plans = array();
 		if (class_exists('pjEntitlement') && pjEntitlement::isReady())
 		{
+			// daily exchange rate without a cron job: when the last update is over 20 hours old, this request fetches
+			// it after its answer is sent (the visitor does not wait; at most one attempt per 20 hours)
+			$at = (string) pjEntitlement::setting('rate_auto_at');
+			if ((string) pjEntitlement::setting('rate_auto') === '1' && ($at === '' || strtotime($at) < time() - 20 * 3600))
+			{
+				self::afterResponse(function () {
+					pjEntitlement::autoUpdateRate(false);
+				});
+			}
 			foreach (pjEntitlement::plans(true) as $plan)
 			{
 				if ((int) $plan['is_public'] !== 1)
@@ -4532,7 +4541,7 @@ class pjJabbApi extends pjAppController
 		if (empty($signup) && ((int) $user['role_id'] !== self::ROLE_COMPANY || (int) $user['company_id'] <= 0))
 		{
 			// Administrators and other back-office users have no booking page: they use the dashboard.
-			$this->respond(404, 'This account has no StayOwned page. Please log in to the dashboard.', array('login_url' => $dashboard));
+			$this->respond(404, 'This account has no BookbyHost page. Please log in to the dashboard.', array('login_url' => $dashboard));
 		}
 		if (empty($signup) || $signup['status'] === 'completed')
 		{

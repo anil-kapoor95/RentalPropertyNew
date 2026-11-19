@@ -14,6 +14,13 @@
 	var PLAN_COLORS = ['#F97618', '#2a78d6', '#1baf7a', '#eda100'], OTHER = '#9aa3ae';
 	var KIND_COLORS = ['#F97618', '#2a78d6', '#1baf7a'];
 	var state = { revView: 'plan', revHidden: {}, growHidden: {} };
+	/* reporting currency of the figures (USD default / INR): sent with every reload of the period */
+	var params = {};
+	(function () {
+		var q = new URLSearchParams(window.location.search);
+		['range', 'from', 'to'].forEach(function (k) { if (q.get(k)) { params[k] = q.get(k); } });
+		params.cur = P.data.report && P.data.report.code === 'INR' ? 'INR' : 'USD';
+	})();
 
 	/* ---------- helpers ---------- */
 	function $(name) { return root.querySelector('[data-sa="' + name + '"]'); }
@@ -72,8 +79,9 @@
 		var cards = [
 			{ label: T.kpi_revenue, value: k.revenue.multi ? k.revenue.text : money(k.revenue.value), icon: 'fa-money', accent: true, spark: spark(s.revenue, '#F97618'),
 				// sub line: what was collected per currency (INR / USD); the big number is the consolidated USD at stored rates
-				foot: delta(k.revenue.value, k.revenue.prev), sub: k.revenue.collected_text || T.vs_prev,
-				title: k.revenue.text + (k.revenue.collected_text ? ' (' + k.revenue.collected_text + ')' : '') + ' · ' + P.range.compare + ': ' + k.revenue.prev_text },
+				// the amounts actually charged, in their own currencies (not converted)
+				foot: delta(k.revenue.value, k.revenue.prev), sub: k.revenue.collected_text ? fmt(T.charged, [k.revenue.collected_text]) : T.vs_prev,
+				title: k.revenue.text + (k.revenue.collected_text ? ' (' + fmt(T.charged, [k.revenue.collected_text]) + ')' : '') + ' · ' + P.range.compare + ': ' + k.revenue.prev_text },
 			{ label: T.kpi_companies, value: num(k.companies.value), icon: 'fa-building', spark: spark(s.companies, '#2a78d6'),
 				foot: '<span class="sa-delta up">▲ ' + esc(fmt(T.new_n, [k.companies['new']])) + '</span>', sub: fmt(T.left_n, [k.companies.left]) },
 			{ label: T.kpi_subs, value: num(k.subs.value), icon: 'fa-credit-card', spark: spark(s.active, '#1baf7a'),
@@ -289,7 +297,15 @@
 	}
 
 	/* ---------- the whole page ---------- */
+	function renderCurrency() {
+		var r = P.data.report || { code: 'USD', converted: false, rate_text: '' };
+		Array.prototype.forEach.call(document.querySelectorAll('#saCurrency button'), function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-cur') === r.code)); });
+		var note = $('curNote');
+		note.innerHTML = '<i class="fa fa-info-circle"></i> ' + esc(fmt(r.converted ? T.cur_note_inr : T.cur_note_usd, [r.rate_text]));
+		note.classList.toggle('is-converted', !!r.converted);
+	}
 	function renderAll() {
+		renderCurrency();
 		$('rangeLabel').textContent = P.range.label;
 		$('daysLabel').textContent = '(' + P.range.days_label + ')';
 		$('bucketLabel').textContent = P.range.bucket_label;
@@ -307,7 +323,11 @@
 		});
 	}
 	var req = 0;
-	function load(params) {
+	function load(next) {
+		// keeps the reporting currency with a new period, and the period with a new currency
+		params = next.range ? { range: next.range, cur: params.cur } : params;
+		if (next.from) { params.from = next.from; params.to = next.to; }
+		if (next.cur) { params.cur = next.cur; }
 		var qs = Object.keys(params).map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
 		var my = ++req;
 		root.classList.add('is-loading');
@@ -354,6 +374,16 @@
 	document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !pop.hidden) { closePop(); cBtn.focus(); } });
 	document.addEventListener('click', function (e) { if (!pop.hidden && !pop.contains(e.target) && !cBtn.contains(e.target)) { closePop(); } });
 
+	/* ---------- reporting currency switch ---------- */
+	Array.prototype.forEach.call(document.querySelectorAll('#saCurrency button'), function (b) {
+		b.addEventListener('click', function () {
+			var c = b.getAttribute('data-cur');
+			if (c === params.cur) { return; }
+			Array.prototype.forEach.call(document.querySelectorAll('#saCurrency button'), function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+			load({ cur: c });
+		});
+	});
+
 	/* ---------- revenue view toggle ---------- */
 	Array.prototype.forEach.call(document.querySelectorAll('#saRevView button'), function (b) {
 		b.addEventListener('click', function () {
@@ -365,13 +395,14 @@
 	/* ---------- export: the figures of the period as CSV ---------- */
 	document.getElementById('saExport').addEventListener('click', function () {
 		var k = P.data.kpi, s = P.data.series, rows = [[T.csv_period, P.range.label], [], [T.csv_metric, T.csv_value]];
-		rows.push([T.kpi_revenue, k.revenue.text + (k.revenue.collected_text ? ' (' + k.revenue.collected_text + ')' : '')], [T.kpi_companies, k.companies.value], [T.kpi_subs, k.subs.value], [T.kpi_mrr, k.mrr.text],
+		rows.push([T.kpi_revenue, k.revenue.text + (k.revenue.collected_text ? ' (' + fmt(T.charged, [k.revenue.collected_text]) + ')' : '')], [T.kpi_companies, k.companies.value], [T.kpi_subs, k.subs.value], [T.kpi_mrr, k.mrr.text],
 			[T.kpi_conv, k.conversion.rate === null ? '' : k.conversion.rate + '%'], []);
 		var head = [T.csv_period, T.kpi_revenue + ' (' + P.data.money.code + ')'].concat(s.by_plan.map(function (x) { return x.name; }), [T.new_companies, T.left, T.kpi_subs, T.kpi_mrr + ' (' + P.data.money.code + ')']);
 		rows.push(head);
 		P.tips.forEach(function (tp, i) {
 			rows.push([tp, s.revenue[i]].concat(s.by_plan.map(function (x) { return x.values[i]; }), [s['new'][i], s.left[i], s.active[i], s.mrr[i]]));
 		});
+		if (P.data.report) { rows.unshift([fmt(P.data.report.converted ? T.cur_note_inr : T.cur_note_usd, [P.data.report.rate_text])], []); }
 		var csv = rows.map(function (r) { return r.map(function (c) { c = String(c === undefined ? '' : c); return /[",;\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c; }).join(','); }).join('\r\n');
 		var a = document.createElement('a');
 		a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));

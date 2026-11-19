@@ -33,7 +33,9 @@ $t_keys = array(
 	'no_billing' => 'dash_bh_empty', 'no_activity' => 'dash_activity_empty', 'loading' => 'dash_loading', 'load_error' => 'dash_load_error',
 	'err_both' => 'dash_range_err_both', 'err_order' => 'dash_range_order', 'err_future' => 'dash_range_err_future',
 	'csv_period' => 'dash_csv_period', 'csv_metric' => 'dash_csv_metric', 'csv_value' => 'dash_csv_value',
+	'charged' => 'dash_cur_charged', 'cur_note_usd' => 'dash_cur_note_usd', 'cur_note_inr' => 'dash_cur_note_inr',
 );
+$report = isset($payload['data']['report']['code']) ? $payload['data']['report']['code'] : 'USD';
 $t = array();
 foreach ($t_keys as $k => $key) { $t[$k] = __($key, true); }
 ?>
@@ -46,6 +48,12 @@ foreach ($t_keys as $k => $key) { $t[$k] = __($key, true); }
 		</div>
 		<div class="sa-tools">
 			<a class="sa-status is-<?php echo $h($payload['overall']); ?>" href="#saHealth" data-sa="status"><i></i><span><?php echo $h($payload['overall_label']); ?></span></a>
+			<!-- reporting currency: USD (default) or INR, converted at the global exchange rate -->
+			<div class="sa-seg sa-cur" role="group" aria-label="<?php __('dash_cur_label', false, true); ?>" id="saCurrency">
+				<?php foreach (array('USD' => '$', 'INR' => '₹') as $code => $sign) { ?>
+					<button type="button" data-cur="<?php echo $code; ?>" aria-pressed="<?php echo $report === $code ? 'true' : 'false'; ?>"><?php echo $code . ' ' . $sign; ?></button>
+				<?php } ?>
+			</div>
 			<div class="sa-seg" role="group" aria-label="<?php __('dash_range', false, true); ?>" id="saPeriod">
 				<?php foreach (array('7' => 'dash_7d', '30' => 'dash_30d', '90' => 'dash_90d', '12m' => 'dash_12m') as $k => $lbl) { ?>
 					<button type="button" data-p="<?php echo $k; ?>" aria-pressed="<?php echo !$is_custom && (string) $range['key'] === (string) $k ? 'true' : 'false'; ?>"><?php __($lbl); ?></button>
@@ -73,6 +81,7 @@ foreach ($t_keys as $k => $key) { $t[$k] = __($key, true); }
 		</div>
 	</div>
 
+	<p class="sa-cur-note" data-sa="curNote" role="status"></p>
 	<div class="alert alert-warning sa-alert" data-sa="rangeError"<?php echo empty($range['error']) ? ' hidden' : ''; ?>><i class="fa fa-exclamation-triangle m-r-xs"></i><?php __('dash_range_invalid'); ?></div>
 	<?php if (empty($payload['data']['ready'])) { ?>
 		<div class="alert alert-warning sa-alert"><i class="fa fa-info-circle m-r-xs"></i><?php __('dash_not_ready'); ?></div>
