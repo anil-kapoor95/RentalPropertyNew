@@ -39,9 +39,17 @@ $sl_badge = array('active' => 'label-primary', 'pending' => 'label-warning', 'er
 
 		<div class="form-group m-b-none">
 			<label class="control-label" for="pjSiteDomain"><?php __('lblSiteLinkDomain'); ?></label>
-			<?php if (!$sl['allowed'] && $sl['domain'] === '') { ?>
-				<p class="alert alert-info m-b-none"><i class="fa fa-lock m-r-xs"></i><?php __('lblSiteLinkLocked'); ?></p>
+			<?php
+			// the company itself (My company) can go straight to its plans
+			$sl_plan_link = (int) $controller->getRoleId() === 4
+				? ' <a href="' . $_SERVER['PHP_SELF'] . '?controller=pjAdminSubscriptions&amp;action=pjActionMyPlan" class="alert-link">' . __('sub_myplan_title', true) . ' &rarr;</a>' : '';
+			if (!$sl['allowed'] && $sl['domain'] === '') { ?>
+				<p class="alert alert-info m-b-none"><i class="fa fa-lock m-r-xs"></i><?php __('lblSiteLinkLocked'); ?><?php echo $sl_plan_link; ?></p>
 			<?php } else { ?>
+				<?php if (!$sl['allowed']) { ?>
+				<!-- saved before a downgrade: the domain opens no website until the plan includes "Custom domain" again -->
+				<p class="alert alert-warning"><i class="fa fa-lock m-r-xs"></i><?php __('lblSiteLinkInactivePlan'); ?><?php echo $sl_plan_link; ?></p>
+				<?php } ?>
 				<div class="input-group" style="max-width: 520px;">
 					<span class="input-group-addon">https://</span>
 					<input type="text" class="form-control" id="pjSiteDomain" value="<?php echo pjSanitize::html($sl['domain']); ?>" placeholder="www.myvilla.com" autocomplete="off" spellcheck="false">

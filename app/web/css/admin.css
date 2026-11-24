@@ -407,3 +407,16 @@ button.ui-multiselect{
 	.table-reservations .table > thead > tr > th:first-child, 
 	.table-reservations .table > tbody > tr > td:first-child { min-width: 160px; }
 }
+
+/* Every clickable control shows the hand cursor; disabled ones show "not allowed". */
+a[href], button, [role="button"], [role="tab"], [role="menuitem"], [role="radio"], [role="checkbox"], [role="switch"],
+input[type="button"], input[type="submit"], input[type="reset"], input[type="checkbox"], input[type="radio"], input[type="file"],
+input[type="color"], select, summary, label:has(input[type="checkbox"]), label:has(input[type="radio"]),
+.btn, .nav-tabs > li > a, .dropdown-toggle, .pj-table th.sortable, .pj-table .pj-table-icon-edit, .pj-table .pj-table-icon-delete,
+.i-checks, .iCheck-helper, .bootstrap-switch, .switchery, .fc-day, .select2-selection, .chosen-single, .datepick, .input-group-addon .fa-calendar,
+.colorpicker-component .input-group-addon, .sub-method, .sub-cur-option, .sub-seg-btn, .sub-coupon-toggle, [data-toggle], [onclick] {
+	cursor: pointer;
+}
+button:disabled, button[disabled], .btn.disabled, .btn:disabled, input:disabled, select:disabled, [aria-disabled="true"] {
+	cursor: not-allowed;
+}

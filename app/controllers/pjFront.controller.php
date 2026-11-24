@@ -1770,6 +1770,8 @@ class pjFront extends pjAppController
 				if (!empty($booking_arr))
 				{
 				    $booking_id = $booking_arr['id'];
+				    // the gateway calls back without the guest's session: the e-mails go out in the language of the booking
+				    $booking_lid = !empty($booking_arr['locale_id']) ? (int) $booking_arr['locale_id'] : $this->getLocaleId();
 				    // The gateway calls back without a property in the URL: load the settings of the booking's company
 				    // (currency, paid / not paid status ...) as the payment page did, then the property's own ones.
 				    $company_arr = array();
@@ -1810,7 +1812,7 @@ class pjFront extends pjAppController
     				        $data['status'] = $option_arr['o_status_if_paid'];
     				        pjFront::addBookingInIcal($data);
     				        
-    				        pjFront::pjActionConfirmSend($booking_arr['id'], $option_arr, $this->getLocaleId(), 'payment');
+    				        pjFront::pjActionConfirmSend($booking_arr['id'], $option_arr, $booking_lid, 'payment');
 				        }
             			echo $option_arr['o_thankyou_page'];
             			exit;
@@ -1824,7 +1826,7 @@ class pjFront extends pjAppController
 				        $data['status'] = 'Cancelled';
 				        pjFront::addBookingInIcal($data);
 				        
-				         pjFront::pjActionConfirmSend($booking_arr['id'], $option_arr, $this->getLocaleId(), 'cancel');
+				         pjFront::pjActionConfirmSend($booking_arr['id'], $option_arr, $booking_lid, 'cancel');
 				        
 				        echo $option_arr['o_cancel_url'];
 				        exit;

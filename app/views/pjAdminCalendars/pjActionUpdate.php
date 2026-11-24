@@ -56,6 +56,15 @@ $rs = __('reservation_statuses', true);
         	} 
         	
         	$active_tab = $controller->_get->check('tab') ? $controller->_get->toString('tab') : 'calendar';
+        	// Tabs of features the company's plan does not include are hidden (the server refuses them too).
+        	$pjTabPlan = array('limits' => 'booking_policies', 'appearance' => 'themes', 'seo' => 'seo', 'feeds' => 'ical_sync');
+        	$pjTabOn = function ($tab) use ($controller, $pjTabPlan) {
+        		return !isset($pjTabPlan[$tab]) || !class_exists('pjEntitlement') || pjEntitlement::allows($controller->getCompanyId(), $pjTabPlan[$tab]);
+        	};
+        	if (!$pjTabOn($active_tab))
+        	{
+        		$active_tab = 'calendar';
+        	}
         	?>
         	<input type="hidden" name="calendar_id" id="calendar_id" value="<?php echo $controller->getCalendarId();?>" />
 			<div id="datePickerOptions" style="display:none;" data-wstart="<?php echo (int) $tpl['option_arr']['o_week_start']; ?>" data-format="<?php echo pjUtil::toBootstrapDate($tpl['option_arr']['o_date_format']); ?>" data-months="<?php echo implode("_", $months);?>" data-days="<?php echo implode("_", $short_days);?>"></div>
@@ -72,19 +81,26 @@ $rs = __('reservation_statuses', true);
 						<?php } else { ?>
 							<li class="<?php echo $active_tab == 'periods' ? 'active' : NULL;?>"><a data-toggle="tab" data-tab="periods" href="#periods" aria-expanded="false"><?php __('menuPrices');?></a></li>
 						<?php } ?>
+						<?php if ($pjTabOn('limits')) { ?>
 						<li class="<?php echo $active_tab == 'limits' ? 'active' : NULL;?>"><a data-toggle="tab" data-tab="limits" href="#limits" aria-expanded="false"><?php __('menuLimits');?></a></li>
+						<?php } if ($pjTabOn('appearance')) { ?>
 						<li class="<?php echo $active_tab == 'appearance' ? 'active' : NULL;?>"><a data-toggle="tab" data-tab="appearance" href="#appearance" aria-expanded="false"><?php __('menuAppearance');?></a></li>
+						<?php } ?>
 						<li class="<?php echo $active_tab == 'general_settings' ? 'active' : NULL;?>"><a data-toggle="tab" data-tab="general_settings" href="#general_settings" aria-expanded="false"><?php __('menuGeneralSettings');?></a></li>
 						<li class="<?php echo $active_tab == 'photos' ? 'active' : NULL;?>"><a data-toggle="tab" data-tab="photos" href="#photos" aria-expanded="false"><?php __('menuPhotos');?></a></li>
 						<li class="<?php echo $active_tab == 'address' ? 'active' : NULL;?>"><a data-toggle="tab" data-tab="address" href="#address" aria-expanded="false"><?php __('menuAddress');?></a></li>
+						<?php if ($pjTabOn('seo')) { ?>
 						<li class="<?php echo $active_tab == 'seo' ? 'active' : NULL;?>"><a data-toggle="tab" data-tab="seo" href="#seo" aria-expanded="false"><?php __('menuSeo');?></a></li>
+						<?php } ?>
 						<li class="<?php echo $active_tab == 'features' ? 'active' : NULL;?>"><a data-toggle="tab" data-tab="features" href="#features" aria-expanded="false"><?php __('menuFeatures');?></a></li>
 						<li class="<?php echo $active_tab == 'bookings' ? 'active' : NULL;?>"><a data-toggle="tab" data-tab="bookings" href="#bookings" aria-expanded="false"><?php __('menuBookingOptions');?></a></li>
 						<li class="<?php echo $active_tab == 'payments' ? 'active' : NULL;?>"><a data-toggle="tab" data-tab="payments" href="#payments" aria-expanded="false"><?php __('menuPayments');?></a></li>
 						<li class="<?php echo $active_tab == 'terms' ? 'active' : NULL;?>"><a data-toggle="tab" data-tab="terms" href="#terms" aria-expanded="false"><?php __('menuTerms');?></a></li>
 						<li class="<?php echo $active_tab == 'notifications' ? 'active' : NULL;?>"><a data-toggle="tab" data-tab="notifications" href="#notifications" aria-expanded="false"><?php __('menuEmailNotifications');?></a></li>
 						<li class="<?php echo $active_tab == 'booking_form' ? 'active' : NULL;?>"><a data-toggle="tab" data-tab="booking_form" href="#booking_form" aria-expanded="false"><?php __('menuBookingForm');?></a></li>
+						<?php if ($pjTabOn('feeds')) { ?>
 						<li class="<?php echo $active_tab == 'feeds' ? 'active' : NULL;?>"><a data-toggle="tab" data-tab="feeds" href="#feeds" aria-expanded="false"><?php __('menuIcalFeeds');?></a></li>
+						<?php } ?>
 						<?php if (pjAuth::factory('pjAdminReservations', 'pjActionExportReservation')->hasAccess()) { ?>
 							<li class="<?php echo $active_tab == 'export' ? 'active' : NULL;?>"><a data-toggle="tab" data-tab="export" href="#export" aria-expanded="false"><?php __('menuExport');?></a></li>
 						<?php } ?>
@@ -98,19 +114,27 @@ $rs = __('reservation_statuses', true);
 						} else {
 							include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/periods.php';
 						}                        	
-						include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/limits.php';                        	
-						include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/appearance.php';
+						if ($pjTabOn('limits')) {
+							include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/limits.php';
+						}
+						if ($pjTabOn('appearance')) {
+							include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/appearance.php';
+						}
 						include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/general_settings.php'; 
 						include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/photos.php';
 						include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/address.php';
-						include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/seo.php';
+						if ($pjTabOn('seo')) {
+							include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/seo.php';
+						}
 						include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/features.php';
 						include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/bookings.php';
 						include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/payments.php';                        	
 						include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/terms.php';                        	
 						include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/notifications.php';                        	
 						include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/booking_form.php';                        	
-						include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/feeds.php';        
+						if ($pjTabOn('feeds')) {
+							include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/feeds.php';
+						}
 						if (pjAuth::factory('pjAdminReservations', 'pjActionExportReservation')->hasAccess()) {                	
 							include PJ_VIEWS_PATH . 'pjAdminCalendars/elements/export.php';
 						}

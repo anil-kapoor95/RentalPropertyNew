@@ -514,7 +514,8 @@
 			{
 				number_of_chidlren = parseInt(pjQ.$("select[name='c_children']").val(), 10);
 			}
-			if(max_people < (number_of_adults + number_of_chidlren) )
+			// "Maximum guests" limits the adults; children have their own maximum (Booking options)
+			if(max_people > 0 && max_people < number_of_adults)
 			{
 				pjQ.$('#pjRpcMaxPeople').show();
 				pjQ.$('#pjRpcMinPeople').hide();

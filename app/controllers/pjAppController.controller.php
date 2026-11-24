@@ -361,15 +361,17 @@ class pjAppController extends pjBaseAppController
     	$cc_exp_month = @$booking_arr['payment_method'] == 'creditcard' ? (!empty($booking_arr['cc_exp_month']) ? @$booking_arr['cc_exp_month'] : $na) : $na;
     	$cc_exp_year = @$booking_arr['payment_method'] == 'creditcard' ? (!empty($booking_arr['cc_exp_year']) ? @$booking_arr['cc_exp_year'] : $na) : $na;
     	$cc_code = !empty($booking_arr['cc_code']) ? @$booking_arr['cc_code'] : $na;
-    	$payment_method = !empty($booking_arr['payment_method']) ? $payment_methods[$booking_arr['payment_method']] : $na;
+    	$payment_method = !empty($booking_arr['payment_method'])
+    		? (is_array($payment_methods) && isset($payment_methods[$booking_arr['payment_method']]) ? $payment_methods[$booking_arr['payment_method']] : ucfirst((string) $booking_arr['payment_method']))
+    		: $na;
     	
     	$security = NULL;
-    	$tax = pjCurrency::formatPrice($booking_arr['tax']);
-    	$tourist_tax = pjCurrency::formatPrice($booking_arr['tourist_tax']);
-    	$amount = pjCurrency::formatPrice($booking_arr['amount']);
+    	$tax = pjCurrency::formatPrice((float) @$booking_arr['tax']);
+    	$tourist_tax = pjCurrency::formatPrice((float) @$booking_arr['tourist_tax']);
+    	$amount = pjCurrency::formatPrice((float) @$booking_arr['amount']);
 
 		if($option_arr['o_to_be_paid'] == 'when_booking') {
-			$security = pjCurrency::formatPrice($booking_arr['security']);
+			$security = pjCurrency::formatPrice((float) @$booking_arr['security']);
 		}
 
 		if (!isset($booking_arr['total'])) {
@@ -379,10 +381,10 @@ class pjAppController extends pjBaseAppController
 			$total = $booking_arr['total'];
 		}
     	$total_price =  pjCurrency::formatPrice($total);
-    	$extra_price = pjCurrency::formatPrice($booking_arr['extra_price']);
-    	$discount_amount = pjCurrency::formatPrice($booking_arr['discount_amount']);
-    	$promo_amount = pjCurrency::formatPrice($booking_arr['promo_amount']);
-    	$deposit = pjCurrency::formatPrice($booking_arr['deposit']);
+    	$extra_price = pjCurrency::formatPrice((float) @$booking_arr['extra_price']);
+    	$discount_amount = pjCurrency::formatPrice((float) @$booking_arr['discount_amount']);
+    	$promo_amount = pjCurrency::formatPrice((float) @$booking_arr['promo_amount']);
+    	$deposit = pjCurrency::formatPrice((float) @$booking_arr['deposit']);
     	
     	$cancelURL = sprintf("%sindex.php?controller=pjFront&action=pjActionCancel&cid=%u&locale=%u&id=%u&hash=%s", PJ_INSTALL_URL, @$booking_arr['calendar_id'], $locale_id, @$booking_arr['id'], sha1(@$booking_arr['id'] . PJ_SALT));
     	$cancelURL = '<a href="'.$cancelURL.'">'.$cancelURL.'</a>';
@@ -411,6 +413,40 @@ class pjAppController extends pjBaseAppController
 			}
 		}
 		
+		// Property address and host (the property's company) for the e-mails
+		$property_address = '';
+		$host_name = $host_email = $host_phone = '';
+		if (isset($booking_arr['calendar_id']) && (int) $booking_arr['calendar_id'] > 0)
+		{
+			$parts = array();
+			foreach (array('address_1', 'address_city') as $f)
+			{
+				$val = '';
+				foreach (pjMultiLangModel::factory()->select('t1.locale, t1.content')->where('t1.model', 'pjCalendar')
+					->where('t1.foreign_id', (int) $booking_arr['calendar_id'])->where('t1.field', $f)->findAll()->getData() as $row)
+				{
+					if (trim((string) $row['content']) === '') { continue; }
+					if ($val === '' || (int) $row['locale'] === (int) $locale_id) { $val = trim((string) $row['content']); }
+				}
+				if ($val !== '') { $parts[] = $val; }
+			}
+			if (!empty($calendar['address_state'])) { $parts[] = trim((string) $calendar['address_state']); }
+			$property_address = implode(', ', $parts);
+			$company_id = class_exists('pjCompanyContext') ? (int) pjCompanyContext::companyOfCalendar((int) $booking_arr['calendar_id']) : 0;
+			$company = $company_id > 0 ? pjCompanyModel::factory()->find($company_id)->getData() : array();
+			$host_name = !empty($company['name']) ? (string) $company['name'] : '';
+			$host_email = !empty($company['email']) ? (string) $company['email'] : '';
+			$host_phone = !empty($company['phone']) ? (string) $company['phone'] : '';
+		}
+		$nights = 0;
+		if (!empty($booking_arr['date_from']) && !empty($booking_arr['date_to']))
+		{
+			$nights = (int) round((strtotime($booking_arr['date_to']) - strtotime($booking_arr['date_from'])) / 86400) + (@$option_arr['o_price_based_on'] === 'days' ? 1 : 0);
+		}
+		$status_names = __('reservation_statuses', true);
+		$status = !empty($booking_arr['status']) ? (is_array($status_names) && isset($status_names[$booking_arr['status']]) ? $status_names[$booking_arr['status']] : $booking_arr['status']) : $na;
+		$amount_due = pjCurrency::formatPrice(max(0, (float) $total - (float) @$booking_arr['deposit']));
+
 		$extra_arr = pjExtraModel::factory()
 			->select('t1.*, t2.content AS name, t3.qty')
 			->join('pjMultiLang', "t2.model='pjExtra' AND t2.foreign_id=t1.id AND t2.field='name' AND t2.locale='".$locale_id."'", 'left outer')
@@ -427,7 +463,7 @@ class pjAppController extends pjBaseAppController
 		{
 			$temp_extra[] = $extra['qty'] . ' x ' . pjSanitize::html($extra['name']) . ' (' . pjCurrency::formatPrice($extra['price']) . ' ' . $price_types[$extra['price_type']] . ')';
 		}
-		$extras = join("<br/>", $temp_extra);
+		$extras = !empty($temp_extra) ? join("<br/>", $temp_extra) : $na;
 		
     	$search = array(
     		'{Name}', '{Email}', '{Phone}', '{Adults}', '{Children}',
@@ -435,14 +471,17 @@ class pjAppController extends pjBaseAppController
     		'{Zip}', '{CCType}', '{CCNum}', '{CCExpMonth}', '{CCExpYear}',
     		'{CCSec}', '{PaymentMethod}', '{StartDate}', '{EndDate}', '{Deposit}',
     		'{Security}', '{Tax}', '{TouristTax}', '{Price}', '{TotalPrice}', '{ExtraPrice}', '{Discount}', '{Promo}', '{PromoCode}','{CalendarID}', '{ReservationID}',
-    		'{ReservationUUID}', '{CancelURL}', '{CalendarName}', '{Extras}');
+    		'{ReservationUUID}', '{CancelURL}', '{CalendarName}', '{Extras}',
+    		'{PropertyAddress}', '{HostName}', '{HostEmail}', '{HostPhone}', '{Nights}', '{Status}', '{AmountDue}');
 		$replace = array(
 			$c_name, $c_email, $c_phone, $c_adults, $c_children,
 			$c_notes, $c_address, $c_city, $country, $c_state,
 			$c_zip, $cc_type, $cc_num, $cc_exp_month, $cc_exp_year,
 			$cc_code, $payment_method, date(@$option_arr['o_date_format'], strtotime(@$booking_arr['date_from'])), date(@$option_arr['o_date_format'], strtotime(@$booking_arr['date_to'])), @$deposit,
-			$security, $tax, $tourist_tax, $amount, @$total_price, @$extra_price, @$discount_amount, @$promo_amount, @$booking_arr['promo_code'], @$booking_arr['calendar_id'], @$booking_arr['id'],
-			@$booking_arr['uuid'], $cancelURL, $calendar_name, $extras
+			$security, $tax, $tourist_tax, $amount, @$total_price, @$extra_price, @$discount_amount, @$promo_amount, (!empty($booking_arr['promo_code']) ? pjSanitize::html($booking_arr['promo_code']) : $na), @$booking_arr['calendar_id'], @$booking_arr['id'],
+			@$booking_arr['uuid'], $cancelURL, $calendar_name, $extras,
+			$property_address !== '' ? pjSanitize::html($property_address) : $na, pjSanitize::html($host_name), pjSanitize::html($host_email),
+			pjSanitize::html($host_phone), $nights, $status, $amount_due
 		);
 		return compact('search', 'replace');
     }
@@ -475,7 +514,7 @@ class pjAppController extends pjBaseAppController
         ->getData();
         if (empty($lang_subject[0]['content']) || empty($lang_message[0]['content']))
         {
-            // No text for this property / company yet: the template notification of the system, then the built-in text
+            // No text for this property / company yet: the text saved for the system template, if any (no built-in text)
             $fallback = self::defaultSubjectMessage($notification, $locale_id);
             if ($fallback !== null)
             {
@@ -485,31 +524,11 @@ class pjAppController extends pjBaseAppController
         return compact('lang_message', 'lang_subject');
     }
 
-    /** Built-in booking e-mails (variant|recipient => subject, message); tokens as in getTokens(). */
-    private static $defaultEmails = array(
-        'confirmation|client' => array(
-            'Your booking at {CalendarName} ({ReservationUUID})',
-            '<p>Dear {Name},</p><p>Thank you for booking <strong>{CalendarName}</strong>. We have received your booking.</p><p>Booking ID: <strong>{ReservationUUID}</strong><br>Check-in: {StartDate}<br>Check-out: {EndDate}<br>Guests: {Adults} adults, {Children} children<br>Payment method: {PaymentMethod}<br>Total price: {TotalPrice}<br>Deposit: {Deposit}</p><p>The host will contact you if anything else is needed.</p>'),
-        'confirmation|owner' => array(
-            'New booking {ReservationUUID} for {CalendarName}',
-            '<p>You have a new booking for <strong>{CalendarName}</strong>.</p><p>Booking ID: <strong>{ReservationUUID}</strong><br>Check-in: {StartDate}<br>Check-out: {EndDate}<br>Guests: {Adults} adults, {Children} children<br>Payment method: {PaymentMethod}<br>Total price: {TotalPrice}<br>Deposit: {Deposit}</p><p>Guest: {Name}<br>Email: {Email}<br>Phone: {Phone}<br>Notes: {Notes}</p>'),
-        'payment|client' => array(
-            'Payment received for booking {ReservationUUID}',
-            '<p>Dear {Name},</p><p>We have received your payment for <strong>{CalendarName}</strong>.</p><p>Booking ID: <strong>{ReservationUUID}</strong><br>Check-in: {StartDate}<br>Check-out: {EndDate}<br>Paid: {Deposit}<br>Total price: {TotalPrice}</p>'),
-        'payment|owner' => array(
-            'Payment received for booking {ReservationUUID}',
-            '<p>The guest paid for booking <strong>{ReservationUUID}</strong> at {CalendarName}.</p><p>Check-in: {StartDate}<br>Check-out: {EndDate}<br>Paid: {Deposit}<br>Total price: {TotalPrice}<br>Guest: {Name} ({Email}, {Phone})</p>'),
-        'cancel|client' => array(
-            'Booking {ReservationUUID} cancelled',
-            '<p>Dear {Name},</p><p>Your booking <strong>{ReservationUUID}</strong> at {CalendarName} ({StartDate} - {EndDate}) has been cancelled.</p>'),
-        'cancel|owner' => array(
-            'Booking {ReservationUUID} cancelled',
-            '<p>Booking <strong>{ReservationUUID}</strong> at {CalendarName} ({StartDate} - {EndDate}) by {Name} has been cancelled.</p>'),
-    );
 
     /**
-     * Subject and message when a notification has no text: the system template (same recipient, transport,
-     * variant; foreign_id 0, company 0), otherwise the built-in text. null: nothing to fall back on.
+     * Subject and message when a property / company notification has no text of its own: the text saved for the
+     * system template (Options > Email notifications: same recipient, transport, variant; foreign_id 0, company 0).
+     * Only saved texts are used, never built-in ones: null when nothing is saved, and then no e-mail is sent.
      */
     private static function defaultSubjectMessage($notification, $locale_id)
     {
@@ -536,21 +555,7 @@ class pjAppController extends pjBaseAppController
                 }
             }
         }
-        if ($notification['transport'] !== 'email')
-        {
-            return null;
-        }
-        // the company / administrator copy ("admin") gets the owner's text
-        $who = $notification['recipient'] === 'admin' ? 'owner' : $notification['recipient'];
-        $key = $notification['variant'] . '|' . $who;
-        if (!isset(self::$defaultEmails[$key]))
-        {
-            return null;
-        }
-        return array(
-            'lang_subject' => array(array('content' => self::$defaultEmails[$key][0])),
-            'lang_message' => array(array('content' => self::$defaultEmails[$key][1])),
-        );
+        return null;
     }
     
 	public static function getSmsMessage($notification, $locale_id)

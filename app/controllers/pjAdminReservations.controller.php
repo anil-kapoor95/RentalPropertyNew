@@ -562,7 +562,21 @@ class pjAdminReservations extends pjAdmin
 				pjReservationModel::factory()->reset()->find($reservation_id)->getData()
 			);
 			$this->saveReservationExtras($reservation_id, $calendar_id);
-			
+
+			// Host confirmed the booking (payment received / booking accepted): the guest, the host and the company get the
+			// "payment" e-mails of the notification system (Properties > Email notifications), filled with this booking.
+			if ($reservation['status'] !== 'Confirmed' && $this->_post->toString('status') === 'Confirmed')
+			{
+				$company_id = class_exists('pjCompanyContext') ? (int) pjCompanyContext::companyOfCalendar($calendar_id) : 0;
+				$mail_options = array_merge(
+					(array) $this->option_arr,
+					$company_id > 0 ? pjCompanyContext::basePairs($company_id) : array(),
+					pjOptionModel::factory()->getPairs($calendar_id)
+				);
+				$saved = pjReservationModel::factory()->reset()->find($reservation_id)->getData();
+				pjFront::pjActionConfirmSend($reservation_id, $mail_options, !empty($saved['locale_id']) ? (int) $saved['locale_id'] : $this->getLocaleId(), 'payment');
+			}
+
 			pjUtil::redirect($_SERVER['PHP_SELF'] . "?controller=pjAdminReservations&action=pjActionIndex&err=AR01");
 		} else {
 			$extra_arr = pjExtraModel::factory()

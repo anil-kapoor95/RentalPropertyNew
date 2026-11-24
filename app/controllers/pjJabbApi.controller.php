@@ -789,7 +789,7 @@ class pjJabbApi extends pjAppController
 			}
 		}
 		$theme = null;
-		if (!empty($signup['company_id']) && (int) $signup['step'] >= 6)
+		if (!empty($signup['company_id']) && ((int) $signup['step'] >= 6 || $signup['status'] === 'completed'))
 		{
 			$opt = pjCompanyOptionModel::factory()->getPairs((int) $signup['company_id']);
 			$theme = array(
@@ -831,6 +831,11 @@ class pjJabbApi extends pjAppController
 			// AI writing: configured (Options > AI settings) and included in the company's plan
 			'ai_available' => pjAi::isConfigured() && self::aiAllowed(!empty($signup['company_id']) ? (int) $signup['company_id'] : 0),
 			'ai_locked'    => pjAi::isConfigured() && !self::aiAllowed(!empty($signup['company_id']) ? (int) $signup['company_id'] : 0),
+			// Airbnb / iCal calendar sync is a plan feature (ical_sync): the sign-up hides it when the plan lacks it
+			'ical_sync_allowed' => empty($signup['company_id']) || self::icalAllowed((int) $signup['company_id']),
+			// plan features the sign-up / Live page shows as included or as an upgrade (trial = the trial plan's features)
+			'themes_allowed'        => !empty($signup['company_id']) && $this->paidThemesAllowed((int) $signup['company_id']),
+			'custom_domain_allowed' => !empty($signup['company_id']) && (!class_exists('pjEntitlement') || !pjEntitlement::isReady() || pjEntitlement::allows((int) $signup['company_id'], 'custom_domain')),
 			'ai_generations_left' => max(0, pjSignupConfig::get('max_ai_generations') - (int) (isset($signup['ai_generations']) ? $signup['ai_generations'] : 0)),
 			// Options > Sign-up settings
 			'limits' => array(
@@ -2846,7 +2851,7 @@ class pjJabbApi extends pjAppController
 	 * (trial, active or in grace). A company without a plan gets the free theme only, whatever
 	 * "unassigned_mode" says. Without the subscription system every theme is free.
 	 */
-	private function paidThemesAllowed($company_id)
+	private static function paidThemesAllowed($company_id)
 	{
 		if (!class_exists('pjEntitlement') || !pjEntitlement::isReady())
 		{
@@ -3075,6 +3080,11 @@ class pjJabbApi extends pjAppController
 	{
 		$copt = pjCompanyOptionModel::factory()->getPairs((int) $company_id);
 		$palette_id = isset($copt['o_color_palette']) ? (string) $copt['o_color_palette'] : '';
+		// Theme access follows the active plan: after a downgrade / an ended trial a paid theme shows as the free one
+		if ($palette_id !== '' && $palette_id !== self::freeThemeId() && !self::paidThemesAllowed((int) $company_id))
+		{
+			$palette_id = self::freeThemeId();
+		}
 		foreach (pjColorHelper::getPalettes() as $id => $p)
 		{
 			if ((string) $id === $palette_id)
@@ -3418,18 +3428,9 @@ class pjJabbApi extends pjAppController
 
 		$theme = self::companyTheme($company_id);
 
-		// nights already taken (bookings and imported calendars), next 12 months
-		$booked = array();
-		$rows = pjReservationModel::factory()
-			->where('t1.calendar_id', (int) $cal['id'])
-			->whereIn('t1.status', array('Confirmed', 'Pending'))
-			->where('t1.date_to >=', date('Y-m-d'))
-			->where('t1.date_from <=', date('Y-m-d', strtotime('+12 months')))
-			->orderBy('t1.date_from ASC')->findAll()->getData();
-		foreach ($rows as $r)
-		{
-			$booked[] = array('from' => $r['date_from'], 'to' => $r['date_to']);
-		}
+		// dates already taken (bookings, imported calendars, blocked periods), next 12 months, with their status:
+		// the same dates the booking checks, so the calendar never offers dates that can't be booked
+		$booked = self::takenDates((int) $cal['id']);
 
 		$host_phone = !empty($company['phone']) ? (string) $company['phone'] : '';
 		$out = array(
@@ -3487,8 +3488,10 @@ class pjJabbApi extends pjAppController
 			// Adults / children of the property's booking form (Booking options > Booking form)
 			'guests'        => array(
 				// never more than the property's "max guests"
-				'adults'   => array('show' => (int) $opt['o_bf_adults'] !== 1, 'max' => max(1, !empty($opt['o_max_people']) ? min((int) $opt['o_bf_adults_max'], (int) $opt['o_max_people']) : (int) $opt['o_bf_adults_max'])),
-				'children' => array('show' => (int) $opt['o_bf_children'] !== 1, 'max' => max(0, !empty($opt['o_max_people']) ? min((int) $opt['o_bf_children_max'], max(0, (int) $opt['o_max_people'] - 1)) : (int) $opt['o_bf_children_max'])),
+				// adults and children are limited separately (see guestLimits)
+				'adults'   => array('show' => (int) $opt['o_bf_adults'] !== 1, 'max' => self::guestLimits($opt)[0]),
+				'children' => array('show' => (int) $opt['o_bf_children'] !== 1, 'max' => self::guestLimits($opt)[1]),
+				'max_people' => null,
 			),
 		);
 		$this->respond(200, 'OK', $out);
@@ -4060,8 +4063,13 @@ class pjJabbApi extends pjAppController
 		$this->requireSignupTable();
 
 		$signup = $this->signupFromToken();
-		$this->requireStep($signup, 6);
-		$this->signupProperty($signup);
+		// After the sign-up the host may change the theme any time (the paid themes follow the active plan, trial included)
+		$changing = $signup['status'] === 'completed' && (int) $signup['company_id'] > 0;
+		if (!$changing)
+		{
+			$this->requireStep($signup, 6);
+			$this->signupProperty($signup);
+		}
 		$company_id = (int) $signup['company_id'];
 
 		$palettes = pjColorHelper::getPalettes();
@@ -4105,6 +4113,12 @@ class pjJabbApi extends pjAppController
 			}
 		}
 
+		if ($changing)
+		{
+			$state = $this->signupState($signup);
+			$state['theme_applied'] = $applied;
+			$this->respond(200, 'Theme saved.', $state);
+		}
 		$this->completeStep($signup, 6);
 		$state = $this->signupState($signup);
 		$state['theme_applied'] = $applied;
@@ -4935,8 +4949,25 @@ class pjJabbApi extends pjAppController
 			self::loadWebsiteLabels(0);
 		}
 		$v = __($key, true);
-		return is_string($v) && $v !== '' ? $v : $key;
+		if (is_string($v) && $v !== '' && $v !== $key)
+		{
+			return $v;
+		}
+		// labels added by an update that has not run yet: English text instead of the raw key
+		return isset(self::$defaultLabels[$key]) ? self::$defaultLabels[$key] : $key;
 	}
+
+	/** English texts of the labels added on 2026-11-24 (update_2026_11_24_10_00_00.sql). */
+	private static $defaultLabels = array(
+		'site_cal_pending'      => 'Pending',
+		'site_cal_booked'       => 'Booked',
+		'site_cal_unavailable'  => 'Unavailable',
+		'site_cal_checkin_day'  => 'Check-in day',
+		'site_cal_checkout_day' => 'Check-out day',
+		'book_cal_unavailable'  => 'Unavailable',
+		'book_err_adults_max'   => 'A booking can have up to {MAX} adults.',
+		'book_err_children_max' => 'A booking can have up to {MAX} children.',
+	);
 
 	/** Booking form fields (Booking options > Booking form): name => array(option, label, input type). */
 	private static $bookingFields = array(
@@ -5040,6 +5071,54 @@ class pjJabbApi extends pjAppController
 		return array(!empty($row['min_nights']) ? (int) $row['min_nights'] : null, !empty($row['max_nights']) ? (int) $row['max_nights'] : null);
 	}
 
+	/**
+	 * Guest limits of a property: array(max adults, max children). Adults: Booking options > max adults, and never more
+	 * than "Maximum guests" (the sign-up's "Max guests"); children: Booking options > max children, on top of the adults.
+	 */
+	private static function guestLimits($opt)
+	{
+		$adults = max(1, (int) $opt['o_bf_adults_max']);
+		if (!empty($opt['o_max_people']) && (int) $opt['o_max_people'] > 0)
+		{
+			$adults = max(1, min($adults, (int) $opt['o_max_people']));
+		}
+		return array($adults, max(0, (int) $opt['o_bf_children_max']));
+	}
+
+	/** Named MySQL lock of a property's bookings (get / release); waits up to 10 seconds for another booking to finish. */
+	private static function bookingLock($calendar_id, $get)
+	{
+		$name = 'rpb_booking_' . (int) $calendar_id;
+		try
+		{
+			pjReservationModel::factory()->prepare($get ? 'SELECT GET_LOCK(:name, 10) AS `l`' : 'SELECT RELEASE_LOCK(:name) AS `l`')->exec(array('name' => $name));
+		} catch (Exception $e) {
+			// no lock: the availability check still runs
+		}
+	}
+
+	/**
+	 * Taken dates of a property for the guest calendars, next 12 months ("to" = check-out day), each with its status:
+	 * pending (booking waiting for the host / payment), booked (confirmed booking or imported calendar) or
+	 * unavailable (dates the host blocked, Properties > Limits). Cancelled bookings free their dates.
+	 */
+	private static function takenDates($calendar_id)
+	{
+		$taken = array();
+		foreach (pjReservationModel::factory()->select('t1.date_from, t1.date_to, t1.status')->where('t1.calendar_id', (int) $calendar_id)
+			->where('t1.status <>', 'Cancelled')->where('t1.date_to >=', date('Y-m-d'))
+			->where('t1.date_from <=', date('Y-m-d', strtotime('+12 months')))->orderBy('t1.date_from ASC')->findAll()->getData() as $r)
+		{
+			$taken[] = array('from' => $r['date_from'], 'to' => $r['date_to'], 'status' => $r['status'] === 'Pending' ? 'pending' : 'booked');
+		}
+		foreach (pjLimitModel::factory()->select('t1.date_from, t1.date_to')->where('t1.calendar_id', (int) $calendar_id)->where('t1.blocked', 'T')
+			->where('t1.date_to >=', date('Y-m-d'))->findAll()->getData() as $r)
+		{
+			$taken[] = array('from' => $r['date_from'], 'to' => date('Y-m-d', strtotime($r['date_to'] . ' +1 day')), 'status' => 'unavailable');
+		}
+		return $taken;
+	}
+
 	/** Dates, guests, extras and coupon of the request, checked against the property: array(values, error text or ''). */
 	private function bookingRequest($cal, $opt)
 	{
@@ -5062,7 +5141,9 @@ class pjJabbApi extends pjAppController
 			return array($v, self::lbl('book_err_dates'));
 		}
 		$nights = (int) round((strtotime($to) - strtotime($from)) / 86400) + ($opt['o_price_based_on'] === 'days' ? 1 : 0);
-		list($min, $max) = self::stayLimits($cal['id'], $from);
+		// Min / max stay (Properties > Limits) is a plan feature (booking_policies): not applied when the plan lacks it.
+		list($min, $max) = !class_exists('pjEntitlement') || pjEntitlement::allows((int) $cal['company_id'], 'booking_policies')
+			? self::stayLimits($cal['id'], $from) : array(null, null);
 		if ($min !== null && $nights < $min)
 		{
 			return array($v, str_replace('{N}', $min, self::lbl('book_err_min_nights')));
@@ -5071,18 +5152,29 @@ class pjJabbApi extends pjAppController
 		{
 			return array($v, str_replace('{N}', $max, self::lbl('book_err_max_nights')));
 		}
+		// Adults and children have their own limits (max adults 2 = up to 2 adults plus up to "max children" children);
+		// the error names the limit that was exceeded.
+		list($max_adults, $max_children) = self::guestLimits($opt);
+		if ($v['adults'] < 0 || $v['children'] < 0)
+		{
+			return array($v, self::lbl('book_err_guests'));
+		}
 		if ((int) $opt['o_bf_adults'] === 3 && $v['adults'] < 1)
 		{
 			return array($v, self::lbl('book_err_guests'));
 		}
-		if ($v['adults'] < 0 || $v['adults'] > max(1, (int) $opt['o_bf_adults_max']) || $v['children'] < 0 || $v['children'] > max(0, (int) $opt['o_bf_children_max']))
+		if ($v['adults'] > $max_adults)
 		{
-			return array($v, self::lbl('book_err_guests'));
+			return array($v, str_replace('{MAX}', $max_adults, self::lbl('book_err_adults_max')));
+		}
+		if ($v['children'] > $max_children)
+		{
+			return array($v, str_replace('{MAX}', $max_children, self::lbl('book_err_children_max')));
 		}
 		$people = $v['adults'] + $v['children'];
-		if (!empty($opt['o_max_people']) && (int) $opt['o_max_people'] > 0 && $people > (int) $opt['o_max_people'])
+		if ($people < 1)
 		{
-			return array($v, str_replace('{MAX}', (int) $opt['o_max_people'], self::lbl('front_max_people_msg')));
+			return array($v, self::lbl('book_err_guests'));
 		}
 		if (!empty($opt['o_min_people']) && (int) $opt['o_min_people'] > 0 && $people < (int) $opt['o_min_people'])
 		{
@@ -5187,20 +5279,8 @@ class pjJabbApi extends pjAppController
 				'body'     => isset($tt['terms_body']) ? self::htmlToText($tt['terms_body']) : '',
 			);
 		}
-		// taken dates: bookings and blocked periods, next 12 months ("to" = check-out day)
-		$booked = array();
-		// status: pending (waiting for the host / payment) or booked (confirmed bookings and blocked periods)
-		foreach (pjReservationModel::factory()->select('t1.date_from, t1.date_to, t1.status')->where('t1.calendar_id', (int) $cal['id'])
-			->where('t1.status <>', 'Cancelled')->where('t1.date_to >=', date('Y-m-d'))
-			->where('t1.date_from <=', date('Y-m-d', strtotime('+12 months')))->orderBy('t1.date_from ASC')->findAll()->getData() as $r)
-		{
-			$booked[] = array('from' => $r['date_from'], 'to' => $r['date_to'], 'status' => $r['status'] === 'Pending' ? 'pending' : 'booked');
-		}
-		foreach (pjLimitModel::factory()->select('t1.date_from, t1.date_to')->where('t1.calendar_id', (int) $cal['id'])->where('t1.blocked', 'T')
-			->where('t1.date_to >=', date('Y-m-d'))->findAll()->getData() as $r)
-		{
-			$booked[] = array('from' => $r['date_from'], 'to' => date('Y-m-d', strtotime($r['date_to'] . ' +1 day')), 'status' => 'booked');
-		}
+		// taken dates: bookings and blocked periods with their status (pending / booked / unavailable)
+		$booked = self::takenDates((int) $cal['id']);
 		// first day of the week of the calendar (Company options > General: 0 = Sunday, 1 = Monday ...)
 		$settings = self::companySettings($cid);
 		$week_start = (string) $settings['week_start'];
@@ -5215,6 +5295,7 @@ class pjJabbApi extends pjAppController
 			$labels[$k] = self::lbl($k);
 		}
 		$price_types = __($opt['o_price_based_on'] === 'days' ? 'day_price_types' : 'price_types', true);
+		$guest_limits = self::guestLimits($opt);
 		$this->respond(200, 'OK', array(
 			'slug' => $slug,
 			'bookable' => !(class_exists('pjEntitlement') && pjEntitlement::frontSuspended($cid)),
@@ -5237,10 +5318,11 @@ class pjJabbApi extends pjAppController
 					'logo' => !empty($company['logo']) ? PJ_INSTALL_URL . ltrim($company['logo'], '/') : null),
 			),
 			'guests' => array(
-				'adults'     => array('show' => (int) $opt['o_bf_adults'] !== 1, 'required' => (int) $opt['o_bf_adults'] === 3, 'max' => max(1, (int) $opt['o_bf_adults_max'])),
-				'children'   => array('show' => (int) $opt['o_bf_children'] !== 1, 'required' => (int) $opt['o_bf_children'] === 3, 'max' => max(0, (int) $opt['o_bf_children_max'])),
+				'adults'     => array('show' => (int) $opt['o_bf_adults'] !== 1, 'required' => (int) $opt['o_bf_adults'] === 3, 'max' => $guest_limits[0]),
+				'children'   => array('show' => (int) $opt['o_bf_children'] !== 1, 'required' => (int) $opt['o_bf_children'] === 3, 'max' => $guest_limits[1]),
 				'min_people' => !empty($opt['o_min_people']) ? (int) $opt['o_min_people'] : null,
-				'max_people' => !empty($opt['o_max_people']) ? (int) $opt['o_max_people'] : null,
+				// adults and children are limited separately (see guestLimits): no combined maximum
+				'max_people' => null,
 			),
 			'fields'            => $fields,
 			'countries'         => $countries,
@@ -5269,7 +5351,7 @@ class pjJabbApi extends pjAppController
 		'site_dates_taken', 'site_whatsapp', 'site_new_tab', 'site_whatsapp_text', 'site_whatsapp_dates', 'site_guest_word',
 		'site_guests_word', 'site_total', 'site_estimate', 'site_book_direct_owner', 'site_rights', 'site_photos_title',
 		'site_photo_prev', 'site_photo_next', 'site_photo_alt', 'site_open_photo', 'site_view_all_photos', 'site_cal_prev',
-		'site_cal_next', 'site_cal_weekdays', 'site_cal_your_dates', 'site_cal_taken', 'site_cal_available', 'site_cal_pick_in',
+		'site_cal_next', 'site_cal_weekdays', 'site_cal_your_dates', 'site_cal_taken', 'site_cal_pending', 'site_cal_booked', 'site_cal_unavailable', 'site_cal_checkin_day', 'site_cal_checkout_day', 'site_cal_available', 'site_cal_pick_in',
 		'site_cal_pick_out', 'site_cal_summary'
 	);
 
@@ -5300,7 +5382,7 @@ class pjJabbApi extends pjAppController
 		'book_no_payment_needed', 'book_adults_hint', 'book_children_hint', 'book_extras_none', 'book_dates', 'book_extras_summary',
 		'book_payment_method', 'book_secure', 'book_book_now', 'book_add_date', 'book_check_in', 'book_check_out', 'book_not_found',
 		'book_bank_transfer_info', 'book_pay_on_arrival', 'book_security_refundable', 'book_on_arrival',
-		'book_cal_available', 'book_cal_pending', 'book_cal_booked', 'book_cal_past', 'book_cal_selected', 'book_cal_pick_in',
+		'book_cal_available', 'book_cal_pending', 'book_cal_booked', 'book_cal_unavailable', 'book_cal_past', 'book_cal_selected', 'book_cal_pick_in',
 		'book_cal_pick_out', 'book_cal_taken', 'book_cal_prev', 'book_cal_next', 'book_cal_clear',
 	);
 
@@ -5346,6 +5428,9 @@ class pjJabbApi extends pjAppController
 		{
 			$this->respond(402, self::lbl('subFrontSuspended'));
 		}
+		// No double booking: one booking of this property at a time between the availability check and the insert
+		// (MySQL releases the lock at the end of the request at the latest).
+		self::bookingLock((int) $cal['id'], true);
 		list($v, $error) = $this->bookingRequest($cal, $opt);
 		if ($error !== '')
 		{
@@ -5429,6 +5514,7 @@ class pjJabbApi extends pjAppController
 			$this->respond(422, self::lbl('book_err_dates'));
 		}
 		$id = (int) $m->setAttributes($data)->insert()->getInsertId();
+		self::bookingLock((int) $cal['id'], false);
 		if ($id <= 0)
 		{
 			$this->respond(500, self::lbl('book_err_not_saved'));

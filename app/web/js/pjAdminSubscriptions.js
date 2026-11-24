@@ -139,7 +139,7 @@
 				$frm.find('input[name="coupon_code"]').val('');
 				$frm.find('#subCouponBox').prop('hidden', true);
 				$frm.find('.sub-coupon-toggle').attr('aria-expanded', 'false');
-				$pay.find('.sub-pay-title').text($.trim($card.find('h3').first().text()));
+				$pay.find('.sub-pay-title').text($.trim($card.find('h3, h4').first().text()));
 				$pay.find('[data-pv="kind"]').text($(this).attr('data-kind-label') || '');
 				$pay.find('[data-pv="interval"]').text($card.attr('data-interval') || '');
 				// currencies of the plan (the ones without a price can't be picked)

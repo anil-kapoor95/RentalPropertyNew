@@ -182,7 +182,8 @@ var jQuery = jQuery || $.noConflict();
 			{
 				number_of_chidlren = parseInt($("select[name='c_children']").val(), 10);
 			}
-			if(max_people < (number_of_adults + number_of_chidlren) )
+			// "Maximum guests" limits the adults; children have their own maximum (Booking options)
+			if(max_people > 0 && max_people < number_of_adults)
 			{
 				$('#boxMaxPeopleMsg').show();
 				$('#boxMinPeopleMsg').hide();

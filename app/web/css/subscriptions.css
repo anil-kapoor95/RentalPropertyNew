@@ -326,3 +326,44 @@
 .sub-fx-history{margin-top:10px;font-size:12px}
 .sub-fx-history summary{cursor:pointer;color:#374151;font-weight:600}
 .sub-fx-history table{margin:8px 0 0;background:#fff}
+
+/* ---- My plan (company): one card for the plan, features in two lists, plans in the company's currency ---- */
+.sub-mp{--mp-line:#e7eaec;--mp-muted:#6b7280;--mp-ink:#111827;--mp-accent:#f97618}
+.sub-mp-card{background:#fff;border:1px solid var(--mp-line);border-radius:14px;padding:22px 24px;margin-bottom:18px}
+.sub-mp-hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:24px;align-items:start}
+.sub-mp-eyebrow{margin:0 0 2px;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mp-muted)}
+.sub-mp-name{margin:0 0 10px;font-size:28px;font-weight:800;color:var(--mp-ink);display:flex;align-items:center;justify-content:flex-start;text-align:left;gap:10px;flex-wrap:wrap}
+.sub-mp-hero-main{text-align:left;min-width:0}
+.sub-mp-name .sub-badge{font-size:12px}
+.sub-mp-meta{display:flex;gap:28px;flex-wrap:wrap;margin:0 0 8px}
+.sub-mp-meta dt{font-size:12px;font-weight:500;color:var(--mp-muted)}.sub-mp-meta dd{margin:0;font-weight:700;color:var(--mp-ink)}
+.sub-mp-alert{margin:6px 0 0;color:#b91c1c;font-size:13px}
+.sub-mp-hero-actions{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}
+.sub-mp-usage{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.sub-mp-tile{border:1px solid var(--mp-line);border-radius:12px;padding:12px 14px;background:#fafafa;min-width:0}
+.sub-mp-tile-label{display:block;font-size:12px;color:var(--mp-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sub-mp-tile-value{display:block;font-size:20px;font-weight:800;color:var(--mp-ink);margin-top:2px}
+.sub-mp-tile-value small{font-size:12px;font-weight:500;color:var(--mp-muted)}
+.sub-mp-bar{display:block;height:6px;border-radius:99px;background:#eef0f2;margin-top:8px;overflow:hidden}
+.sub-mp-bar>span{display:block;height:100%;background:#16a34a;border-radius:99px}.sub-mp-bar.full>span{background:var(--mp-accent)}
+.sub-mp-h{font-size:15px;font-weight:700;color:var(--mp-ink);margin:0 0 10px}
+.sub-mp-feature-cols{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.sub-mp-features{list-style:none;margin:0;padding:0;display:grid;gap:7px}
+.sub-mp-features li{display:flex;align-items:center;gap:8px;font-size:13px}
+.sub-mp-features li.on i{color:#16a34a;font-size:15px}.sub-mp-features li.off{color:#9ca3af}.sub-mp-features li.off i{font-size:13px;width:15px;text-align:center}
+.sub-mp-soon{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;background:#f3f4f6;color:var(--mp-muted);border-radius:99px;padding:1px 8px}
+.sub-mp-plans-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:6px 0 12px}
+.sub-mp-plans-head .sub-mp-h{margin:0;font-size:18px}
+.sub-mp-cur{font-size:13px;color:var(--mp-muted)}.sub-mp-cur strong{color:var(--mp-ink)}
+.sub-mp-cur-sign{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#fff3e9;color:var(--mp-accent);font-weight:700}
+.sub-mp-plans{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:18px;margin:0 0 18px}
+.sub-mp-plan{background:#fff;padding:20px;display:flex;flex-direction:column}
+.sub-mp-plan-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sub-mp-plan-top h4{margin:0;font-size:17px;font-weight:700;color:var(--mp-ink)}
+.sub-mp-plan .sub-price{margin:10px 0 6px}
+.sub-mp-plan-desc{font-size:13px;color:var(--mp-muted);margin:0 0 10px}
+.sub-mp-plan-list{list-style:none;margin:0 0 16px;padding:12px 0 0;border-top:1px dashed var(--mp-line);display:grid;gap:6px;font-size:13px;flex:1;align-content:start}
+.sub-mp-plan-list i{width:16px;text-align:center;color:#16a34a}.sub-mp-plan-list .fa-home,.sub-mp-plan-list .fa-user{color:var(--mp-muted)}
+.sub-mp-plan .sub-actions{display:grid;gap:8px}.sub-mp-plan .sub-actions .sub-inline{display:block;margin:0}
+@media (max-width:991px){.sub-mp-hero{grid-template-columns:1fr}}
+@media (max-width:600px){.sub-mp-usage{grid-template-columns:1fr 1fr}.sub-mp-feature-cols{grid-template-columns:1fr}.sub-mp-card{padding:18px}}

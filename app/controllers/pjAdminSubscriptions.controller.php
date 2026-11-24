@@ -702,7 +702,8 @@ class pjAdminSubscriptions extends pjAdmin
 				case 'pay':
 					// new plan / upgrade / renewal: always through a verified payment. The same purchase process as the
 					// StayOwned website (pjSubscriptionBilling::purchase).
-					$res = pjSubscriptionBilling::purchase($company, $plan, $this->_post->toString('currency'), (string) $this->_post->toString('method'),
+					// the company's own currency, whatever the form sends (no currency choice on My plan)
+					$res = pjSubscriptionBilling::purchase($company, $plan, pjEntitlement::billingCurrency($cid), (string) $this->_post->toString('method'),
 						$this->_post->toString('coupon_code'), $uid);
 					switch ($res['result'])
 					{
@@ -799,7 +800,8 @@ class pjAdminSubscriptions extends pjAdmin
 		}
 		$state = pjEntitlement::state($cid);
 		$kind = $this->payKind($plan, $state['plan']);
-		$currency = pjEntitlement::checkoutCurrency($cid, $plan, $kind, $this->_get->toString('currency'));
+		// My plan works in the company's own currency only (India INR, other countries USD; once billed, that currency)
+		$currency = pjEntitlement::checkoutCurrency($cid, $plan, $kind, pjEntitlement::billingCurrency($cid));
 		$charged = $currency ? pjEntitlement::chargedPlan($cid, $plan, $kind, $currency) : false;
 		if (!$charged)
 		{

@@ -305,12 +305,19 @@ class pjSiteLinks
 		foreach (array($host, $alt) as $d)
 		{
 			$c = pjCompanyModel::factory()->where('t1.status', 'T')->where('t1.custom_domain', $d)->limit(1)->findAll()->getDataIndex(0);
-			if (!empty($c))
+			// "Your own domain" is a plan feature: a domain of a company whose plan lacks it opens no website
+			if (!empty($c) && self::domainAllowed((int) $c['id']))
 			{
 				return $c;
 			}
 		}
 		return null;
+	}
+
+	/** True when the company's active plan includes "Your own domain" (custom_domain). */
+	public static function domainAllowed($company_id)
+	{
+		return !class_exists('pjEntitlement') || !pjEntitlement::isReady() || pjEntitlement::allows((int) $company_id, 'custom_domain');
 	}
 
 	/** File with the active custom domains (read by api.php to let these websites call the API). */
@@ -342,9 +349,13 @@ class pjSiteLinks
 		{
 			$list[] = strtolower($p['scheme'] . '://' . $p['host'] . (!empty($p['port']) ? ':' . (int) $p['port'] : ''));
 		}
-		foreach (pjCompanyModel::factory()->select('t1.custom_domain')->where('t1.status', 'T')->where('t1.domain_status', 'active')
+		foreach (pjCompanyModel::factory()->select('t1.id, t1.custom_domain')->where('t1.status', 'T')->where('t1.domain_status', 'active')
 			->where('t1.custom_domain IS NOT NULL')->findAll()->getData() as $r)
 		{
+			if (!self::domainAllowed((int) $r['id']))
+			{
+				continue;
+			}
 			$d = (string) $r['custom_domain'];
 			$list[] = 'https://' . $d;
 			$list[] = 'https://' . (strpos($d, 'www.') === 0 ? substr($d, 4) : 'www.' . $d);
