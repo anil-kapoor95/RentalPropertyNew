@@ -165,7 +165,7 @@ var jQuery = jQuery || $.noConflict();
 			}
 		}
 
-		// Website address: own domain of the company (save / check at Vercel)
+		// Website address: own domain of the company (save / check its DNS)
 		var $site = $("#pjSiteLink");
 		if ($site.length) {
 			var siteCall = function ($btn, data) {

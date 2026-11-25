@@ -11,8 +11,12 @@ if (!defined("ROOT_PATH"))
  *   <website>/stays/anil-kapoor. Two properties with the same name get "casanova" and "casanova-2".
  *   A link is made from the name once and then kept (renaming the property does not break shared links).
  * - A company may use its own domain (plan feature "custom_domain"). The host points the domain to the website
- *   (DNS record shown in My company), the administrator adds it in the Vercel dashboard (Project > Domains), and
- *   the DNS is checked here; active domains are written to a list file that api.php reads (CORS).
+ *   (DNS record shown in My company) and the DNS is checked here; active domains are written to a list file that
+ *   api.php reads (CORS). Not tied to any hosting: the DNS targets are the website's own address (PJ_WEBSITE_URL)
+ *   unless PJ_DOMAIN_CNAME_TARGET / PJ_DOMAIN_A_TARGET say otherwise (app/config/config.inc.php), and a domain
+ *   behind a proxy / CDN (Cloudflare ...) is recognised by asking the website itself (/api/site-check).
+ *   A web server that issues certificates on demand (Caddy, Traefik, nginx + a hook) can ask
+ *   api.php?action=pjActionDomainAllowed&domain=... whether a domain belongs to a host (see DEPLOYMENT.md).
  */
 class pjSiteLinks
 {
@@ -24,9 +28,8 @@ class pjSiteLinks
 		'app', 'account', 'signup', 'register', 'search', 'checkout', 'pay', 'payment', 'confirmed', 'new',
 	);
 
-	/** Vercel DNS targets (https://vercel.com/docs/domains). */
-	const VERCEL_CNAME = 'cname.vercel-dns.com';
-	const VERCEL_A = '76.76.21.21';
+	/** What the website's /api/site-check answers (Next.js: src/app/api/site-check/route.ts). */
+	const SITE_CHECK_APP = 'bookbyhost';
 
 	private static $columnsReady = null;
 
@@ -177,7 +180,7 @@ class pjSiteLinks
 	}
 
 	/* ------------------------------------------------------------------
-	 * Custom domains (Vercel)
+	 * Custom domains (any hosting)
 	 * ------------------------------------------------------------------ */
 
 	/** "https://WWW.MyVilla.com/" -> "www.myvilla.com"; '' when not a valid domain. */
@@ -204,40 +207,132 @@ class pjSiteLinks
 		return rtrim($url !== '' ? $url : 'http://localhost:3000', '/');
 	}
 
-	/** DNS record the host has to add: CNAME for a subdomain (www.), A for the bare domain. */
+	/**
+	 * Where the hosts' domains must point: array(cname => host name, ips => IPv4 addresses).
+	 *   PJ_DOMAIN_CNAME_TARGET: host name for CNAME records (default: the host of PJ_WEBSITE_URL, e.g. bookbyhost.com)
+	 *   PJ_DOMAIN_A_TARGET:     IP address(es) for the bare domain, comma separated (default: the addresses the
+	 *                           CNAME target resolves to)
+	 * Works with any hosting: a VPS, a PaaS, a load balancer, a CDN or Vercel (set its documented targets here).
+	 */
+	public static function dnsTargets()
+	{
+		static $targets = null;
+		if ($targets !== null)
+		{
+			return $targets;
+		}
+		$cname = defined('PJ_DOMAIN_CNAME_TARGET') ? strtolower(trim((string) PJ_DOMAIN_CNAME_TARGET)) : '';
+		if ($cname === '')
+		{
+			$cname = strtolower((string) parse_url(self::websiteUrl(), PHP_URL_HOST));
+		}
+		$cname = rtrim($cname, '.');
+		$ips = array();
+		$list = defined('PJ_DOMAIN_A_TARGET') ? trim((string) PJ_DOMAIN_A_TARGET) : '';
+		foreach (preg_split('/[\s,;]+/', $list) as $ip)
+		{
+			if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4))
+			{
+				$ips[] = $ip;
+			}
+		}
+		if (empty($ips) && $cname !== '' && $cname !== 'localhost' && function_exists('gethostbynamel'))
+		{
+			$found = @gethostbynamel($cname);
+			if (is_array($found))
+			{
+				$ips = array_values(array_unique($found));
+			}
+		}
+		return $targets = array('cname' => $cname, 'ips' => $ips);
+	}
+
+	/** DNS record the host has to add: CNAME for a subdomain (www.), A for the bare domain (ALIAS when no IP is known). */
 	public static function dnsRecord($domain)
 	{
+		$t = self::dnsTargets();
 		$parts = explode('.', $domain);
 		$apex = count($parts) <= 2;
-		return $apex
-			? array('type' => 'A', 'name' => '@', 'value' => self::VERCEL_A)
-			: array('type' => 'CNAME', 'name' => $parts[0], 'value' => self::VERCEL_CNAME);
+		if ($apex)
+		{
+			return !empty($t['ips'])
+				? array('type' => 'A', 'name' => '@', 'value' => $t['ips'][0])
+				: array('type' => 'ALIAS / ANAME', 'name' => '@', 'value' => $t['cname']);
+		}
+		return array('type' => 'CNAME', 'name' => $parts[0], 'value' => $t['cname']);
 	}
 
 	/**
-	 * Does the domain point to the website (Vercel)? array(status active|pending, message). The domain itself is
-	 * added to the website in the Vercel dashboard (Project > Settings > Domains) by the administrator.
+	 * Does the domain reach the website? array(status active|pending, message). Active when one of these is true:
+	 *  1. its CNAME is the website's CNAME target,
+	 *  2. it resolves to one of the website's addresses,
+	 *  3. the website answers on it (/api/site-check) - for domains behind a proxy / CDN that hides the addresses.
 	 */
 	public static function dnsCheck($domain)
 	{
+		$t = self::dnsTargets();
 		$records = function_exists('dns_get_record') ? @dns_get_record($domain, DNS_A | DNS_CNAME) : false;
 		if (is_array($records))
 		{
 			foreach ($records as $r)
 			{
-				// cname.vercel-dns.com (or a project's own *.vercel-dns-*.com name)
-				if (isset($r['target']) && preg_match('~vercel-dns[a-z0-9-]*\.com\.?$~i', (string) $r['target']))
+				if ($t['cname'] !== '' && isset($r['target']) && rtrim(strtolower((string) $r['target']), '.') === $t['cname'])
 				{
 					return array('active', '');
 				}
-				// Vercel's addresses (76.76.21.21 and its newer 216.198.79.x range)
-				if (isset($r['ip']) && preg_match('~^(76\.76\.21\.|216\.198\.79\.)~', (string) $r['ip']))
+				if (!empty($t['ips']) && isset($r['ip']) && in_array((string) $r['ip'], $t['ips'], true))
 				{
 					return array('active', '');
 				}
 			}
 		}
+		if (self::siteAnswersOn($domain))
+		{
+			return array('active', '');
+		}
 		return array('pending', 'The DNS record is not there yet (it can take up to a few hours).');
+	}
+
+	/** Does the website itself answer on this domain (GET http(s)://<domain>/api/site-check)? */
+	public static function siteAnswersOn($domain)
+	{
+		foreach (array('https://', 'http://') as $scheme)
+		{
+			$body = self::httpGet($scheme . $domain . '/api/site-check');
+			if ($body === '')
+			{
+				continue;
+			}
+			$json = json_decode($body, true);
+			if (is_array($json) && isset($json['app']) && $json['app'] === self::SITE_CHECK_APP)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Small GET with a short timeout (redirects followed); '' on any problem. */
+	private static function httpGet($url)
+	{
+		if (function_exists('curl_init'))
+		{
+			$ch = curl_init($url);
+			curl_setopt_array($ch, array(
+				CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 3,
+				CURLOPT_CONNECTTIMEOUT => 4, CURLOPT_TIMEOUT => 6, CURLOPT_USERAGENT => 'BookbyHost-domain-check/1.0',
+				// a certificate may not be issued yet (on-demand TLS): the answer itself is what is checked
+				CURLOPT_SSL_VERIFYPEER => false, CURLOPT_SSL_VERIFYHOST => 0,
+			));
+			$body = curl_exec($ch);
+			$code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			curl_close($ch);
+			return is_string($body) && $code >= 200 && $code < 300 ? substr($body, 0, 2000) : '';
+		}
+		$ctx = stream_context_create(array('http' => array('timeout' => 6, 'follow_location' => 1, 'max_redirects' => 3),
+			'ssl' => array('verify_peer' => false, 'verify_peer_name' => false)));
+		$body = @file_get_contents($url, false, $ctx, 0, 2000);
+		return is_string($body) ? $body : '';
 	}
 
 	/** Saves a company's domain (normalized, '' clears it) and checks it. array(ok, error label key) */

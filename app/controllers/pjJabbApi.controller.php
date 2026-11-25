@@ -3358,6 +3358,25 @@ class pjJabbApi extends pjAppController
 	}
 
 	/**
+	 * Is this a host's connected domain? For a web server that issues HTTPS certificates on demand (Caddy
+	 * "on_demand_tls ask", Traefik, nginx + a hook): GET api.php?action=pjActionDomainAllowed&domain=www.myvilla.com
+	 * 200 = a company with an active plan that includes "Custom domain" uses it (and has a public property), 404 = no.
+	 * Any hosting can use it; nothing secret is returned.
+	 */
+	public function pjActionDomainAllowed()
+	{
+		$this->setAjax(true);
+		$this->requireSignupTable();
+		$domain = $this->param('domain') !== '' ? $this->param('domain') : $this->param('host');
+		$company = self::linksReady() ? pjSiteLinks::companyOfDomain($domain) : null;
+		if (empty($company) || count(self::publicCalendars((int) $company['id'])) === 0)
+		{
+			$this->respond(404, 'Unknown domain.');
+		}
+		$this->respond(200, 'OK', array('domain' => (string) $company['custom_domain']));
+	}
+
+	/**
 	 * Website of a company's own domain (the website's proxy asks this for every host that is not its own).
 	 *   host* (e.g. www.myvilla.com)
 	 * Data: company_slug, property_slug (when the company has exactly one public property: it is the home page,

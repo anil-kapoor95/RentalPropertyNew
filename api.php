@@ -634,6 +634,8 @@ $routes = array(
     'pjActionGetPropertyPage' => 'pjJabbApi',
     'pjActionGetCompanyPage' => 'pjJabbApi',
     'pjActionResolveDomain' => 'pjJabbApi',
+    // HTTPS on demand for the hosts' domains (Caddy / Traefik / nginx hook): GET is allowed for this one
+    'pjActionDomainAllowed' => 'pjJabbApi',
     'pjActionGetDirectory' => 'pjJabbApi',
     'pjActionGetSocialLinks' => 'pjJabbApi',
     // Booking on the host's website
@@ -672,15 +674,18 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'OPTIONS
 
 header("Content-Type: application/json; charset=utf-8");
 
-if (!isset($_SERVER['REQUEST_METHOD']) || $_SERVER['REQUEST_METHOD'] !== 'POST')
+// GET only for the certificate check of a web server (it cannot send a POST): api.php?action=pjActionDomainAllowed&domain=...
+$api_get_ok = isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'GET'
+    && isset($_GET['action']) && $_GET['action'] === 'pjActionDomainAllowed';
+if (!$api_get_ok && (!isset($_SERVER['REQUEST_METHOD']) || $_SERVER['REQUEST_METHOD'] !== 'POST'))
 {
     http_response_code(405);
     echo json_encode(array('status' => 'ERR', 'code' => 405, 'message' => 'Method not allowed. Use POST.'));
     exit;
 }
 
-// Form-data / urlencoded, or a JSON body
-$data = $_POST;
+// Form-data / urlencoded, or a JSON body (the GET certificate check: its query string)
+$data = $api_get_ok ? array_intersect_key($_GET, array('domain' => 1, 'host' => 1)) : $_POST;
 if (empty($data))
 {
     $json = json_decode((string) file_get_contents('php://input'), true);
@@ -751,7 +756,7 @@ foreach ($_FILES as $key => $file)
 // (used for log-in throttling; never taken from the request).
 unset($data['api_proxy_key'], $data['api_client_ip'], $data['api_site_url']);
 $data['api_client_ip'] = isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : '';
-// Behind the website's own server (Next.js on Vercel calling this file server-side) REMOTE_ADDR is that server:
+// Behind the website's own server (Next.js calling this file server-side, on any hosting) REMOTE_ADDR is that server:
 // it may pass the visitor's address in X-Client-IP when it also sends the shared secret (PJ_API_PROXY_SECRET).
 if (defined('PJ_API_PROXY_SECRET') && PJ_API_PROXY_SECRET !== '' && isset($_SERVER['HTTP_X_PROXY_SECRET'], $_SERVER['HTTP_X_CLIENT_IP'])
     && hash_equals((string) PJ_API_PROXY_SECRET, (string) $_SERVER['HTTP_X_PROXY_SECRET']) && filter_var($_SERVER['HTTP_X_CLIENT_IP'], FILTER_VALIDATE_IP))

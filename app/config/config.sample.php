@@ -9,6 +9,11 @@ if (!defined("PJ_INSTALL_FOLDER")) define("PJ_INSTALL_FOLDER", "[install_folder]
 if (!defined("PJ_INSTALL_PATH")) define("PJ_INSTALL_PATH", "[install_path]");
 // Address of the Next.js website (short links, hosts' domains, API access). Set it when the website goes live.
 if (!defined("PJ_WEBSITE_URL")) define("PJ_WEBSITE_URL", "http://localhost:3000");
+// Hosts' own domains (any hosting): where their DNS records must point. Empty = worked out from PJ_WEBSITE_URL
+// (CNAME -> its host name, A -> the addresses that host name resolves to). Set them when the website sits behind a
+// load balancer / CDN with its own targets, e.g. "sites.bookbyhost.com" and "203.0.113.10".
+if (!defined("PJ_DOMAIN_CNAME_TARGET")) define("PJ_DOMAIN_CNAME_TARGET", "");
+if (!defined("PJ_DOMAIN_A_TARGET")) define("PJ_DOMAIN_A_TARGET", "");
 if (!defined("PJ_INSTALL_URL")) define("PJ_INSTALL_URL", "[install_url]");
 if (!defined("PJ_SALT")) define("PJ_SALT", "[salt]");
 if (!defined("PJ_INSTALLATION")) define("PJ_INSTALLATION", "[pj_installation]");
